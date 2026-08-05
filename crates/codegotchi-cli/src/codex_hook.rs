@@ -95,6 +95,7 @@ pub fn translate_hook(input: &HookInput, metadata: &RuntimeMetadataV1) -> Option
     let id = deterministic_event_id(
         metadata,
         session_id,
+        input.stable_event_identity(),
         event_name,
         kind,
         activity,
@@ -181,15 +182,17 @@ fn read_bounded_stdin() -> Result<Vec<u8>, io::Error> {
 fn deterministic_event_id(
     metadata: &RuntimeMetadataV1,
     session_id: Uuid,
+    event_identity: Option<&str>,
     event_name: &str,
     kind: AgentEventKind,
     activity: Option<ActivityKind>,
     event_metadata: &EventMetadata,
 ) -> Uuid {
     let canonical = format!(
-        "codegotchi-hook-v1|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        "codegotchi-hook-v2|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         metadata.runtime_id,
         session_id,
+        event_identity.unwrap_or_default(),
         event_name,
         kind_name(kind),
         activity_name(activity),

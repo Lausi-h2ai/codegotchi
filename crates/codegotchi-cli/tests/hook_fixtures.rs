@@ -131,6 +131,46 @@ fn event_ids_are_deterministic_and_ignore_discarded_or_future_fields() {
 }
 
 #[test]
+fn official_event_identity_deduplicates_replay_but_distinguishes_repeats() {
+    let metadata = metadata();
+    let prompt = translate_hook(
+        &HookInput::from_json(fixture("user_prompt_submit.json").as_bytes()).unwrap(),
+        &metadata,
+    )
+    .unwrap();
+    let prompt_replay = translate_hook(
+        &HookInput::from_json(fixture("user_prompt_submit.json").as_bytes()).unwrap(),
+        &metadata,
+    )
+    .unwrap();
+    let repeated_prompt = translate_hook(
+        &HookInput::from_json(fixture("user_prompt_submit_repeat.json").as_bytes()).unwrap(),
+        &metadata,
+    )
+    .unwrap();
+    let bash = translate_hook(
+        &HookInput::from_json(fixture("bash_pre.json").as_bytes()).unwrap(),
+        &metadata,
+    )
+    .unwrap();
+    let repeated_bash = translate_hook(
+        &HookInput::from_json(fixture("bash_pre_repeat.json").as_bytes()).unwrap(),
+        &metadata,
+    )
+    .unwrap();
+    let bash_post = translate_hook(
+        &HookInput::from_json(fixture("bash_post_success.json").as_bytes()).unwrap(),
+        &metadata,
+    )
+    .unwrap();
+
+    assert_eq!(prompt.id, prompt_replay.id);
+    assert_ne!(prompt.id, repeated_prompt.id);
+    assert_ne!(bash.id, repeated_bash.id);
+    assert_ne!(bash.id, bash_post.id);
+}
+
+#[test]
 fn command_classification_is_structured_and_fail_open_for_unknown_shapes() {
     let test = classify_command("Bash", "cargo test -p codegotchi-cli");
     assert_eq!(test.category(), CommandCategory::Development);
@@ -147,6 +187,61 @@ fn command_classification_is_structured_and_fail_open_for_unknown_shapes() {
     let unknown = classify_command("Bash", "a command shape that is not recognized");
     assert_eq!(unknown.category(), CommandCategory::Unknown);
     assert_eq!(unknown.purpose(), CommandPurpose::Uncertain);
+}
+
+#[test]
+fn executable_metadata_is_bounded_without_changing_fail_open_classification() {
+    let metadata = metadata();
+    let cases = [
+        ("one-token-secret", "unknown", ActivityKind::UnknownWork),
+        (
+            "/private/project/secrets/credentials.txt",
+            "unknown",
+            ActivityKind::UnknownWork,
+        ),
+        (
+            "CODEGOTCHI_SECRET=do-not-persist",
+            "unknown",
+            ActivityKind::UnknownWork,
+        ),
+    ];
+
+    for (command, category, activity) in cases {
+        let payload = serde_json::json!({
+            "session_id": "00000000-0000-0000-0000-000000000001",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": { "command": command },
+            "turn_id": "turn-privacy"
+        });
+        let input = HookInput::from_json(&serde_json::to_vec(&payload).unwrap()).unwrap();
+        let event = translate_hook(&input, &metadata).unwrap();
+
+        assert_eq!(event.metadata.executable_name, None, "{command}");
+        assert_eq!(event.metadata.command_category.as_deref(), Some(category));
+        assert_eq!(event.activity, Some(activity));
+        let event_json = serde_json::to_string(&event).unwrap();
+        assert!(!event_json.contains(command), "{command}");
+    }
+
+    let assignment_prefixed = serde_json::json!({
+        "session_id": "00000000-0000-0000-0000-000000000001",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": { "command": "CODEGOTCHI_SECRET=do-not-persist cargo test" },
+        "turn_id": "turn-privacy-known"
+    });
+    let input = HookInput::from_json(&serde_json::to_vec(&assignment_prefixed).unwrap()).unwrap();
+    let event = translate_hook(&input, &metadata).unwrap();
+    assert_eq!(event.metadata.executable_name.as_deref(), Some("cargo"));
+    assert_eq!(
+        event.metadata.command_category.as_deref(),
+        Some("development")
+    );
+    assert_eq!(event.activity, Some(ActivityKind::Testing));
+    let event_json = serde_json::to_string(&event).unwrap();
+    assert!(!event_json.contains("CODEGOTCHI_SECRET"));
+    assert!(!event_json.contains("do-not-persist"));
 }
 
 #[test]
@@ -219,6 +314,15 @@ fn post_success_and_failure_keep_command_metadata_but_discard_raw_values() {
     assert_eq!(success.metadata.duration_ms, Some(37));
     assert_eq!(failure.metadata.executable_name.as_deref(), Some("cargo"));
     assert_eq!(failure.metadata.exit_status, Some(1));
+    assert_eq!(
+        HookInput::from_json(fixture("bash_post_success.json").as_bytes())
+            .unwrap()
+            .tool_response
+            .as_ref()
+            .and_then(|response| response.get("exit_code"))
+            .and_then(serde_json::Value::as_i64),
+        Some(0)
+    );
     assert!(
         !serde_json::to_string(&success)
             .unwrap()

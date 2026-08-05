@@ -1,5 +1,6 @@
 {
   "session_id": "00000000-0000-0000-0000-000000000001",
+  "turn_id": "turn-00000000000000000000000000000003",
   "hook_event_name": "UserPromptSubmit",
   "prompt": "a different prompt that is also discarded",
   "source": "future-source-value",

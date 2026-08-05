@@ -1,5 +1,6 @@
 {
   "session_id": "00000000-0000-0000-0000-000000000001",
+  "turn_id": "turn-00000000000000000000000000000002",
   "hook_event_name": "PreToolUse",
   "tool_name": "apply_patch",
   "tool_input": {
@@ -7,5 +8,5 @@
     "workdir": "/workspace/codegatchi"
   },
   "cwd": "/workspace/codegatchi",
-  "tool_call_id": "call-pre-patch"
+  "tool_use_id": "call-pre-patch"
 }

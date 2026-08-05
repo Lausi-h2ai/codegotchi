@@ -1,6 +1,8 @@
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use codegotchi_cli::TemporaryCodexProfile;
 use sha2::{Digest, Sha256};
@@ -15,6 +17,29 @@ fn temp_home() -> PathBuf {
 fn checksum(path: &Path) -> String {
     let bytes = fs::read(path).unwrap();
     format!("{:x}", Sha256::digest(bytes))
+}
+
+#[test]
+fn installed_binary_target_is_codegotchi_and_runs_the_generated_hook_command() {
+    let binary = std::env::var_os("CARGO_BIN_EXE_codegotchi")
+        .expect("the crate must install an explicit codegotchi binary");
+    assert_eq!(
+        Path::new(&binary)
+            .file_name()
+            .and_then(|name| name.to_str()),
+        Some("codegotchi")
+    );
+
+    let mut child = Command::new(&binary)
+        .args(["hook"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("the installed binary target must launch");
+    child.stdin.as_mut().unwrap().write_all(b"{}").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"{}\n");
 }
 
 #[test]

@@ -19,13 +19,17 @@ pub struct HookInput {
     #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
+    pub turn_id: Option<String>,
+    #[serde(default)]
     pub hook_event_name: String,
     #[serde(default)]
     pub tool_name: Option<String>,
+    #[serde(default, alias = "tool_call_id")]
+    pub tool_use_id: Option<String>,
     #[serde(default)]
     pub tool_input: Option<Value>,
-    #[serde(default)]
-    pub tool_output: Option<Value>,
+    #[serde(default, alias = "tool_output")]
+    pub tool_response: Option<Value>,
     #[serde(default)]
     pub prompt: Option<Value>,
     #[serde(default)]
@@ -54,12 +58,12 @@ impl HookInput {
     }
 
     pub fn exit_status(&self) -> Option<i32> {
-        let output = self.tool_output.as_ref()?.as_object()?;
+        let response = self.tool_response.as_ref()?.as_object()?;
         ["exit_code", "exitCode", "status"]
             .iter()
-            .find_map(|key| output.get(*key).and_then(value_as_i32))
+            .find_map(|key| response.get(*key).and_then(value_as_i32))
             .or_else(|| {
-                output
+                response
                     .get("success")
                     .and_then(Value::as_bool)
                     .map(|success| if success { 0 } else { 1 })
@@ -67,14 +71,24 @@ impl HookInput {
     }
 
     pub fn duration_ms(&self) -> Option<u64> {
-        self.tool_output
+        self.tool_response
             .as_ref()
             .and_then(Value::as_object)
-            .and_then(|output| {
+            .and_then(|response| {
                 ["duration_ms", "durationMs"]
                     .iter()
-                    .find_map(|key| output.get(*key).and_then(Value::as_u64))
+                    .find_map(|key| response.get(*key).and_then(Value::as_u64))
             })
+    }
+
+    /// Returns the stable identity Codex assigns to this invocation boundary.
+    /// Turn-scoped hooks use `turn_id`; tool hooks use the more specific
+    /// `tool_use_id` so two tools in one turn cannot collapse into one event.
+    pub fn stable_event_identity(&self) -> Option<&str> {
+        self.tool_use_id
+            .as_deref()
+            .filter(|id| !id.is_empty())
+            .or_else(|| self.turn_id.as_deref().filter(|id| !id.is_empty()))
     }
 
     pub fn parsed_session_id(&self) -> Option<Uuid> {

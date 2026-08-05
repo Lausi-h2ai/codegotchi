@@ -1,8 +1,8 @@
 {
   "session_id": "00000000-0000-0000-0000-000000000001",
-  "turn_id": "turn-00000000000000000000000000000003",
+  "turn_id": "turn-00000000000000000000000000000004",
   "hook_event_name": "UserPromptSubmit",
-  "prompt": "never-persist-this-prompt",
+  "prompt": "a second discarded prompt",
   "source": "user",
   "cwd": "/workspace/codegatchi"
 }

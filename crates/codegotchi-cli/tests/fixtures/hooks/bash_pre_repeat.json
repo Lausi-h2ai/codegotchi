@@ -1,17 +1,13 @@
 {
   "session_id": "00000000-0000-0000-0000-000000000001",
   "turn_id": "turn-00000000000000000000000000000001",
-  "hook_event_name": "PostToolUse",
+  "hook_event_name": "PreToolUse",
   "tool_name": "Bash",
   "tool_input": {
     "command": "cargo test -p secret-project",
+    "timeout": 10000,
     "workdir": "/workspace/codegatchi"
   },
-  "tool_response": {
-    "exit_code": 1,
-    "duration_ms": 41,
-    "stderr": "sensitive-tool-output"
-  },
   "cwd": "/workspace/codegatchi",
-  "tool_use_id": "call-post-bash-failure"
+  "tool_use_id": "call-pre-bash-repeat"
 }
