@@ -120,6 +120,18 @@ fn state_database(temp: &TempDir) -> PathBuf {
     temp.join("state/codegotchi/state.sqlite")
 }
 
+fn read_snapshot(database: &Path) -> Value {
+    let connection = Connection::open(database).expect("snapshot database opens");
+    let snapshot: String = connection
+        .query_row(
+            "SELECT snapshot_json FROM simulation_snapshots LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("snapshot exists");
+    serde_json::from_str(&snapshot).expect("snapshot JSON is valid")
+}
+
 fn write_executable(path: &Path, contents: &str) {
     fs::write(path, contents).expect("fixture writes");
     let mut permissions = fs::metadata(path).expect("fixture metadata").permissions();
@@ -314,6 +326,50 @@ fn missing_and_non_executable_codex_are_rejected_without_runtime_files() {
 }
 
 #[test]
+fn signal_handlers_are_installed_before_setup_can_publish_owned_files() {
+    let temp = TempDir::new("setup-signal");
+    let cwd = temp.join("cwd");
+    let bin = temp.join("bin");
+    fs::create_dir_all(&cwd).unwrap();
+    fs::create_dir_all(&bin).unwrap();
+    let git = bin.join("git");
+    write_executable(
+        &git,
+        "#!/bin/sh
+set -eu
+touch \"$FAKE_GIT_READY\"
+while [ -e \"$FAKE_GIT_RELEASE\" ]; do sleep 0.05; done
+exit 1
+",
+    );
+    let ready = temp.join("git-ready");
+    let release = temp.join("git-release");
+    fs::write(&release, b"").unwrap();
+    let mut command = setup_command(&temp, &cwd);
+    command
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("FAKE_GIT_READY", &ready)
+        .env("FAKE_GIT_RELEASE", &release)
+        .args(["run", "--", "codex"]);
+    let mut child = command.spawn().unwrap();
+    drop(child.stdin.take());
+    wait_for(&ready);
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    fs::remove_file(&release).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(143), "{output:?}");
+    assert!(!temp.join("state").exists());
+    assert!(!temp.join("runtime").exists());
+    assert!(!temp.join("codex-home").read_dir().unwrap().next().is_some());
+}
+
+#[test]
 fn recursive_symlink_codex_and_browser_failure_are_nonfatal() {
     let temp = TempDir::new("symlink-browser");
     let cwd = temp.join("cwd");
@@ -329,6 +385,25 @@ fn recursive_symlink_codex_and_browser_failure_are_nonfatal() {
     command
         .env("CODEGOTCHI_REAL_CODEX", "./codex-relative")
         .env("CODEGOTCHI_BROWSER", temp.join("missing-browser"))
+        .env("FAKE_CODEX_LOG", &log)
+        .env("FAKE_STDIN_FILE", &input)
+        .args(["run", "--", "codex"]);
+    let output = command.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("browser"));
+    assert!(log.exists());
+}
+
+#[test]
+fn browser_helper_nonzero_exit_warns_without_delaying_codex() {
+    let temp = TempDir::new("browser-nonzero");
+    let cwd = temp.join("cwd");
+    fs::create_dir_all(&cwd).unwrap();
+    let log = temp.join("codex.log");
+    let input = temp.join("stdin");
+    let mut command = setup_command(&temp, &cwd);
+    command
+        .env("CODEGOTCHI_BROWSER", "/bin/false")
         .env("FAKE_CODEX_LOG", &log)
         .env("FAKE_STDIN_FILE", &input)
         .args(["run", "--", "codex"]);
@@ -408,11 +483,12 @@ fn metadata_directory_modes_stale_cleanup_and_unrelated_files_are_safe() {
     fs::create_dir_all(&cwd).unwrap();
     let runtime = temp.join("runtime/codegotchi");
     fs::create_dir_all(&runtime).unwrap();
-    let stale = runtime.join("session-stale.json");
+    let stale_id = Uuid::new_v4();
+    let stale = runtime.join(format!("session-{stale_id}.json"));
     write_metadata(
         &stale,
         &RuntimeMetadataV1::new(
-            Uuid::new_v4(),
+            stale_id,
             &cwd,
             "http://127.0.0.1:1",
             "stale-token",
@@ -420,13 +496,28 @@ fn metadata_directory_modes_stale_cleanup_and_unrelated_files_are_safe() {
         ),
     )
     .unwrap();
-    let unrelated = runtime.join("session-unrelated.json");
-    fs::write(&unrelated, b"user-owned file").unwrap();
-    let active = runtime.join("session-active.json");
+    let unrelated_filename_id = Uuid::new_v4();
+    let unrelated_runtime_id = Uuid::new_v4();
+    let unrelated = runtime.join(format!("session-{unrelated_filename_id}.json"));
+    write_metadata(
+        &unrelated,
+        &RuntimeMetadataV1::new(
+            unrelated_runtime_id,
+            &cwd,
+            "http://127.0.0.1:1",
+            "unrelated-token",
+            u32::MAX,
+        ),
+    )
+    .unwrap();
+    let malformed = runtime.join("session-malformed.json");
+    fs::write(&malformed, b"user-owned file").unwrap();
+    let active_id = Uuid::new_v4();
+    let active = runtime.join(format!("session-{active_id}.json"));
     write_metadata(
         &active,
         &RuntimeMetadataV1::new(
-            Uuid::new_v4(),
+            active_id,
             &cwd,
             "http://127.0.0.1:1",
             "active-token",
@@ -454,16 +545,7 @@ fn metadata_directory_modes_stale_cleanup_and_unrelated_files_are_safe() {
         .unwrap()
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .find(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| {
-                    name.starts_with("session-")
-                        && name != "session-active.json"
-                        && name != "session-stale.json"
-                        && name != "session-unrelated.json"
-                })
-        })
+        .find(|path| path != &stale && path != &unrelated && path != &malformed && path != &active)
         .expect("launcher session metadata exists");
     assert_eq!(
         fs::metadata(&runtime).unwrap().permissions().mode() & 0o777,
@@ -474,6 +556,14 @@ fn metadata_directory_modes_stale_cleanup_and_unrelated_files_are_safe() {
         0o600
     );
     let metadata = read_metadata(&owned).unwrap();
+    let filename_id = owned
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_prefix("session-"))
+        .and_then(|name| name.strip_suffix(".json"))
+        .and_then(|name| Uuid::parse_str(name).ok())
+        .expect("owned metadata filename contains a UUID");
+    assert_eq!(metadata.runtime_id, filename_id);
     let token_parts: Vec<&str> = metadata.bearer_token.split('-').collect();
     assert_eq!(token_parts.len(), 2);
     assert!(
@@ -486,6 +576,7 @@ fn metadata_directory_modes_stale_cleanup_and_unrelated_files_are_safe() {
     assert!(output.status.success());
     assert!(!stale.exists());
     assert!(unrelated.exists());
+    assert!(malformed.exists());
     assert!(active.exists());
     assert!(!owned.exists());
 }
@@ -578,35 +669,132 @@ fn sigwinch_is_forwarded_while_child_keeps_inherited_stdio() {
     assert!(fs::read_to_string(signal_log).unwrap().contains("SIGWINCH"));
 }
 
+#[cfg(unix)]
+fn process_group_id(pid: u32) -> i32 {
+    let output = Command::new("ps")
+        .args(["-o", "pgid=", "-p", &pid.to_string()])
+        .output()
+        .expect("ps starts");
+    assert!(output.status.success());
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .expect("process group id parses")
+}
+
+#[cfg(unix)]
+fn shell_quote_path(path: &Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+}
+
+#[cfg(unix)]
+#[test]
+fn foreground_terminal_group_signal_is_not_forwarded_a_second_time() {
+    let temp = TempDir::new("pty-signal");
+    let cwd = temp.join("cwd");
+    let home = temp.join("home");
+    let codex_home = temp.join("codex-home");
+    let state = temp.join("state");
+    let runtime = temp.join("runtime");
+    for path in [&cwd, &home, &codex_home, &state, &runtime] {
+        fs::create_dir_all(path).unwrap();
+    }
+    let log = temp.join("codex.log");
+    let input = temp.join("stdin");
+    let ready = temp.join("signal-ready");
+    let release = temp.join("signal-release");
+    let signal_log = temp.join("signals");
+    fs::write(&release, b"").unwrap();
+    let command_line = format!("exec {} run -- codex", shell_quote_path(&binary()));
+    let mut command = Command::new("setsid");
+    command
+        .args(["script", "-q", "-e", "-f", "-c", &command_line, "/dev/null"])
+        .current_dir(&cwd)
+        .env_clear()
+        .env("HOME", &home)
+        .env("CODEX_HOME", &codex_home)
+        .env("XDG_STATE_HOME", &state)
+        .env("XDG_RUNTIME_DIR", &runtime)
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("CODEGOTCHI_REAL_CODEX", fake_codex())
+        .env("CODEGOTCHI_BROWSER", "none")
+        .env("FAKE_CODEX_LOG", &log)
+        .env("FAKE_STDIN_FILE", &input)
+        .env("FAKE_SIGNAL_FILE", &ready)
+        .env("FAKE_SIGNAL_LOG", &signal_log)
+        .env("FAKE_SIGNAL_EXIT_ON_SIGNAL", "0")
+        .env("FAKE_SIGNAL_RELEASE_FILE", &release)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = command.spawn().expect("script creates a real PTY");
+    wait_for(&ready);
+    let launcher_pid = log_fields(&log, "PID")
+        .first()
+        .expect("fake Codex logs its PID")
+        .parse()
+        .expect("launcher PID parses");
+    let process_group = process_group_id(launcher_pid);
+    assert!(process_group > 0, "PTY process group must be positive");
+    assert!(
+        Command::new("kill")
+            .args(["-INT", "--", &format!("-{process_group}")])
+            .status()
+            .unwrap()
+            .success()
+    );
+    wait_for_text(&signal_log, "SIGINT");
+    thread::sleep(Duration::from_millis(200));
+    let count = fs::read_to_string(&signal_log)
+        .unwrap()
+        .lines()
+        .filter(|line| *line == "SIGINT")
+        .count();
+    assert_eq!(count, 1, "the terminal group delivered SIGINT twice");
+    fs::remove_file(&release).unwrap();
+    let status = child.wait().unwrap();
+    assert!(
+        status.success() || status.code() == Some(130),
+        "PTY launcher status: {status}"
+    );
+}
+
 #[test]
 fn sqlite_state_is_preserved_and_reloaded_for_the_same_repository() {
     let temp = TempDir::new("persistence");
     let cwd = temp.join("repository");
     fs::create_dir_all(&cwd).unwrap();
-    for first in [true, false] {
-        let log = temp.join(if first { "first.log" } else { "second.log" });
-        let input = temp.join(if first { "first.stdin" } else { "second.stdin" });
-        let mut command = setup_command(&temp, &cwd);
-        command
-            .env("FAKE_CODEX_LOG", &log)
-            .env("FAKE_STDIN_FILE", &input)
-            .env("CODEGOTCHI_ENABLE_DEBUG", "1")
-            .env("CODEGOTCHI_BIN", binary())
-            .env("FAKE_DEBUG_NEGLECT", if first { "1" } else { "0" })
-            .args(["run", "--", "codex"]);
-        assert!(command.output().unwrap().status.success());
-    }
-    let database = Connection::open(state_database(&temp)).unwrap();
-    let snapshots: Vec<Value> = database
-        .prepare("SELECT snapshot_json FROM simulation_snapshots ORDER BY repository_id")
-        .unwrap()
-        .query_map([], |row| row.get::<_, String>(0))
-        .unwrap()
-        .map(|row| serde_json::from_str(&row.unwrap()).unwrap())
-        .collect();
-    assert_eq!(snapshots.len(), 1);
-    assert!(snapshots[0]["needs"]["hunger"].as_f64().unwrap() > 0.0);
-    let first_pet = snapshots[0]["petId"].clone();
+    let first_log = temp.join("first.log");
+    let first_input = temp.join("first.stdin");
+    let mut first_command = setup_command(&temp, &cwd);
+    first_command
+        .env("FAKE_CODEX_LOG", &first_log)
+        .env("FAKE_STDIN_FILE", &first_input)
+        .env("CODEGOTCHI_ENABLE_DEBUG", "1")
+        .env("CODEGOTCHI_BIN", binary())
+        .env("FAKE_DEBUG_NEGLECT", "1")
+        .args(["run", "--", "codex"]);
+    assert!(first_command.output().unwrap().status.success());
+    let first_snapshot = read_snapshot(&state_database(&temp));
+    assert!(first_snapshot["needs"]["hunger"].as_f64().unwrap() > 0.0);
+
+    let second_log = temp.join("second.log");
+    let second_input = temp.join("second.stdin");
+    let mut second_command = setup_command(&temp, &cwd);
+    second_command
+        .env("FAKE_CODEX_LOG", &second_log)
+        .env("FAKE_STDIN_FILE", &second_input)
+        .env("FAKE_DEBUG_NEGLECT", "0")
+        .args(["run", "--", "codex"]);
+    assert!(second_command.output().unwrap().status.success());
+    let second_snapshot = read_snapshot(&state_database(&temp));
+    assert_eq!(first_snapshot["petId"], second_snapshot["petId"]);
+    assert_eq!(first_snapshot["needs"], second_snapshot["needs"]);
+    assert_eq!(first_snapshot["inventory"], second_snapshot["inventory"]);
+    assert_eq!(
+        first_snapshot["processedEventIds"],
+        second_snapshot["processedEventIds"]
+    );
 
     let other = temp.join("other-repository");
     fs::create_dir_all(&other).unwrap();
@@ -618,13 +806,13 @@ fn sqlite_state_is_preserved_and_reloaded_for_the_same_repository() {
         .env("FAKE_STDIN_FILE", &input)
         .args(["run", "--", "codex"]);
     assert!(command.output().unwrap().status.success());
+    let database = Connection::open(state_database(&temp)).unwrap();
     let count: i64 = database
         .query_row("SELECT COUNT(*) FROM simulation_snapshots", [], |row| {
             row.get(0)
         })
         .unwrap();
     assert_eq!(count, 2);
-    assert!(first_pet.is_string());
 }
 
 #[test]

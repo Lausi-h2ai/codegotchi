@@ -32,13 +32,20 @@ fi
 
 if [ -n "${FAKE_SIGNAL_FILE-}" ]; then
     signal_log=${FAKE_SIGNAL_LOG:?FAKE_SIGNAL_LOG must be set}
-    trap 'printf "SIGINT\n" >>"$signal_log"; exit 130' INT
+    signal_count=0
+    trap 'signal_count=$((signal_count + 1)); printf "SIGINT\n" >>"$signal_log"; if [ "${FAKE_SIGNAL_EXIT_ON_SIGNAL-1}" = 1 ]; then exit 130; fi' INT
     trap 'printf "SIGTERM\n" >>"$signal_log"; exit 143' TERM
     trap 'printf "SIGWINCH\n" >>"$signal_log"' WINCH
     touch "$FAKE_SIGNAL_FILE"
-    while :; do
-        sleep 1
-    done
+    if [ -n "${FAKE_SIGNAL_RELEASE_FILE-}" ]; then
+        while [ -e "$FAKE_SIGNAL_RELEASE_FILE" ]; do
+            sleep 0.05
+        done
+    else
+        while :; do
+            sleep 1
+        done
+    fi
 fi
 
 if [ -n "${FAKE_READY_FILE-}" ]; then

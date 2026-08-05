@@ -1,12 +1,14 @@
 use std::fs;
+use std::io::{BufRead, BufReader, Read as StdRead, Write as StdWrite};
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use codegotchi_cli::{AuthoritativeRuntime, RunningServer, SqliteStore};
 use codegotchi_domain::{Pet, PetSpecies};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncReadExt as TokioReadExt, AsyncWriteExt as TokioWriteExt};
+use tokio::net::TcpStream as TokioTcpStream;
 use uuid::Uuid;
 
 struct TempDir {
@@ -38,7 +40,7 @@ struct HttpResponse {
 }
 
 async fn get(server: &RunningServer, path: &str, authorization: Option<&str>) -> HttpResponse {
-    let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
+    let mut stream = TokioTcpStream::connect(server.local_addr()).await.unwrap();
     let mut request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n");
     if let Some(token) = authorization {
         request.push_str(&format!("Authorization: Bearer {token}\r\n"));
@@ -80,6 +82,76 @@ fn asset_path_from_reference(reference: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("web-dist")
         .join(reference.trim_start_matches('/'))
+}
+
+fn wait_for_file(path: &Path) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !path.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for {}",
+            path.display()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn installed_get(address: SocketAddr, path: &str) -> HttpResponse {
+    let mut stream = TcpStream::connect(address).expect("installed server accepts HTTP");
+    stream
+        .write_all(
+            format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .unwrap();
+    let mut bytes = Vec::new();
+    stream.read_to_end(&mut bytes).unwrap();
+    let separator = bytes
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .unwrap();
+    let headers = String::from_utf8_lossy(&bytes[..separator]);
+    let status = headers
+        .lines()
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .nth(1)
+        .unwrap()
+        .parse()
+        .unwrap();
+    let content_type = headers
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("content-type: ")
+                .or_else(|| line.strip_prefix("Content-Type: "))
+        })
+        .unwrap_or_default()
+        .to_owned();
+    HttpResponse {
+        status,
+        content_type,
+        body: bytes[separator + 4..].to_vec(),
+    }
+}
+
+fn installed_ui_address(line: &str) -> SocketAddr {
+    let url = line
+        .trim()
+        .strip_prefix("CodeGotchi UI: ")
+        .expect("launcher prints a UI line");
+    assert!(url.starts_with("http://127.0.0.1:"));
+    assert!(
+        url.contains("/#token="),
+        "token must be in the URL fragment"
+    );
+    url.strip_prefix("http://")
+        .unwrap()
+        .split("/#")
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap()
 }
 
 #[tokio::test]
@@ -177,6 +249,8 @@ fn installed_binary_serves_assets_without_repository_runtime_dependencies() {
     fs::create_dir_all(&cwd).unwrap();
     let log = temp.path.join("installed.log");
     let input = temp.path.join("installed.stdin");
+    let ready = temp.path.join("installed.ready");
+    let release = temp.path.join("installed.release");
     let home = temp.path.join("home");
     let codex_home = temp.path.join("codex-home");
     let state = temp.path.join("state");
@@ -184,14 +258,15 @@ fn installed_binary_serves_assets_without_repository_runtime_dependencies() {
     for path in [&home, &codex_home, &state, &runtime] {
         fs::create_dir_all(path).unwrap();
     }
-    let output = Command::new(&installed)
+    fs::write(&release, b"").unwrap();
+    let mut child = Command::new(&installed)
         .args(["run", "--", "codex"])
         .current_dir(&cwd)
         .env_clear()
         .env("HOME", home)
-        .env("CODEX_HOME", codex_home)
+        .env("CODEX_HOME", &codex_home)
         .env("XDG_STATE_HOME", state)
-        .env("XDG_RUNTIME_DIR", runtime)
+        .env("XDG_RUNTIME_DIR", &runtime)
         .env("PATH", "/usr/local/bin:/usr/bin:/bin")
         .env(
             "CODEGOTCHI_REAL_CODEX",
@@ -200,15 +275,88 @@ fn installed_binary_serves_assets_without_repository_runtime_dependencies() {
         .env("CODEGOTCHI_BROWSER", "none")
         .env("FAKE_CODEX_LOG", &log)
         .env("FAKE_STDIN_FILE", &input)
-        .output()
+        .env("FAKE_READY_FILE", &ready)
+        .env("FAKE_RELEASE_FILE", &release)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .expect("installed launcher starts outside repository");
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+    let stdout = child.stdout.take().expect("installed stdout is piped");
+    let mut stdout = BufReader::new(stdout);
+    let mut ui_line = String::new();
+    stdout.read_line(&mut ui_line).unwrap();
+    let address = installed_ui_address(&ui_line);
+    wait_for_file(&ready);
+    let fake_pid: u32 = fs::read_to_string(&log)
+        .expect("fake Codex log is readable")
+        .lines()
+        .find_map(|line| line.strip_prefix("PID\t"))
+        .expect("fake Codex logs its PID")
+        .parse()
+        .unwrap();
+    let parent_pid = String::from_utf8_lossy(
+        &Command::new("ps")
+            .args(["-o", "ppid=", "-p", &fake_pid.to_string()])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .trim()
+    .parse::<u32>()
+    .unwrap();
+    assert_eq!(
+        fs::canonicalize(format!("/proc/{parent_pid}/exe")).unwrap(),
+        installed.canonicalize().unwrap(),
+        "the installed launcher owns the Codex child and embedded server"
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("CodeGotchi UI: http://127.0.0.1:"));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("fake codex stdout"));
+
+    let index_bytes = fs::read(asset_path_from_reference("/index.html")).unwrap();
+    let index = installed_get(address, "/");
+    assert_eq!(index.status, 200);
+    assert_eq!(index.content_type, "text/html; charset=utf-8");
+    assert_eq!(index.body, index_bytes);
+    let index_text = String::from_utf8(index.body).unwrap();
+    let reference = index_text
+        .split(['"', '\''])
+        .find(|part| part.starts_with("/assets/"))
+        .expect("installed index references a hashed asset");
+    let asset = installed_get(address, reference);
+    assert_eq!(asset.status, 200);
+    assert_eq!(
+        asset.body,
+        fs::read(asset_path_from_reference(reference)).unwrap()
+    );
+    if reference.ends_with(".js") {
+        assert_eq!(asset.content_type, "application/javascript; charset=utf-8");
+    } else if reference.ends_with(".css") {
+        assert_eq!(asset.content_type, "text/css; charset=utf-8");
+    } else {
+        panic!("expected a hashed JS/CSS asset, got {reference}");
+    }
+
+    fs::remove_file(&release).unwrap();
+    let status = child.wait().unwrap();
+    assert!(status.success(), "installed launcher status: {status}");
+    let mut remaining = String::new();
+    stdout.read_to_string(&mut remaining).unwrap();
+    assert!(remaining.contains("fake codex stdout"));
     assert!(log.is_file());
-    assert!(!String::from_utf8_lossy(&output.stdout).contains("Vite"));
+    assert!(!remaining.contains("Vite"));
+    assert!(
+        !runtime.join("codegotchi").read_dir().unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("session-")
+        })
+    );
+    assert!(!codex_home.read_dir().unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".config.toml")
+    }));
 }

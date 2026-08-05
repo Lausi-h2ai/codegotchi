@@ -12,6 +12,9 @@ compile-time embedded bytes, launches Codex with an additive temporary hook
 profile, forwards terminal signals while waiting, returns Codex's numeric exit
 status, and cleans only the metadata/profile owned by that run.
 
+This report also records the focused correction pass for all seven MVP-blocking
+findings in the independent review committed at `6d453db`.
+
 ## TDD evidence
 
 The new process and static-asset tests were added before the implementation.
@@ -19,13 +22,19 @@ The initial RED focused run failed as expected: `run` was not yet accepted by
 the CLI, the production server still returned the old JSON 404 for UI routes,
 and the first installed-binary fixture exposed the incorrect install working
 directory. The implementation and test-fixture corrections turned those
-failures into the GREEN results below.
+failures into the GREEN results below. The correction RED pass then failed on
+setup-time SIGTERM handling, nonzero browser-helper reporting, UUID/runtime-ID
+ownership mismatches, and the new PTY/install/persistence assertions before
+the corresponding fixes were added.
 
 Focused GREEN results:
 
-- `cargo test -p codegotchi-cli --test process_wrapper`: 11 passed.
+- `cargo test -p codegotchi-cli --test process_wrapper`: 14 passed, including
+  the real PTY/process-group signal test.
 - `cargo test -p codegotchi-cli --test static_assets`: 2 passed, including a
   real `cargo install` and an installed-binary run from outside the repository.
+- `cargo test -p codegotchi-cli --lib runtime_metadata`: 2 focused cleanup tests
+  passed (write failure and sync failure).
 - `cargo fmt --all -- --check`: passed.
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings`:
   passed.
@@ -37,9 +46,11 @@ generated profile, raw stdin/stdout/stderr and ANSI bytes, current directory,
 metadata/profile environment, exit status, malformed command and all profile
 conflicts before mutation, missing/non-executable/self-resolving Codex paths,
 recursive symlinks, spawn cleanup, nonfatal browser failure, SIGINT/SIGTERM/
-SIGWINCH forwarding, additive config/credential byte identity, metadata modes
-and token syntax, stale-session cleanup, preservation of unrelated/active
-files, and SQLite pet-state reload/distinction across repositories.
+SIGWINCH forwarding, setup-time signal cancellation, foreground PTY process
+group delivery without duplicate SIGINT, additive config/credential byte
+identity, metadata modes and token syntax, exact UUID filename/runtime-ID
+ownership, stale-session cleanup, preservation of unrelated/active files, and
+SQLite pet-state capture/reload/distinction across repositories.
 
 ## Embedded UI and install proof
 
@@ -65,11 +76,16 @@ cargo install --path crates/codegotchi-cli --root <temporary-root> --locked --of
 
 It runs the installed executable from a directory outside the repository with
 `CODEGOTCHI_REAL_CODEX` pointed at the fake Codex and
-`CODEGOTCHI_BROWSER=none`. The test confirms the UI line and fake Codex output,
-and confirms the install root contains neither `web-dist` nor pnpm/runtime
-frontend dependencies. The production-server test also verifies `/`, every
-referenced hashed asset and MIME type, SPA fallback, typed unknown API 404s,
-and unchanged authentication for state-changing routes.
+`CODEGOTCHI_BROWSER=none`, holds the fake Codex alive, parses the printed
+loopback URL, fetches `/` and a referenced hashed asset from the installed
+binary, and checks status, exact bytes, and MIME type before releasing the
+child. It then proves the owned session metadata and additive profile are
+gone, and verifies the fake Codex parent is the installed launcher itself
+rather than a second UI process. The test also confirms the install root
+contains neither `web-dist` nor pnpm/runtime frontend dependencies. The
+production-server test verifies `/`,
+every referenced hashed asset and MIME type, SPA fallback, typed unknown API
+404s, and unchanged authentication for state-changing routes.
 
 ## Cleanup, persistence, and configuration checks
 
@@ -82,7 +98,17 @@ and unchanged authentication for state-changing routes.
   `$HOME/.local/state/codegotchi/state.sqlite`.
 - Runtime metadata is created with the existing create-new 0600 writer below a
   mode-0700 CodeGotchi runtime directory. The token is two UUIDv4 simple forms
-  separated by a safe hyphen and is used only in the URL fragment.
+  separated by a safe hyphen and is used only in the URL fragment. A session
+  file is owned only when its canonical UUID filename equals
+  `RuntimeMetadataV1.runtime_id`; malformed names and valid mismatches remain.
+- SIGINT, SIGTERM, and SIGWINCH handlers are installed before setup can publish
+  runtime metadata. Setup cancellation cleans any resources already owned and
+  returns the conventional signal status. After spawn, direct launcher-only
+  signals remain forwarded; inherited foreground terminal-group SIGINT and
+  SIGWINCH are not forwarded a second time, while SIGTERM is still forwarded.
+- Browser helpers are reaped concurrently with Codex startup. Nonzero helper
+  completion produces a warning with the surfaced URL; spawn failure remains
+  nonfatal.
 - Existing `CODEX_HOME/config.toml` and auth/credential files retain their
   checksums. Only the unique additive `codegotchi-<uuid>.config.toml` is
   created and later removed.
@@ -99,8 +125,8 @@ and unchanged authentication for state-changing routes.
 - `README.md`.
 - `crates/codegotchi-cli/build.rs`.
 - `crates/codegotchi-cli/src/assets.rs` and `src/launcher.rs`.
-- `crates/codegotchi-cli/src/cli.rs`, `src/lib.rs`, `src/main.rs`, and
-  `src/server.rs`.
+- `crates/codegotchi-cli/src/cli.rs`, `src/lib.rs`, `src/main.rs`,
+  `src/runtime_metadata.rs`, and `src/server.rs`.
 - `crates/codegotchi-cli/tests/process_wrapper.rs`.
 - `crates/codegotchi-cli/tests/static_assets.rs`.
 - `crates/codegotchi-cli/tests/fixtures/fake-codex.sh`.

@@ -4,12 +4,14 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::time::Duration;
 
 use chrono::Utc;
 use codegotchi_domain::{Pet, PetSpecies};
 use thiserror::Error;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::TemporaryCodexProfile;
@@ -26,6 +28,107 @@ const SESSION_FILE_PREFIX: &str = "session-";
 const SESSION_FILE_SUFFIX: &str = ".json";
 const PROFILE_PREFIX: &str = "codegotchi-";
 const REPOSITORY_ID_NAMESPACE: &str = "codegotchi-repository-v1";
+
+#[derive(Clone, Copy, Debug)]
+enum LauncherSignal {
+    Interrupt,
+    Terminate,
+    WindowChange,
+}
+
+impl LauncherSignal {
+    fn exit_status(self) -> i32 {
+        128 + self.number()
+    }
+
+    fn number(self) -> i32 {
+        match self {
+            Self::Interrupt => 2,
+            Self::Terminate => 15,
+            Self::WindowChange => 28,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Interrupt => "INT",
+            Self::Terminate => "TERM",
+            Self::WindowChange => "WINCH",
+        }
+    }
+
+    fn is_terminal_group_signal(self) -> bool {
+        matches!(self, Self::Interrupt | Self::WindowChange)
+    }
+}
+
+#[cfg(unix)]
+struct SignalController {
+    interrupt: tokio::signal::unix::Signal,
+    terminate: tokio::signal::unix::Signal,
+    window_change: tokio::signal::unix::Signal,
+}
+
+#[cfg(not(unix))]
+struct SignalController;
+
+impl SignalController {
+    #[cfg(unix)]
+    fn install() -> Result<Self, LauncherError> {
+        Ok(Self {
+            interrupt: signal(SignalKind::interrupt()).map_err(|error| {
+                LauncherError::message(format!("could not install SIGINT handling: {error}"))
+            })?,
+            terminate: signal(SignalKind::terminate()).map_err(|error| {
+                LauncherError::message(format!("could not install SIGTERM handling: {error}"))
+            })?,
+            window_change: signal(SignalKind::window_change()).map_err(|error| {
+                LauncherError::message(format!("could not install SIGWINCH handling: {error}"))
+            })?,
+        })
+    }
+
+    #[cfg(not(unix))]
+    fn install() -> Result<Self, LauncherError> {
+        Ok(Self)
+    }
+
+    #[cfg(unix)]
+    async fn next(&mut self) -> Option<LauncherSignal> {
+        tokio::select! {
+            value = self.interrupt.recv() => value.map(|_| LauncherSignal::Interrupt),
+            value = self.terminate.recv() => value.map(|_| LauncherSignal::Terminate),
+            value = self.window_change.recv() => value.map(|_| LauncherSignal::WindowChange),
+        }
+    }
+
+    #[cfg(not(unix))]
+    async fn next(&mut self) -> Option<LauncherSignal> {
+        None
+    }
+
+    #[cfg(unix)]
+    async fn try_next(&mut self) -> Option<LauncherSignal> {
+        tokio::time::timeout(Duration::from_millis(1), self.next())
+            .await
+            .ok()
+            .flatten()
+    }
+
+    #[cfg(not(unix))]
+    async fn try_next(&mut self) -> Option<LauncherSignal> {
+        None
+    }
+
+    async fn try_setup_termination(&mut self) -> Option<LauncherSignal> {
+        loop {
+            match self.try_next().await {
+                Some(LauncherSignal::WindowChange) => {}
+                signal => return signal,
+            }
+        }
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum LauncherError {
@@ -75,7 +178,14 @@ pub fn run(arguments: impl IntoIterator<Item = OsString>) -> Result<i32, Launche
 
 async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
     let validated = validate(arguments)?;
+    let mut signals = SignalController::install()?;
+    if let Some(signal) = signals.try_setup_termination().await {
+        return Ok(signal.exit_status());
+    }
     let paths = resolve_launch_paths()?;
+    if let Some(signal) = signals.try_setup_termination().await {
+        return Ok(signal.exit_status());
+    }
 
     ensure_private_directory(&paths.state_directory)?;
     fs::create_dir_all(&paths.codex_home).map_err(|error| {
@@ -97,6 +207,9 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
         })?;
     ensure_private_directory(&paths.runtime_directory)?;
     clean_stale_metadata(&paths.runtime_directory)?;
+    if let Some(signal) = signals.try_setup_termination().await {
+        return Ok(signal.exit_status());
+    }
 
     let repository_uuid = Uuid::parse_str(&paths.repository_id).map_err(|error| {
         LauncherError::message(format!("could not derive the repository identity: {error}"))
@@ -120,7 +233,11 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
         .map_err(|error| {
             LauncherError::message(format!("could not start CodeGotchi server: {error}"))
         })?;
-    let metadata_path = match session_path(&paths.runtime_directory) {
+    if let Some(signal) = signals.try_setup_termination().await {
+        let _ = server.shutdown().await;
+        return Ok(signal.exit_status());
+    }
+    let (runtime_id, metadata_path) = match session_path(&paths.runtime_directory) {
         Ok(path) => path,
         Err(error) => {
             let _ = server.shutdown().await;
@@ -128,7 +245,7 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
         }
     };
     let metadata = RuntimeMetadataV1::new(
-        Uuid::new_v4(),
+        runtime_id,
         paths.repository_root.clone(),
         server.base_url(),
         token,
@@ -142,6 +259,11 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
         )));
     }
     let mut owned_metadata = OwnedMetadata::new(metadata_path);
+    if let Some(signal) = signals.try_setup_termination().await {
+        let _ = owned_metadata.cleanup();
+        let _ = server.shutdown().await;
+        return Ok(signal.exit_status());
+    }
 
     let profile_name = format!("{PROFILE_PREFIX}{}", Uuid::new_v4().simple());
     let hook_command = format!("{} hook", shell_quote(&validated.codegotchi_executable));
@@ -160,11 +282,24 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
             )));
         }
     };
+    if let Some(signal) = signals.try_setup_termination().await {
+        let _ = profile.cleanup();
+        let _ = owned_metadata.cleanup();
+        let _ = server.shutdown().await;
+        return Ok(signal.exit_status());
+    }
 
     let ui_url = format!("{}/#token={}", server.base_url(), metadata.bearer_token);
     println!("CodeGotchi UI: {ui_url}");
     let _ = io::Write::flush(&mut io::stdout());
-    launch_browser(&ui_url);
+    let browser_wait = launch_browser(&ui_url);
+    if let Some(signal) = signals.try_setup_termination().await {
+        wait_for_browser(browser_wait).await;
+        let _ = profile.cleanup();
+        let _ = owned_metadata.cleanup();
+        let _ = server.shutdown().await;
+        return Ok(signal.exit_status());
+    }
 
     let mut child_command = profile.codex_command(&validated.codex_path);
     child_command
@@ -175,6 +310,7 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
     let child = match child_command.spawn() {
         Ok(child) => child,
         Err(error) => {
+            wait_for_browser(browser_wait).await;
             let _ = owned_metadata.cleanup();
             let _ = server.shutdown().await;
             let _ = profile.cleanup();
@@ -186,10 +322,11 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
         }
     };
 
-    let wait_result = wait_for_child(child).await;
+    let wait_result = wait_for_child(child, signals).await;
     let metadata_cleanup = owned_metadata.cleanup();
     let profile_cleanup = profile.cleanup();
     let server_cleanup = server.shutdown().await;
+    wait_for_browser(browser_wait).await;
     drop(profile);
 
     if let Err(error) = metadata_cleanup {
@@ -510,9 +647,13 @@ fn ensure_private_directory(path: &Path) -> Result<(), LauncherError> {
     Ok(())
 }
 
-fn is_owned_session_name(name: &OsStr) -> bool {
-    let name = name.to_string_lossy();
-    name.starts_with(SESSION_FILE_PREFIX) && name.ends_with(SESSION_FILE_SUFFIX)
+fn session_runtime_id(name: &OsStr) -> Option<Uuid> {
+    let name = name.to_str()?;
+    let value = name
+        .strip_prefix(SESSION_FILE_PREFIX)?
+        .strip_suffix(SESSION_FILE_SUFFIX)?;
+    let runtime_id = Uuid::parse_str(value).ok()?;
+    (value == runtime_id.to_string()).then_some(runtime_id)
 }
 
 fn clean_stale_metadata(directory: &Path) -> Result<(), LauncherError> {
@@ -525,9 +666,9 @@ fn clean_stale_metadata(directory: &Path) -> Result<(), LauncherError> {
     for entry in entries {
         let entry = entry.map_err(|error| LauncherError::message(error.to_string()))?;
         let path = entry.path();
-        if !is_owned_session_name(&entry.file_name()) {
+        let Some(filename_runtime_id) = session_runtime_id(&entry.file_name()) else {
             continue;
-        }
+        };
         let file_type = entry.file_type().map_err(|error| {
             LauncherError::message(format!("could not inspect {}: {error}", path.display()))
         })?;
@@ -537,6 +678,9 @@ fn clean_stale_metadata(directory: &Path) -> Result<(), LauncherError> {
         let Ok(metadata) = read_metadata(&path) else {
             continue;
         };
+        if metadata.runtime_id != filename_runtime_id {
+            continue;
+        }
         if !crate::codex_hook::runtime_metadata_is_active(&metadata) {
             remove_metadata(&path).map_err(|error| {
                 LauncherError::message(format!(
@@ -549,11 +693,12 @@ fn clean_stale_metadata(directory: &Path) -> Result<(), LauncherError> {
     Ok(())
 }
 
-fn session_path(directory: &Path) -> Result<PathBuf, LauncherError> {
+fn session_path(directory: &Path) -> Result<(Uuid, PathBuf), LauncherError> {
     for _ in 0..8 {
-        let path = directory.join(format!("{SESSION_FILE_PREFIX}{}.json", Uuid::new_v4()));
+        let runtime_id = Uuid::new_v4();
+        let path = directory.join(format!("{SESSION_FILE_PREFIX}{runtime_id}.json"));
         if !path.exists() {
-            return Ok(path);
+            return Ok((runtime_id, path));
         }
     }
     Err(LauncherError::message(
@@ -600,10 +745,10 @@ impl Drop for OwnedMetadata {
     }
 }
 
-fn launch_browser(url: &str) {
+fn launch_browser(url: &str) -> Option<JoinHandle<()>> {
     let override_value = env::var_os("CODEGOTCHI_BROWSER");
     if override_value.as_deref() == Some(OsStr::new("none")) {
-        return;
+        return None;
     }
 
     let result = if let Some(program) = override_value {
@@ -611,12 +756,18 @@ fn launch_browser(url: &str) {
     } else {
         launch_native_browser(url)
     };
-    if let Err(error) = result {
-        eprintln!("CodeGotchi warning: could not open the UI automatically ({error}); open {url}");
+    match result {
+        Ok(child) => Some(tokio::spawn(reap_browser(child, url.to_owned()))),
+        Err(error) => {
+            eprintln!(
+                "CodeGotchi warning: could not open the UI automatically ({error}); open {url}"
+            );
+            None
+        }
     }
 }
 
-fn spawn_browser_command(program: &Path, arguments: &[OsString]) -> Result<(), String> {
+fn spawn_browser_command(program: &Path, arguments: &[OsString]) -> Result<Child, String> {
     let mut command = Command::new(program);
     command
         .args(arguments)
@@ -625,19 +776,18 @@ fn spawn_browser_command(program: &Path, arguments: &[OsString]) -> Result<(), S
         .stderr(Stdio::null());
     command
         .spawn()
-        .map(|_| ())
         .map_err(|error| format!("{program:?}: {error}"))
 }
 
-fn launch_native_browser(url: &str) -> Result<(), String> {
+fn launch_native_browser(url: &str) -> Result<Child, String> {
     #[cfg(target_os = "linux")]
     {
         for (program, arguments) in [
             ("xdg-open", vec![OsString::from(url)]),
             ("gio", vec![OsString::from("open"), OsString::from(url)]),
         ] {
-            if spawn_browser_command(Path::new(program), &arguments).is_ok() {
-                return Ok(());
+            if let Ok(child) = spawn_browser_command(Path::new(program), &arguments) {
+                return Ok(child);
             }
         }
         if is_wsl() {
@@ -647,12 +797,34 @@ fn launch_native_browser(url: &str) -> Result<(), String> {
                 OsString::new(),
                 OsString::from(url),
             ];
-            if spawn_browser_command(Path::new("cmd.exe"), &arguments).is_ok() {
-                return Ok(());
+            if let Ok(child) = spawn_browser_command(Path::new("cmd.exe"), &arguments) {
+                return Ok(child);
             }
         }
     }
     Err(String::from("no supported browser launcher was available"))
+}
+
+async fn reap_browser(mut child: Child, url: String) {
+    let result = tokio::task::spawn_blocking(move || child.wait()).await;
+    match result {
+        Ok(Ok(status)) if status.success() => {}
+        Ok(Ok(status)) => eprintln!(
+            "CodeGotchi warning: browser helper exited unsuccessfully ({status}); open {url}"
+        ),
+        Ok(Err(error)) => eprintln!(
+            "CodeGotchi warning: browser helper could not be reaped ({error}); open {url}"
+        ),
+        Err(error) => {
+            eprintln!("CodeGotchi warning: browser helper wait failed ({error}); open {url}")
+        }
+    }
+}
+
+async fn wait_for_browser(wait: Option<JoinHandle<()>>) {
+    if let Some(wait) = wait {
+        let _ = wait.await;
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -663,31 +835,14 @@ fn is_wsl() -> bool {
             .unwrap_or(false)
 }
 
-async fn wait_for_child(child: Child) -> Result<ExitStatus, LauncherError> {
+async fn wait_for_child(
+    child: Child,
+    mut signals: SignalController,
+) -> Result<ExitStatus, LauncherError> {
     #[cfg(unix)]
     {
-        let signals = (
-            signal(SignalKind::interrupt()),
-            signal(SignalKind::terminate()),
-            signal(SignalKind::window_change()),
-        );
-        let (mut interrupt, mut terminate, mut window_change) = match signals {
-            (Ok(interrupt), Ok(terminate), Ok(window_change)) => {
-                (interrupt, terminate, window_change)
-            }
-            (interrupt, terminate, window_change) => {
-                let error = interrupt
-                    .err()
-                    .or_else(|| terminate.err())
-                    .or_else(|| window_change.err())
-                    .unwrap_or_else(|| io::Error::other("unknown signal setup error"));
-                eprintln!(
-                    "CodeGotchi warning: signal forwarding setup failed ({error}); relying on inherited terminal delivery"
-                );
-                return wait_without_signal_forwarding(child).await;
-            }
-        };
         let pid = child.id();
+        let shared_foreground_group = shared_foreground_terminal_group(pid);
         let wait = tokio::task::spawn_blocking(move || {
             let mut child = child;
             child.wait()
@@ -696,9 +851,13 @@ async fn wait_for_child(child: Child) -> Result<ExitStatus, LauncherError> {
         loop {
             tokio::select! {
                 result = &mut wait => return join_child_wait(result),
-                _ = interrupt.recv() => forward_signal(pid, "INT"),
-                _ = terminate.recv() => forward_signal(pid, "TERM"),
-                _ = window_change.recv() => forward_signal(pid, "WINCH"),
+                received = signals.next() => match received {
+                    Some(received) if !shared_foreground_group || !received.is_terminal_group_signal() => {
+                        forward_signal(pid, received.name());
+                    }
+                    Some(_) => {}
+                    None => return join_child_wait(wait.await),
+                },
             }
         }
     }
@@ -708,6 +867,35 @@ async fn wait_for_child(child: Child) -> Result<ExitStatus, LauncherError> {
     }
 }
 
+#[cfg(unix)]
+fn shared_foreground_terminal_group(child_pid: u32) -> bool {
+    let Some((launcher_group, launcher_foreground)) = process_group_info(std::process::id()) else {
+        return false;
+    };
+    let Some((child_group, _)) = process_group_info(child_pid) else {
+        return false;
+    };
+    launcher_group > 0 && launcher_group == launcher_foreground && child_group == launcher_group
+}
+
+#[cfg(unix)]
+fn process_group_info(pid: u32) -> Option<(i32, i32)> {
+    let output = Command::new("ps")
+        .args(["-o", "pgid=,tpgid=", "-p", &pid.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut fields = stdout.split_whitespace();
+    Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
+}
+
+#[cfg(not(unix))]
 async fn wait_without_signal_forwarding(child: Child) -> Result<ExitStatus, LauncherError> {
     let result = tokio::task::spawn_blocking(move || {
         let mut child = child;
@@ -718,6 +906,7 @@ async fn wait_without_signal_forwarding(child: Child) -> Result<ExitStatus, Laun
     result.map_err(|error| LauncherError::message(format!("could not wait for Codex: {error}")))
 }
 
+#[cfg(unix)]
 fn join_child_wait(
     result: Result<Result<ExitStatus, io::Error>, tokio::task::JoinError>,
 ) -> Result<ExitStatus, LauncherError> {

@@ -19,7 +19,8 @@ and attempts to open it with the native browser helper. The token is present
 only in the URL fragment; the UI removes it from the visible address bar and
 uses same-origin authenticated HTTP/WebSocket requests. Set
 `CODEGOTCHI_BROWSER=none` to suppress browser spawning in tests or headless
-sessions.
+sessions. If the helper cannot start or exits unsuccessfully, CodeGotchi warns
+and leaves the printed URL usable without stopping Codex.
 
 On the first run, Codex may pause for its normal `/hooks` trust review. Review
 and accept the generated CodeGotchi hook profile in Codex; CodeGotchi does not
