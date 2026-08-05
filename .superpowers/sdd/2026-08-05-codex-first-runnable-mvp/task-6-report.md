@@ -35,17 +35,20 @@ test result: ok. 2 passed; 0 failed
 
 The restart flow uses the compiled `CARGO_BIN_EXE_codegotchi`, the repository
 fake Codex, an isolated HOME/CODEX_HOME/XDG state/runtime home, real hook
-subprocess fixtures, authenticated HTTP, and `tokio-tungstenite`. It checks
+subprocess fixtures, including prompt, source/patch, command, and complete
+tool-output cases, authenticated HTTP, and `tokio-tungstenite`. It checks
 the printed URL/runtime metadata match, a complete initial WebSocket snapshot,
 a later authoritative event snapshot, feed/invalid feed, guarded debug poop,
-normal clean, duplicate event/care no-op behavior, privacy-limited serialized
-state, runtime/profile cleanup, and a concrete restart projection of identity,
-needs, inventory, poop, enforcement mode, work/digestion points, and replay
-sets.
+normal clean, complete-snapshot duplicate event/care no-op behavior, and
+HTTP/SQLite privacy checks after those sensitive fixtures pass through the
+launched hook process. It also checks runtime/profile cleanup and a concrete
+restart projection of identity, needs, inventory, poop, enforcement mode,
+work/digestion points, and replay sets.
 
 The Strict flow checks the exact installed denial JSON and both care/retry
-guidance clauses, normal authenticated feed recovery with a fresh tool-use
-ID, and `{}` fail-open after the launcher/server has stopped.
+guidance clauses, a retry ID that is distinct and independently absent-before/
+present-after recorded, normal authenticated feed recovery, and `{}` fail-open
+after the launcher/server has stopped.
 
 ## Production browser harness
 

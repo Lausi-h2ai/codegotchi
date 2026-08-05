@@ -438,6 +438,18 @@ fn complete_snapshot(snapshot: &Value) {
     }
 }
 
+fn snapshot_from_mutation_response(response: &Value) -> Value {
+    let mut snapshot = response.clone();
+    let duplicate = snapshot
+        .as_object_mut()
+        .expect("mutation response is an object")
+        .remove("duplicate")
+        .expect("mutation response has duplicate flag");
+    assert!(duplicate.is_boolean(), "duplicate flag is boolean");
+    complete_snapshot(&snapshot);
+    snapshot
+}
+
 fn persisted_projection(snapshot: &Value) -> Value {
     json!({
         "petId": snapshot["petId"],
@@ -469,6 +481,27 @@ fn read_persisted_snapshot(database: &Path) -> String {
             |row| row.get(0),
         )
         .expect("persisted snapshot exists")
+}
+
+fn assert_privacy_safe(serialized: &str, location: &str) {
+    for (label, forbidden) in [
+        ("prompt", "never-persist-this-prompt"),
+        ("source", "secret-source-content"),
+        ("command", "cargo test -p secret-project"),
+        ("complete output", "sensitive-tool-output"),
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "{location} contains forbidden {label}"
+        );
+    }
+}
+
+fn assert_snapshot_privacy(state: &Value, database: &Path) {
+    let serialized_state = serde_json::to_string(state).expect("state serializes");
+    assert_privacy_safe(&serialized_state, "HTTP state");
+    let persisted_state = read_persisted_snapshot(database);
+    assert_privacy_safe(&persisted_state, "SQLite state");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -518,6 +551,47 @@ async fn launcher_vertical_flow_persists_and_replays_across_restart() {
         "processedEventIds",
         &session_event_id
     ));
+
+    for fixture_name in [
+        "user_prompt_submit.json",
+        "bash_pre.json",
+        "apply_patch_pre.json",
+        "bash_post_success.json",
+        "bash_post_failure.json",
+        "apply_patch_post.json",
+    ] {
+        let payload = fixture(fixture_name);
+        let event = translate_hook_json(&payload, &first.metadata)
+            .expect("sensitive installed fixture translates");
+        let output = invoke_hook(&first.metadata_path, &payload);
+        assert!(
+            output.status.success(),
+            "installed fixture hook process failed: {fixture_name}"
+        );
+        assert_eq!(
+            output.stdout, b"{}\n",
+            "installed fixture was not allowed: {fixture_name}"
+        );
+        let snapshot = websocket_snapshot(&mut socket).await;
+        complete_snapshot(&snapshot);
+        assert!(contains_id(
+            &snapshot,
+            "processedEventIds",
+            &event.id.to_string()
+        ));
+    }
+
+    let sensitive_state = request(
+        &first.metadata.loopback_base_url,
+        "GET",
+        "/api/v1/state",
+        &first.metadata.bearer_token,
+        b"",
+    )
+    .await;
+    assert_eq!(sensitive_state.status, 200);
+    complete_snapshot(&sensitive_state.body);
+    assert_snapshot_privacy(&sensitive_state.body, &environment.state_database());
 
     let after_event = request(
         &first.metadata.loopback_base_url,
@@ -581,6 +655,7 @@ async fn launcher_vertical_flow_persists_and_replays_across_restart() {
     .await;
     assert_eq!(fed.status, 200);
     assert_eq!(fed.body["duplicate"], false);
+    let fed_snapshot = snapshot_from_mutation_response(&fed.body);
     let fed_duplicate = request(
         &first.metadata.loopback_base_url,
         "POST",
@@ -591,7 +666,10 @@ async fn launcher_vertical_flow_persists_and_replays_across_restart() {
     .await;
     assert_eq!(fed_duplicate.status, 200);
     assert_eq!(fed_duplicate.body["duplicate"], true);
-    assert_eq!(fed_duplicate.body["inventory"], fed.body["inventory"]);
+    assert_eq!(
+        snapshot_from_mutation_response(&fed_duplicate.body),
+        fed_snapshot
+    );
 
     let debug_without_guard = invoke_cli(&first.metadata_path, &["debug", "generate-poop"], false);
     assert!(!debug_without_guard.status.success());
@@ -630,6 +708,7 @@ async fn launcher_vertical_flow_persists_and_replays_across_restart() {
     .await;
     assert_eq!(cleaned.status, 200);
     assert_eq!(cleaned.body["duplicate"], false);
+    let cleaned_snapshot = snapshot_from_mutation_response(&cleaned.body);
     let cleaned_duplicate = request(
         &first.metadata.loopback_base_url,
         "POST",
@@ -640,11 +719,9 @@ async fn launcher_vertical_flow_persists_and_replays_across_restart() {
     .await;
     assert_eq!(cleaned_duplicate.status, 200);
     assert_eq!(cleaned_duplicate.body["duplicate"], true);
-    assert!(
-        cleaned_duplicate.body["pendingPoops"]
-            .as_array()
-            .expect("pending poop state is an array")
-            .is_empty()
+    assert_eq!(
+        snapshot_from_mutation_response(&cleaned_duplicate.body),
+        cleaned_snapshot
     );
 
     let final_state = request(
@@ -679,28 +756,7 @@ async fn launcher_vertical_flow_persists_and_replays_across_restart() {
         "00000000-0000-0000-0000-000000000012"
     ));
 
-    let serialized_state = serde_json::to_string(&final_state.body).expect("state serializes");
-    for forbidden in [
-        "never-persist-this-prompt",
-        "secret-source-content",
-        "cargo test -p secret-project",
-    ] {
-        assert!(
-            !serialized_state.contains(forbidden),
-            "state contains {forbidden}"
-        );
-    }
-    let persisted_state = read_persisted_snapshot(&environment.state_database());
-    for forbidden in [
-        "never-persist-this-prompt",
-        "secret-source-content",
-        "cargo test -p secret-project",
-    ] {
-        assert!(
-            !persisted_state.contains(forbidden),
-            "SQLite state contains {forbidden}"
-        );
-    }
+    assert_snapshot_privacy(&final_state.body, &environment.state_database());
     let expected_projection = persisted_projection(&final_state.body);
     socket.close(None).await.expect("WebSocket closes");
     let first_profile_path = first.profile_path.clone();
@@ -809,6 +865,29 @@ async fn strict_flow_denies_cares_retries_and_fails_open_when_server_stops() {
         .into_bytes();
     let retry_event = translate_hook_json(&retry_payload, &launcher.metadata)
         .expect("fresh tool-use fixture translates");
+    assert_ne!(retry_event.id, denial_event.id);
+    let denial_id = denial_event.id.to_string();
+    let retry_id = retry_event.id.to_string();
+    let before_retry = request(
+        &launcher.metadata.loopback_base_url,
+        "GET",
+        "/api/v1/state",
+        &launcher.metadata.bearer_token,
+        b"",
+    )
+    .await;
+    assert_eq!(before_retry.status, 200);
+    complete_snapshot(&before_retry.body);
+    assert!(contains_id(
+        &before_retry.body,
+        "processedEventIds",
+        &denial_id
+    ));
+    assert!(!contains_id(
+        &before_retry.body,
+        "processedEventIds",
+        &retry_id
+    ));
     let retry = invoke_hook(&launcher.metadata_path, &retry_payload);
     assert!(retry.status.success());
     assert_eq!(retry.stdout, b"{}\n");
@@ -823,13 +902,13 @@ async fn strict_flow_denies_cares_retries_and_fails_open_when_server_stops() {
     assert!(contains_id(
         &recovered.body,
         "processedEventIds",
-        &denial_event.id.to_string()
+        &denial_id
     ));
-    assert!(contains_id(
-        &recovered.body,
-        "processedEventIds",
-        &retry_event.id.to_string()
-    ));
+    assert!(contains_id(&recovered.body, "processedEventIds", &retry_id));
+    assert_ne!(
+        recovered.body["processedEventIds"],
+        before_retry.body["processedEventIds"]
+    );
 
     let stopped_metadata = launcher.metadata.clone();
     let stopped_metadata_path = environment.root.join("stopped-runtime.json");

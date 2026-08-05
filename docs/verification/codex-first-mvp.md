@@ -104,25 +104,29 @@ repository fake Codex and `CODEGOTCHI_BROWSER=none`. It discovers and checks
 the printed fragment URL against mode-0600 runtime metadata, then:
 
 - consumes a complete authenticated WebSocket snapshot and a later
-  authoritative snapshot after a real `SessionStart` hook subprocess;
+  authoritative snapshot after a real `SessionStart` hook subprocess, then
+  sends installed prompt, source/patch, command, and complete-output fixtures
+  through the launched hook process;
 - invokes the same installed-schema hook fixture twice and confirms the
   duplicate event is a no-op, including an authenticated duplicate event
   response;
 - performs authenticated feed, rejects invalid food, proves duplicate care is
-  a no-op, runs the guarded CLI poop demo, and cleans the resulting poop with
-  the normal care endpoint;
+  a complete authoritative snapshot no-op for both feed and clean, runs the
+  guarded CLI poop demo, and cleans the resulting poop with the normal care
+  endpoint;
 - checks concrete persisted pet identity, needs, inventory, poop sequence and
   pending-poop state, enforcement mode, work/digestion points, and event/care
   replay sets after relaunch in the same repository/state home;
 - checks owned session/profile files are removed while SQLite remains; and
-- checks the SQLite and HTTP-serialized state contains none of the fixture's
-  prompt, source content, or complete command strings.
+- checks HTTP and SQLite serialized state immediately after those launched
+  sensitive fixtures contain none of their prompt, source content, complete
+  command, or complete output values.
 
 The Strict process flow enables Strict, applies fixed debug neglect, verifies
-the exact installed denial JSON and care/retry guidance, feeds through the
-normal authenticated care route, retries with a fresh tool-use ID, and proves
-that a valid metadata file pointing at the stopped server returns `{}`
-fail-open.
+the exact installed denial JSON and care/retry guidance, proves the retry ID is
+distinct and absent before/present after independent recording, feeds through
+the normal authenticated care route, and proves that a valid metadata file
+pointing at the stopped server returns `{}` fail-open.
 
 Existing workspace tests additionally cover all Task 1–5 hook, domain,
 persistence, HTTP, WebSocket, UI, launcher, cleanup, and embedded-asset
