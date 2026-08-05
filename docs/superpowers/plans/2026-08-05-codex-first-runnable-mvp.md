@@ -243,13 +243,13 @@
 - Consumes: the complete Tasks 1-5 public behavior.
 - Produces: one automated restart flow and the evidence template used for the supervisor's personal real-Codex/browser acceptance.
 
-- [ ] Write a full process-level test using the installed-style binary and fake Codex: start runtime, ingest hook activity, connect WebSocket, feed, generate/clean poop, stop, restart, and assert the persisted cared-for state plus replay idempotency.
-- [ ] Add a strict process-level test for neglect, safe denial, authenticated UI-equivalent care, retry allow, and fail-open after server shutdown.
-- [ ] Run the vertical tests red against the integrated Tasks 1-5 result; fix only demonstrated cross-task defects and run them green.
-- [ ] Add Playwright production-bundle coverage to root scripts and CI while keeping fixture mutation guarded from normal production use.
-- [ ] Update architecture and README to match the final executable, data flow, persistence, privacy, install, launch, trust, Strict, demo, and limitation behavior.
-- [ ] Create the verification report with environment and command fields populated from current evidence; leave no success claim unverified.
-- [ ] Run all focused and repository-wide automated gates and commit the task. Write the report at the plan workspace's `task-6-report.md`.
+- [x] Write a full process-level test using the installed-style binary and fake Codex: start runtime, ingest hook activity, connect WebSocket, feed, generate/clean poop, stop, restart, and assert the persisted cared-for state plus replay idempotency.
+- [x] Add a strict process-level test for neglect, safe denial, authenticated UI-equivalent care, retry allow, and fail-open after server shutdown.
+- [x] Run the vertical tests red against the integrated Tasks 1-5 result; fix only demonstrated cross-task defects and run them green.
+- [x] Add Playwright production-bundle coverage to root scripts and CI while keeping fixture mutation guarded from normal production use.
+- [x] Update architecture and README to match the final executable, data flow, persistence, privacy, install, launch, trust, Strict, demo, and limitation behavior.
+- [x] Create the verification report with environment and command fields populated from current evidence; leave no success claim unverified.
+- [x] Run all focused and repository-wide automated gates and commit the task. Write the report at the plan workspace's `task-6-report.md`.
 
 ## Manual verification sequence
 

@@ -69,6 +69,13 @@ Task 5: complete; supervisor accepted after two bounded correction rounds and pe
 - Supervisor adjudication and implementation: standard POSIX child process-group/foreground terminal handoff using safe nix APIs, exact signal-mask restoration, direct and terminal-group one-delivery fixtures, and PTY ownership restoration mutation proof; commit b8bb665
 - Final focused evidence: process wrapper 16 PASS; cargo fmt PASS; strict workspace clippy PASS
 - Deferred findings: PID reuse hardening and best-effort cleanup after hard-kill; recorded in docs/backlog/codex-first-mvp-followups.md
-Task 6: pending
+Task 6: complete; accepted after one focused correction
+- Implementer: Codex CLI session 019fd285-b098-7a41-a21e-f3f2b34924a4, model gpt-5.6-luna, reasoning max
+- Base: 7426e11; brief commit: d317ffe; implementation commit: e4ed4e1
+- Initial evidence: compiled-launcher restart and Strict flows 2 PASS; Rust workspace 110 PASS with 1 manual installed-Codex test ignored; frontend 29 PASS; lint/format/build PASS; production embedded Playwright 7/7 PASS with the WSL extracted library path
+- Review: CORRECTION REQUIRED — 3 MVP-blocking test-validity gaps, 0 new Backlog; reviewer session 019fd29e-9de1-7c93-bf9b-18ff1c9998d9, model gpt-5.6-luna, reasoning max; review commit 48fb968
+- Correction: original implementer resumed; fresh Strict retry identity, complete duplicate-care no-op equality, and non-vacuous process-level HTTP/SQLite privacy evidence fixed; commit 0006f59
+- Focused re-review: ACCEPTED; all three original findings resolved; full vertical flow 2 PASS
+- Deferred findings: stronger changed-state reconnect proof and graceful Playwright fixture sidecar cleanup were already recorded in docs/backlog/codex-first-mvp-followups.md
 Final review: pending
 Real acceptance: pending
