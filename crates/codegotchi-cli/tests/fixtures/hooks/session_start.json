@@ -1,0 +1,8 @@
+{
+  "session_id": "00000000-0000-0000-0000-000000000001",
+  "hook_event_name": "SessionStart",
+  "source": "startup",
+  "cwd": "/workspace/codegatchi",
+  "model": "gpt-5.6",
+  "base_instructions": null
+}

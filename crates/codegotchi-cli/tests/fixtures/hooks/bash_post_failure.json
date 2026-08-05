@@ -1,0 +1,16 @@
+{
+  "session_id": "00000000-0000-0000-0000-000000000001",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cargo test -p secret-project",
+    "workdir": "/workspace/codegatchi"
+  },
+  "tool_output": {
+    "exit_code": 1,
+    "duration_ms": 41,
+    "stderr": "sensitive-tool-output"
+  },
+  "cwd": "/workspace/codegatchi",
+  "tool_call_id": "call-post-bash-failure"
+}

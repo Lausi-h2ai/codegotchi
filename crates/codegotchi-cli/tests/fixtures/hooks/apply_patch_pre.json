@@ -1,0 +1,11 @@
+{
+  "session_id": "00000000-0000-0000-0000-000000000001",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "apply_patch",
+  "tool_input": {
+    "command": "*** Begin Patch\nsecret-source-content\n*** End Patch",
+    "workdir": "/workspace/codegatchi"
+  },
+  "cwd": "/workspace/codegatchi",
+  "tool_call_id": "call-pre-patch"
+}

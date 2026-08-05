@@ -1,0 +1,8 @@
+{
+  "session_id": "00000000-0000-0000-0000-000000000001",
+  "hook_event_name": "SessionStart",
+  "source": "startup",
+  "future_field": {"anything": "ignored"},
+  "future_number": 123,
+  "future_boolean": true
+}

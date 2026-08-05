@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/codegotchi-domain"]
+members = ["crates/codegotchi-domain", "crates/codegotchi-cli"]
 resolver = "2"
 
 [workspace.package]

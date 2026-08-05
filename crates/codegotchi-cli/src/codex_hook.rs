@@ -1,0 +1,333 @@
+use std::io::{self, Read, Write};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::time::Duration;
+
+use chrono::Utc;
+use codegotchi_domain::{ActivityKind, AgentEvent, AgentEventKind, EventMetadata, EventSource};
+use thiserror::Error;
+use uuid::Uuid;
+
+use crate::classify::{
+    activity_for_command, classify_command, command_category_name, executable_name,
+};
+use crate::protocol::{
+    EventIngestRequest, EventIngestResponse, HookInput, HookOutput, RuntimeMetadataV1,
+};
+use crate::runtime_metadata::read_metadata;
+
+pub const CODEGOTCHI_SESSION_FILE: &str = "CODEGOTCHI_SESSION_FILE";
+pub const EVENT_INGEST_PATH: &str = "/api/events";
+pub const MAX_HOOK_INPUT_BYTES: usize = 1024 * 1024;
+const HOOK_IO_TIMEOUT: Duration = Duration::from_millis(250);
+const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+
+#[derive(Debug, Error)]
+enum HookTransportError {
+    #[error("invalid loopback URL")]
+    InvalidUrl,
+    #[error("loopback URL is not local")]
+    NonLoopback,
+    #[error("HTTP transport failed: {0}")]
+    Io(#[source] io::Error),
+    #[error("HTTP response was not successful")]
+    Status,
+    #[error("HTTP response was invalid")]
+    Response,
+}
+
+/// Translates one accepted Codex event into the domain event boundary.
+pub fn translate_hook(input: &HookInput, metadata: &RuntimeMetadataV1) -> Option<AgentEvent> {
+    let event_name = input.hook_event_name.as_str();
+    let session_id = input.parsed_session_id().unwrap_or(metadata.runtime_id);
+    let (kind, activity, event_metadata) = match event_name {
+        "SessionStart" => (
+            AgentEventKind::SessionStarted,
+            Some(ActivityKind::Idle),
+            EventMetadata::default(),
+        ),
+        "SessionEnd" => (
+            AgentEventKind::SessionEnded,
+            Some(ActivityKind::Idle),
+            EventMetadata::default(),
+        ),
+        "UserPromptSubmit" => (
+            AgentEventKind::TurnStarted,
+            Some(ActivityKind::Thinking),
+            EventMetadata::default(),
+        ),
+        "Stop" => (
+            AgentEventKind::TurnCompleted,
+            Some(ActivityKind::Waiting),
+            EventMetadata::default(),
+        ),
+        "PreToolUse" | "PostToolUse" => {
+            let tool_name = input.tool_name.as_deref().unwrap_or_default();
+            let command = input.command().unwrap_or_default();
+            let exit_status = input.exit_status();
+            let known_tool = tool_name.eq_ignore_ascii_case("bash")
+                || tool_name.eq_ignore_ascii_case("apply_patch");
+            let classification = classify_command(tool_name, command);
+            let activity = if known_tool {
+                activity_for_command(tool_name, command, exit_status)
+            } else {
+                ActivityKind::UnknownWork
+            };
+            let event_metadata = EventMetadata::new(
+                executable_name(tool_name, command),
+                Some(command_category_name(classification.category()).to_owned()),
+                exit_status,
+                input.duration_ms(),
+                false,
+            );
+            (
+                if event_name == "PreToolUse" {
+                    AgentEventKind::ToolStarted
+                } else {
+                    AgentEventKind::ToolCompleted
+                },
+                Some(activity),
+                event_metadata,
+            )
+        }
+        _ => return None,
+    };
+
+    let id = deterministic_event_id(
+        metadata,
+        session_id,
+        event_name,
+        kind,
+        activity,
+        &event_metadata,
+    );
+    Some(AgentEvent::new(
+        id,
+        session_id,
+        metadata.repository_root.to_string_lossy(),
+        EventSource::Codex,
+        kind,
+        activity,
+        Utc::now(),
+        event_metadata,
+    ))
+}
+
+pub fn translate_hook_json(payload: &[u8], metadata: &RuntimeMetadataV1) -> Option<AgentEvent> {
+    HookInput::from_json(payload)
+        .ok()
+        .and_then(|input| translate_hook(&input, metadata))
+}
+
+pub fn hook_output_for_payload(payload: &[u8], metadata: &RuntimeMetadataV1) -> HookOutput {
+    if payload.len() > MAX_HOOK_INPUT_BYTES {
+        return HookOutput::allow();
+    }
+    translate_hook_json(payload, metadata)
+        .map(|_| HookOutput::allow())
+        .unwrap_or_else(HookOutput::allow)
+}
+
+pub fn run_hook_from_environment() -> HookOutput {
+    let payload = match read_bounded_stdin() {
+        Ok(payload) => payload,
+        Err(_) => return HookOutput::allow(),
+    };
+    if payload.len() > MAX_HOOK_INPUT_BYTES {
+        return HookOutput::allow();
+    }
+
+    let metadata_path = match std::env::var_os(CODEGOTCHI_SESSION_FILE) {
+        Some(path) => path,
+        None => return HookOutput::allow(),
+    };
+    let metadata = match read_metadata(std::path::Path::new(&metadata_path)) {
+        Ok(metadata) => metadata,
+        Err(_) => return HookOutput::allow(),
+    };
+    let input = match HookInput::from_json(&payload) {
+        Ok(input) => input,
+        Err(_) => return HookOutput::allow(),
+    };
+    let event = match translate_hook(&input, &metadata) {
+        Some(event) => event,
+        None => return HookOutput::allow(),
+    };
+    let request = EventIngestRequest::new(event);
+    let response = match post_event(&metadata, &request) {
+        Ok(response) => response,
+        Err(_) => return HookOutput::allow(),
+    };
+
+    if input.hook_event_name == "PreToolUse" && response.is_strict_denial() {
+        return HookOutput::deny(
+            response
+                .denial_reason()
+                .unwrap_or("Safe development work is blocked until care is restored."),
+        );
+    }
+    HookOutput::allow()
+}
+
+fn read_bounded_stdin() -> Result<Vec<u8>, io::Error> {
+    let mut input = io::stdin().lock();
+    let mut payload = Vec::with_capacity(MAX_HOOK_INPUT_BYTES.min(4096));
+    input
+        .by_ref()
+        .take((MAX_HOOK_INPUT_BYTES as u64).saturating_add(1))
+        .read_to_end(&mut payload)?;
+    Ok(payload)
+}
+
+fn deterministic_event_id(
+    metadata: &RuntimeMetadataV1,
+    session_id: Uuid,
+    event_name: &str,
+    kind: AgentEventKind,
+    activity: Option<ActivityKind>,
+    event_metadata: &EventMetadata,
+) -> Uuid {
+    let canonical = format!(
+        "codegotchi-hook-v1|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        metadata.runtime_id,
+        session_id,
+        event_name,
+        kind_name(kind),
+        activity_name(activity),
+        event_metadata
+            .executable_name
+            .as_deref()
+            .unwrap_or_default(),
+        event_metadata
+            .command_category
+            .as_deref()
+            .unwrap_or_default(),
+        event_metadata
+            .exit_status
+            .map_or_else(String::new, |value| value.to_string()),
+        event_metadata
+            .duration_ms
+            .map_or_else(String::new, |value| value.to_string()),
+        event_metadata.blocked,
+        metadata.repository_root.to_string_lossy(),
+        metadata.loopback_base_url,
+    );
+    Uuid::new_v5(&Uuid::NAMESPACE_URL, canonical.as_bytes())
+}
+
+fn kind_name(kind: AgentEventKind) -> &'static str {
+    match kind {
+        AgentEventKind::SessionStarted => "session_started",
+        AgentEventKind::SessionEnded => "session_ended",
+        AgentEventKind::TurnStarted => "turn_started",
+        AgentEventKind::TurnCompleted => "turn_completed",
+        AgentEventKind::WaitingForUser => "waiting_for_user",
+        AgentEventKind::OutputActivity => "output_activity",
+        AgentEventKind::ToolStarted => "tool_started",
+        AgentEventKind::ToolCompleted => "tool_completed",
+        AgentEventKind::CommandStarted => "command_started",
+        AgentEventKind::CommandCompleted => "command_completed",
+        AgentEventKind::Interrupted => "interrupted",
+        AgentEventKind::IntegrationError => "integration_error",
+    }
+}
+
+fn activity_name(activity: Option<ActivityKind>) -> &'static str {
+    match activity {
+        None => "none",
+        Some(ActivityKind::Idle) => "idle",
+        Some(ActivityKind::Thinking) => "thinking",
+        Some(ActivityKind::Reading) => "reading",
+        Some(ActivityKind::Searching) => "searching",
+        Some(ActivityKind::Editing) => "editing",
+        Some(ActivityKind::Testing) => "testing",
+        Some(ActivityKind::Building) => "building",
+        Some(ActivityKind::Installing) => "installing",
+        Some(ActivityKind::GitOperation) => "git_operation",
+        Some(ActivityKind::DockerOperation) => "docker_operation",
+        Some(ActivityKind::WebResearch) => "web_research",
+        Some(ActivityKind::Waiting) => "waiting",
+        Some(ActivityKind::Celebrating) => "celebrating",
+        Some(ActivityKind::Error) => "error",
+        Some(ActivityKind::Blocked) => "blocked",
+        Some(ActivityKind::UnknownWork) => "unknown_work",
+    }
+}
+
+fn post_event(
+    metadata: &RuntimeMetadataV1,
+    request: &EventIngestRequest,
+) -> Result<EventIngestResponse, HookTransportError> {
+    let endpoint = parse_loopback_endpoint(&metadata.loopback_base_url)?;
+    let body = serde_json::to_vec(request).map_err(|_| HookTransportError::Response)?;
+    let mut stream =
+        TcpStream::connect_timeout(&endpoint, HOOK_IO_TIMEOUT).map_err(HookTransportError::Io)?;
+    stream
+        .set_read_timeout(Some(HOOK_IO_TIMEOUT))
+        .map_err(HookTransportError::Io)?;
+    stream
+        .set_write_timeout(Some(HOOK_IO_TIMEOUT))
+        .map_err(HookTransportError::Io)?;
+    let request_head = format!(
+        "POST {EVENT_INGEST_PATH} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        endpoint,
+        metadata.bearer_token,
+        body.len()
+    );
+    stream
+        .write_all(request_head.as_bytes())
+        .and_then(|()| stream.write_all(&body))
+        .map_err(HookTransportError::Io)?;
+    let mut response = Vec::new();
+    stream
+        .take((MAX_RESPONSE_BYTES + 1) as u64)
+        .read_to_end(&mut response)
+        .map_err(HookTransportError::Io)?;
+    if response.len() > MAX_RESPONSE_BYTES {
+        return Err(HookTransportError::Response);
+    }
+    parse_http_response(&response)
+}
+
+fn parse_loopback_endpoint(base_url: &str) -> Result<SocketAddr, HookTransportError> {
+    let authority = base_url
+        .strip_prefix("http://")
+        .ok_or(HookTransportError::InvalidUrl)?
+        .split('/')
+        .next()
+        .ok_or(HookTransportError::InvalidUrl)?;
+    let (host, port) = authority
+        .rsplit_once(':')
+        .ok_or(HookTransportError::InvalidUrl)?;
+    if !matches!(host, "127.0.0.1" | "localhost") {
+        return Err(HookTransportError::NonLoopback);
+    }
+    let port = port
+        .parse::<u16>()
+        .map_err(|_| HookTransportError::InvalidUrl)?;
+    let mut addresses = (host, port)
+        .to_socket_addrs()
+        .map_err(HookTransportError::Io)?;
+    addresses
+        .find(|address| address.ip().is_loopback())
+        .ok_or(HookTransportError::NonLoopback)
+}
+
+fn parse_http_response(response: &[u8]) -> Result<EventIngestResponse, HookTransportError> {
+    let header_end = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or(HookTransportError::Response)?;
+    let headers =
+        std::str::from_utf8(&response[..header_end]).map_err(|_| HookTransportError::Response)?;
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|status| status.parse::<u16>().ok())
+        .ok_or(HookTransportError::Response)?;
+    if !(200..300).contains(&status) {
+        return Err(HookTransportError::Status);
+    }
+    let body = &response[header_end + 4..];
+    serde_json::from_slice(body).map_err(|_| HookTransportError::Response)
+}
