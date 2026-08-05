@@ -100,15 +100,15 @@
 - `RuntimeMetadataV1` fields are `schema_version`, runtime UUID, repository root, loopback base URL, bearer token, and owning PID; JSON uses camelCase.
 - `HookOutput::allow()` serializes as `{}`; denial serializes only the documented `hookSpecificOutput` shape.
 
-- [ ] Write sanitized exact-schema fixtures for SessionStart, SessionEnd, UserPromptSubmit, Bash pre/post success/post failure, apply_patch pre/post, Stop, unknown tool, future fields, and malformed JSON.
-- [ ] Write fixture tests proving deterministic event IDs, exact activity/kind mapping, command categories, prompt/source/output discard, unknown-tool generic work, malformed-input fail-open output, and Strict denial serialization.
-- [ ] Run `cargo test -p codegotchi-cli --test hook_fixtures` and record the expected missing-module/API failures.
-- [ ] Implement the bounded stdin reader, tolerant Codex-only deserialization, privacy-limited translator, low-timeout loopback POST, and stdout discipline. No backend server is implemented in this task.
-- [ ] Write profile lifecycle tests proving unique-name conflict refusal, base config preservation by checksum, mode-0600 creation, additive inline hooks for all six event families, inherited `CODEGOTCHI_SESSION_FILE`, and exact-file cleanup.
-- [ ] Run the profile tests red, implement the smallest profile/runtime metadata seams, and run them green.
-- [ ] Use a temporary profile, a loopback capture receiver, and the installed Codex CLI to prove SessionStart, prompt, Bash, apply_patch, Stop, and SessionEnd input plus one safe PreTool denial. Do not continue to Task 2 until this succeeds; do not bypass hook trust.
-- [ ] Record exact installed fields, trust interaction, existing-hook coexistence observation, cleanup, and the chosen production mechanism in ADR 0002.
-- [ ] Run Rust format/clippy/workspace tests and commit the task. Write the report at the plan workspace's `task-1-report.md`.
+- [x] Write sanitized exact-schema fixtures for SessionStart, SessionEnd, UserPromptSubmit, Bash pre/post success/post failure, apply_patch pre/post, Stop, unknown tool, future fields, and malformed JSON.
+- [x] Write fixture tests proving deterministic event IDs, exact activity/kind mapping, command categories, prompt/source/output discard, unknown-tool generic work, malformed-input fail-open output, and Strict denial serialization.
+- [x] Run `cargo test -p codegotchi-cli --test hook_fixtures` and record the expected missing-module/API failures.
+- [x] Implement the bounded stdin reader, tolerant Codex-only deserialization, privacy-limited translator, low-timeout loopback POST, and stdout discipline. No backend server is implemented in this task.
+- [x] Write profile lifecycle tests proving unique-name conflict refusal, base config preservation by checksum, mode-0600 creation, additive inline hooks for all six event families, inherited `CODEGOTCHI_SESSION_FILE`, and exact-file cleanup.
+- [x] Run the profile tests red, implement the smallest profile/runtime metadata seams, and run them green.
+- [x] Use a temporary profile, a loopback capture receiver, and the installed Codex CLI to prove SessionStart, prompt, Bash, apply_patch, Stop, and SessionEnd input plus one safe PreTool denial. Do not continue to Task 2 until this succeeds; do not bypass hook trust.
+- [x] Record exact installed fields, trust interaction, existing-hook coexistence observation, cleanup, and the chosen production mechanism in ADR 0002.
+- [x] Run Rust format/clippy/workspace tests and commit the task. Write the report at the plan workspace's `task-1-report.md`.
 
 ### Task 2: Versioned domain restore, SQLite authority, HTTP, and WebSocket
 
@@ -132,15 +132,15 @@
 - Every accepted mutation persists before broadcast. Duplicate event/action IDs return success without a second transition.
 - New pets start with a literal practical inventory of 50 kibble, 25 treats, and 25 fruit; restored pets never receive a second seed.
 
-- [ ] Write domain restore tests proving complete snapshot round-trip, version rejection, replay-ID survival, deterministic continuation, and unchanged Phase 2 behavior.
-- [ ] Run the restore test red, add only serde/restore seams, then run it green and run all domain tests.
-- [ ] Write real temporary-SQLite tests for initialization, reload, corrupt/unsupported snapshot errors, atomic save, enforcement persistence, and restart idempotency.
-- [ ] Run the persistence tests red, implement schema version 1 and transactional snapshot storage, then run them green.
-- [ ] Write loopback integration tests for health/state, missing/wrong bearer rejection, bounded body rejection, valid/duplicate event ingestion, valid/invalid/duplicate feeding and cleaning, typed error envelopes, and no command execution route.
-- [ ] Implement the authoritative runtime and Axum routes with `127.0.0.1:0`, then run the HTTP tests green.
-- [ ] Write and run WebSocket tests for authenticated initial full snapshot, mutation broadcast, disconnect/reconnect, and the authoritative reconnect snapshot.
-- [ ] Add a one-second maintenance tick that advances/persists/broadcasts only when the snapshot changes and shuts down with the server.
-- [ ] Run Rust format/clippy/workspace tests and commit the task. Write the report at the plan workspace's `task-2-report.md`.
+- [x] Write domain restore tests proving complete snapshot round-trip, version rejection, replay-ID survival, deterministic continuation, and unchanged Phase 2 behavior.
+- [x] Run the restore test red, add only serde/restore seams, then run it green and run all domain tests.
+- [x] Write real temporary-SQLite tests for initialization, reload, corrupt/unsupported snapshot errors, atomic save, enforcement persistence, and restart idempotency.
+- [x] Run the persistence tests red, implement schema version 1 and transactional snapshot storage, then run them green.
+- [x] Write loopback integration tests for health/state, missing/wrong bearer rejection, bounded body rejection, valid/duplicate event ingestion, valid/invalid/duplicate feeding and cleaning, typed error envelopes, and no command execution route.
+- [x] Implement the authoritative runtime and Axum routes with `127.0.0.1:0`, then run the HTTP tests green.
+- [x] Write and run WebSocket tests for authenticated initial full snapshot, mutation broadcast, disconnect/reconnect, and the authoritative reconnect snapshot.
+- [x] Add a one-second maintenance tick that advances/persists/broadcasts only when the snapshot changes and shuts down with the server.
+- [x] Run Rust format/clippy/workspace tests and commit the task. Write the report at the plan workspace's `task-2-report.md`.
 
 ### Task 3: Functional pet room, authenticated care, reconnect, and Playwright
 

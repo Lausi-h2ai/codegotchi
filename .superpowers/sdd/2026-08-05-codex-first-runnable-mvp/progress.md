@@ -28,9 +28,18 @@ Task 1: complete; supervisor approved after bounded correction loop
 - Second correction tests: focused hook/profile PASS; routine installed-Codex predicate PASS with manual paid/authenticated gate ignored; cargo fmt PASS; strict workspace clippy PASS; cargo test --workspace PASS
 - Supervisor adjudication: APPROVED; denial/non-execution and lifecycle-source blockers resolved. Identical ID-less SessionEnd occurrence distinction deferred to backlog because Codex 0.146 exposes no discriminator.
 - Deferred findings: docs/backlog/codex-first-mvp-followups.md
-Task 2: implementation in progress
-- Implementer: Codex CLI Luna/max dispatch pending session ID
+Task 2: complete; supervisor approved after two bounded correction rounds
+- Implementer: Codex CLI session 019fd151-dd8d-75d1-b660-5cae2b334267, model gpt-5.6-luna, reasoning max
 - Base: 8667af0
+- Brief commit: df45d7a
+- Implementation commit: 49ff122
+- Tests: cargo fmt PASS; strict workspace clippy PASS; cargo test --workspace PASS
+- Review: NEEDS FIXES — 4 MVP-blocking, 0 Backlog; reviewer session 019fd16c-8286-7c81-b5d2-4c0f2f7c820a, model gpt-5.6-luna, reasoning max
+- First correction: original implementer resumed with Luna/max; commit 4e09469; hook/live-server, WebSocket lag ordering, typed 405, and deterministic maintenance/runtime coverage fixed
+- Focused re-review: 3 findings resolved; scheduled `RunningServer` maintenance task remained unexercised
+- Second correction: original implementer resumed with Luna/max; shared interval/trigger maintenance runner plus production-server scheduler test
+- Supervisor adjudication: APPROVED; focused scheduler test, formatting, strict clippy, persistence/broadcast, bounded shutdown, and receiver-drop proof PASS
+- Deferred findings: none
 Task 3: pending
 Task 4: pending
 Task 5: pending

@@ -17,7 +17,7 @@ use futures_util::StreamExt;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 use tokio::net::TcpListener;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
 use crate::persistence::PersistenceError;
@@ -53,12 +53,39 @@ pub struct RunningServer {
     maintenance_task: Option<JoinHandle<()>>,
 }
 
+enum MaintenanceSchedule {
+    Interval,
+    Trigger(mpsc::UnboundedReceiver<()>),
+}
+
 impl RunningServer {
     pub async fn start(
         runtime: Arc<AuthoritativeRuntime>,
         bearer_token: impl Into<String>,
     ) -> Result<Self, ServerError> {
-        let bearer_token: Arc<str> = Arc::from(bearer_token.into());
+        Self::start_with_schedule(runtime, bearer_token.into(), MaintenanceSchedule::Interval).await
+    }
+
+    #[doc(hidden)]
+    pub async fn start_with_maintenance_trigger(
+        runtime: Arc<AuthoritativeRuntime>,
+        bearer_token: impl Into<String>,
+        ticks: mpsc::UnboundedReceiver<()>,
+    ) -> Result<Self, ServerError> {
+        Self::start_with_schedule(
+            runtime,
+            bearer_token.into(),
+            MaintenanceSchedule::Trigger(ticks),
+        )
+        .await
+    }
+
+    async fn start_with_schedule(
+        runtime: Arc<AuthoritativeRuntime>,
+        bearer_token_value: String,
+        maintenance_schedule: MaintenanceSchedule,
+    ) -> Result<Self, ServerError> {
+        let bearer_token: Arc<str> = Arc::from(bearer_token_value);
         let listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
             .await
             .map_err(ServerError::Bind)?;
@@ -78,19 +105,12 @@ impl RunningServer {
                 .await
         });
 
-        let mut maintenance_shutdown = shutdown.subscribe();
-        let maintenance_task = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(1));
-            interval.tick().await;
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        let _ = runtime.maintenance_tick();
-                    }
-                    _ = maintenance_shutdown.recv() => break,
-                }
-            }
-        });
+        let maintenance_shutdown = shutdown.subscribe();
+        let maintenance_task = tokio::spawn(run_maintenance(
+            runtime,
+            maintenance_shutdown,
+            maintenance_schedule,
+        ));
 
         Ok(Self {
             address,
@@ -124,6 +144,38 @@ impl RunningServer {
                 .map_err(ServerError::Serve)?;
         }
         Ok(())
+    }
+}
+
+async fn run_maintenance(
+    runtime: Arc<AuthoritativeRuntime>,
+    mut shutdown: broadcast::Receiver<()>,
+    schedule: MaintenanceSchedule,
+) {
+    match schedule {
+        MaintenanceSchedule::Interval => {
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            interval.tick().await;
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let _ = runtime.maintenance_tick();
+                    }
+                    _ = shutdown.recv() => break,
+                }
+            }
+        }
+        MaintenanceSchedule::Trigger(mut ticks) => loop {
+            tokio::select! {
+                tick = ticks.recv() => {
+                    if tick.is_none() {
+                        break;
+                    }
+                    let _ = runtime.maintenance_tick();
+                }
+                _ = shutdown.recv() => break,
+            }
+        },
     }
 }
 

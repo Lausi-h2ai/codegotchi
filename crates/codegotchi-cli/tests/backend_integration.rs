@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use chrono::{Duration, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use codegotchi_cli::runtime_metadata::write_metadata;
 use codegotchi_cli::{
     AuthoritativeRuntime, EventIngestRequest, RunningServer, RuntimeMetadataV1, SqliteStore,
@@ -13,7 +13,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::broadcast::error::TryRecvError;
+use tokio::sync::{broadcast::error::TryRecvError, mpsc};
 use uuid::Uuid;
 
 const TOKEN: &str = "task-2-test-token";
@@ -480,34 +480,43 @@ async fn sqlite_reload_keeps_inventory_enforcement_and_replay_ids_without_reseed
 }
 
 #[tokio::test]
-async fn maintenance_is_deterministic_persisted_before_broadcast_and_shutdown_completes() {
+async fn scheduled_maintenance_is_persisted_broadcast_and_shutdown_completes() {
     let db = TestDatabase::new();
-    let runtime = runtime(&db);
+    let initial_time = Utc.with_ymd_and_hms(2020, 1, 1, 12, 0, 0).unwrap();
+    let runtime = AuthoritativeRuntime::new(
+        SqliteStore::open(&db.path).unwrap(),
+        Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, initial_time),
+    )
+    .unwrap();
     let (initial, mut snapshots) = runtime.subscribe().unwrap();
+    let (tick_sender, tick_receiver) = mpsc::unbounded_channel();
 
-    assert_eq!(initial.last_updated_at, start());
-    assert!(!runtime.maintenance_tick_at(start()).unwrap());
+    assert_eq!(initial.last_updated_at, initial_time);
     assert!(matches!(snapshots.try_recv(), Err(TryRecvError::Empty)));
-    assert_eq!(
-        SqliteStore::open(&db.path).unwrap().load().unwrap(),
-        Some(initial.clone())
-    );
 
-    let maintenance_time = start() + Duration::hours(1);
-    assert!(runtime.maintenance_tick_at(maintenance_time).unwrap());
-    let broadcast = snapshots.try_recv().unwrap();
-    assert_eq!(broadcast.last_updated_at, maintenance_time);
+    let server = RunningServer::start_with_maintenance_trigger(runtime, TOKEN, tick_receiver)
+        .await
+        .unwrap();
+    tick_sender.send(()).unwrap();
+    let broadcast = tokio::time::timeout(std::time::Duration::from_secs(1), snapshots.recv())
+        .await
+        .expect("scheduled maintenance should broadcast within the bound")
+        .unwrap();
+    assert!(broadcast.last_updated_at > initial.last_updated_at);
     assert_eq!(
         SqliteStore::open(&db.path).unwrap().load().unwrap(),
         Some(broadcast.clone())
     );
     assert!(matches!(snapshots.try_recv(), Err(TryRecvError::Empty)));
 
-    let server = RunningServer::start(runtime, TOKEN).await.unwrap();
     let address = server.local_addr();
     tokio::time::timeout(std::time::Duration::from_secs(1), server.shutdown())
         .await
         .expect("server shutdown should complete")
         .unwrap();
+    assert!(
+        tick_sender.send(()).is_err(),
+        "shutdown must stop and drop the maintenance task"
+    );
     assert!(TcpStream::connect(address).await.is_err());
 }

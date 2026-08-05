@@ -116,10 +116,51 @@ reader now stops at HTTP framing instead of waiting for EOF.
 The lag test publishes 33 snapshots against the capacity-32 channel, verifies
 recovery returns the current authoritative snapshot, verifies no retained stale
 snapshot follows it, and verifies the next mutation is delivered on the fresh
-subscription. The maintenance test covers deterministic unchanged/changed
-ticks, persisted state observed with the broadcast snapshot, no extra
-broadcast, and bounded server shutdown completion. HTTP tests cover typed 405
-JSON for wrong methods on `/api/v1/state` and `/api/v1/events`.
+subscription. Runtime/domain coverage retains deterministic clock-driven
+maintenance behavior; the scheduler-wiring correction is recorded below. HTTP
+tests cover typed 405 JSON for wrong methods on `/api/v1/state` and
+`/api/v1/events`.
+
+## Focused correction 2 evidence: scheduled maintenance wiring
+
+This final correction started from `4e09469` and addressed only the re-review
+finding that the maintenance test called `maintenance_tick_at` directly.
+
+### RED
+
+~~~text
+cargo test --offline -p codegotchi-cli --test backend_integration scheduled_maintenance_is_persisted_broadcast_and_shutdown_completes
+exit 101: no associated function `RunningServer::start_with_maintenance_trigger`
+~~~
+
+### GREEN
+
+~~~text
+cargo test --offline -p codegotchi-cli --test backend_integration scheduled_maintenance_is_persisted_broadcast_and_shutdown_completes
+1 passed; 0 failed
+
+cargo test --offline -p codegotchi-cli --test backend_integration
+5 passed; 0 failed
+
+cargo test --offline -p codegotchi-cli --test websocket_integration
+1 passed; 0 failed
+
+cargo test --offline -p codegotchi-domain --test persistence_restore
+4 passed; 0 failed
+~~~
+
+The integration test now starts a real `RunningServer` with a narrow
+manual-trigger seam shared by the production maintenance task, confirms no
+snapshot arrives before the trigger, sends one trigger, observes the
+elapsed-time snapshot, verifies that exact snapshot is persisted in SQLite and
+broadcast once, bounds shutdown, and proves the trigger receiver is dropped.
+The normal `RunningServer::start` path
+still uses `tokio::time::interval(Duration::from_secs(1))`; no production
+interval or runtime behavior changed.
+
+Correction-2 files are `crates/codegotchi-cli/src/server.rs`,
+`crates/codegotchi-cli/tests/backend_integration.rs`, and this report. No
+commit was attempted, as required by the correction brief.
 
 ## Repository gates
 
