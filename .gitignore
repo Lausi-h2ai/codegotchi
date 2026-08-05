@@ -2,5 +2,6 @@
 /node_modules/
 /web/node_modules/
 /web/dist/
+/web/test-results/
 /.superpowers/
 .DS_Store

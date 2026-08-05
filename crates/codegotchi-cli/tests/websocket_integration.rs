@@ -109,5 +109,26 @@ async fn websocket_is_authenticated_and_reconnects_to_authoritative_snapshots() 
     assert!(ids.iter().any(|id| id == &Uuid::from_u128(200).to_string()));
     assert!(ids.iter().any(|id| id == &Uuid::from_u128(201).to_string()));
     socket.close(None).await.unwrap();
+
+    let mut browser_request = ws_url(&server).into_client_request().unwrap();
+    browser_request
+        .headers_mut()
+        .insert("sec-websocket-protocol", TOKEN.parse().unwrap());
+    let (mut browser_socket, response) = connect_async(browser_request).await.unwrap();
+    assert_eq!(
+        response.headers().get("sec-websocket-protocol").unwrap(),
+        TOKEN
+    );
+    let browser_snapshot = browser_socket
+        .next()
+        .await
+        .unwrap()
+        .unwrap()
+        .into_text()
+        .unwrap();
+    let browser_snapshot: serde_json::Value = serde_json::from_str(&browser_snapshot).unwrap();
+    assert_eq!(browser_snapshot["petId"], Uuid::from_u128(1).to_string());
+    browser_socket.close(None).await.unwrap();
+
     server.shutdown().await.unwrap();
 }

@@ -9,6 +9,7 @@
         "test": "corepack pnpm --filter @codegotchi/web test",
         "build": "corepack pnpm --filter @codegotchi/web build",
         "lint": "corepack pnpm --filter @codegotchi/web lint",
-        "format:check": "corepack pnpm --filter @codegotchi/web format:check"
+        "format:check": "corepack pnpm --filter @codegotchi/web format:check",
+        "playwright:test": "corepack pnpm --filter @codegotchi/web playwright:test"
     }
 }

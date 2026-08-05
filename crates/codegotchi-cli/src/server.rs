@@ -205,12 +205,28 @@ fn router(state: AppState) -> Router {
 }
 
 async fn require_bearer(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    let authorized = request
+    let bearer_authorized = request
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .is_some_and(|token| constant_time_equal(token.as_bytes(), state.bearer_token.as_bytes()));
+    let browser_websocket_authorized = request.uri().path() == "/api/v1/stream"
+        && request
+            .headers()
+            .get_all(header::SEC_WEBSOCKET_PROTOCOL)
+            .iter()
+            .any(|value| {
+                value.to_str().ok().is_some_and(|protocols| {
+                    protocols.split(',').any(|protocol| {
+                        constant_time_equal(
+                            protocol.trim().as_bytes(),
+                            state.bearer_token.as_bytes(),
+                        )
+                    })
+                })
+            });
+    let authorized = bearer_authorized || browser_websocket_authorized;
     if !authorized {
         return error_response(
             StatusCode::UNAUTHORIZED,
@@ -279,6 +295,7 @@ async fn stream_handler(State(state): State<AppState>, websocket: WebSocketUpgra
     };
     let runtime = Arc::clone(&state.runtime);
     websocket
+        .protocols([state.bearer_token.to_string()])
         .on_upgrade(move |socket| websocket_session(socket, subscription, runtime))
         .into_response()
 }
