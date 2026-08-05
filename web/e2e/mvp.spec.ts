@@ -56,6 +56,20 @@ test.describe.serial("CodeGotchi Task 3 browser vertical slice", () => {
         await expect(page.getByRole("alert")).toHaveCount(0);
     });
 
+    test("does not clean a poop dragged directly to trash", async ({
+        page,
+    }) => {
+        await page.goto(launchUrl);
+        const poops = page.locator("[data-poop-id]");
+        const before = await poops.count();
+
+        await poops.first().dragTo(page.getByRole("button", { name: "Trash" }));
+        await page.waitForTimeout(150);
+
+        await expect(poops).toHaveCount(before);
+        await expect(page.getByText("Cleaned up")).toHaveCount(0);
+    });
+
     test("presents a real backend care error", async ({ page }) => {
         await page.goto(launchUrl);
         const emptyFood = page.getByTestId("food-kibble");

@@ -194,6 +194,27 @@ describe("CodeGotchi pet room", () => {
         expect(feed).not.toHaveBeenCalled();
     });
 
+    it("does not clean a poop dragged directly to trash", () => {
+        const clean = vi.fn().mockResolvedValue(undefined);
+        renderApp({
+            snapshot: snapshot(),
+            connectionStatus: "connected",
+            clean,
+        });
+
+        const poop = screen.getByTestId(
+            "poop-00000000-0000-0000-0000-000000000099",
+        );
+        fireEvent.drop(screen.getByRole("button", { name: /trash/i }), {
+            dataTransfer: {
+                getData: () => `poop:${poop.dataset.poopId}`,
+            },
+        });
+
+        expect(clean).not.toHaveBeenCalled();
+        expect(poop).toBeInTheDocument();
+    });
+
     it("sends cleaning only after shovel, poop, and trash", () => {
         const clean = vi.fn().mockResolvedValue(undefined);
         renderApp({
@@ -212,6 +233,35 @@ describe("CodeGotchi pet room", () => {
         fireEvent.click(poop);
         expect(clean).not.toHaveBeenCalled();
         fireEvent.click(trash);
+
+        expect(clean).toHaveBeenCalledWith(
+            "00000000-0000-0000-0000-000000000099",
+        );
+    });
+
+    it("preserves the shovel, poop, and trash drag path", () => {
+        const clean = vi.fn().mockResolvedValue(undefined);
+        renderApp({
+            snapshot: snapshot(),
+            connectionStatus: "connected",
+            clean,
+        });
+
+        const poop = screen.getByTestId(
+            "poop-00000000-0000-0000-0000-000000000099",
+        );
+        const trash = screen.getByRole("button", { name: /trash/i });
+
+        fireEvent.drop(poop, {
+            dataTransfer: {
+                getData: () => "shovel",
+            },
+        });
+        fireEvent.drop(trash, {
+            dataTransfer: {
+                getData: () => "poop:00000000-0000-0000-0000-000000000099",
+            },
+        });
 
         expect(clean).toHaveBeenCalledWith(
             "00000000-0000-0000-0000-000000000099",

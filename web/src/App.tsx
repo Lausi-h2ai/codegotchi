@@ -76,15 +76,19 @@ function App({ launchToken }: AppProps) {
     }
 
     function handleTrashDrop(event: DragEvent<HTMLButtonElement>): void {
-        const candidatePoopId =
-            cleaningPoopId ??
-            event.dataTransfer
-                .getData("application/x-codegotchi-poop")
-                .replace("poop:", "");
+        const draggedPoopId = event.dataTransfer
+            .getData("application/x-codegotchi-poop")
+            .replace("poop:", "");
+        if (
+            !cleaningPoopId ||
+            (draggedPoopId.length > 0 && draggedPoopId !== cleaningPoopId)
+        ) {
+            return;
+        }
         const poopId = snapshot?.pendingPoops.some(
-            (poop) => poop.id === candidatePoopId,
+            (poop) => poop.id === cleaningPoopId,
         )
-            ? candidatePoopId
+            ? cleaningPoopId
             : null;
         if (!poopId) {
             return;

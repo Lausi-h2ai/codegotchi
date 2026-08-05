@@ -7,7 +7,10 @@ import {
 } from "./client";
 import type { SimulationSnapshot } from "./protocol";
 
-function snapshot(name: string): SimulationSnapshot {
+function snapshot(
+    name: string,
+    overrides: Partial<SimulationSnapshot> = {},
+): SimulationSnapshot {
     return {
         schemaVersion: 1,
         petId: "00000000-0000-0000-0000-000000000001",
@@ -30,7 +33,17 @@ function snapshot(name: string): SimulationSnapshot {
         lastOutcomeAt: null,
         consecutiveFailures: 0,
         enforcementMode: "decorative",
+        ...overrides,
     };
+}
+
+interface FakeResponse {
+    ok: boolean;
+    json: () => Promise<unknown>;
+}
+
+function responseFor(value: unknown): FakeResponse {
+    return { ok: true, json: async () => value };
 }
 
 class FakeWebSocket {
@@ -126,10 +139,39 @@ describe("CodeGotchi browser client", () => {
         );
     });
 
+    it("publishes an accepted care response through the snapshot gate", async () => {
+        const initial = snapshot("initial state");
+        const care = snapshot("fed state", {
+            lastUpdatedAt: "2026-08-05T12:00:01Z",
+            processedCareIds: ["care-action"],
+        });
+        const fetch = vi
+            .fn()
+            .mockResolvedValueOnce(responseFor(initial))
+            .mockResolvedValueOnce(responseFor({ ...care, duplicate: false }));
+        const snapshots: SimulationSnapshot[] = [];
+        const client = new CodeGotchiClient("care-secret", {
+            fetch,
+            WebSocket: FakeWebSocket,
+            baseUrl: "http://127.0.0.1:4242",
+        });
+
+        client.start({
+            onSnapshot: (value) => snapshots.push(value),
+        });
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        await client.feed("kibble", "care-action");
+
+        expect(snapshots).toEqual([initial, { ...care, duplicate: false }]);
+        client.close();
+    });
+
     it("loads a complete snapshot, reconnects with bounded retry, and replaces state", async () => {
         vi.useFakeTimers();
         const initial = snapshot("HTTP state");
-        const reconnected = snapshot("authoritative reconnect");
+        const reconnected = snapshot("authoritative reconnect", {
+            lastUpdatedAt: "2026-08-05T12:00:01Z",
+        });
         const fetch = vi.fn().mockResolvedValue({
             ok: true,
             json: async () => initial,
@@ -170,6 +212,76 @@ describe("CodeGotchi browser client", () => {
 
         expect(snapshots.at(-1)).toEqual(reconnected);
         expect(statuses.at(-1)).toBe("connected");
+        client.close();
+    });
+
+    it("does not let a delayed initial HTTP snapshot replace a newer stream snapshot", async () => {
+        let resolveInitial!: (response: FakeResponse) => void;
+        const initialRequest = new Promise<FakeResponse>((resolve) => {
+            resolveInitial = resolve;
+        });
+        const initial = snapshot("older HTTP state", {
+            lastUpdatedAt: "2026-08-05T12:00:00Z",
+        });
+        const streamed = snapshot("newer WebSocket state", {
+            lastUpdatedAt: "2026-08-05T12:00:01Z",
+            processedEventIds: ["stream-event"],
+        });
+        const fetch = vi.fn().mockReturnValue(initialRequest);
+        const snapshots: SimulationSnapshot[] = [];
+        const client = new CodeGotchiClient("stream-secret", {
+            fetch,
+            WebSocket: FakeWebSocket,
+            baseUrl: "http://127.0.0.1:4242",
+        });
+
+        client.start({
+            onSnapshot: (value) => snapshots.push(value),
+        });
+        const socket = FakeWebSocket.instances[0];
+        socket?.open();
+        socket?.message(streamed);
+
+        resolveInitial(responseFor(initial));
+        await initialRequest;
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+        expect(snapshots).toEqual([streamed]);
+        client.close();
+    });
+
+    it("rejects an equal-timestamp snapshot without newer continuation fields", async () => {
+        let resolveInitial!: (response: FakeResponse) => void;
+        const initialRequest = new Promise<FakeResponse>((resolve) => {
+            resolveInitial = resolve;
+        });
+        const timestamp = "2026-08-05T12:00:00Z";
+        const delayedInitial = snapshot("delayed HTTP state", {
+            lastUpdatedAt: timestamp,
+        });
+        const streamed = snapshot("stream state", {
+            lastUpdatedAt: timestamp,
+            processedCareIds: ["stream-care"],
+        });
+        const fetch = vi.fn().mockReturnValue(initialRequest);
+        const snapshots: SimulationSnapshot[] = [];
+        const client = new CodeGotchiClient("stream-secret", {
+            fetch,
+            WebSocket: FakeWebSocket,
+            baseUrl: "http://127.0.0.1:4242",
+        });
+
+        client.start({
+            onSnapshot: (value) => snapshots.push(value),
+        });
+        const socket = FakeWebSocket.instances[0];
+        socket?.message(streamed);
+
+        resolveInitial(responseFor(delayedInitial));
+        await initialRequest;
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+        expect(snapshots).toEqual([streamed]);
         client.close();
     });
 

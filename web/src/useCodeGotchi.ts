@@ -66,8 +66,7 @@ export function useCodeGotchi(token: string | null): CodeGotchiState {
             return;
         }
         try {
-            const response = await client.feed(foodId);
-            setSnapshot(response);
+            await client.feed(foodId);
             setError(null);
             setFeedback(`Eating ${foodId}`);
         } catch (nextError) {
@@ -81,8 +80,7 @@ export function useCodeGotchi(token: string | null): CodeGotchiState {
             return;
         }
         try {
-            const response = await client.clean(poopId);
-            setSnapshot(response);
+            await client.clean(poopId);
             setError(null);
             setFeedback("Cleaned up");
         } catch (nextError) {

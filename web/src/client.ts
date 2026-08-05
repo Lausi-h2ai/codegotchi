@@ -93,6 +93,7 @@ export class CodeGotchiClient {
     private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     private reconnectAttempt = 0;
     private stopped = true;
+    private latestSnapshot: SimulationSnapshot | null = null;
 
     public constructor(token: string, options: ClientOptions = {}) {
         this.token = token;
@@ -150,7 +151,7 @@ export class CodeGotchiClient {
                 { method: "GET" },
             );
             if (!this.stopped) {
-                this.observer.onSnapshot?.(snapshot);
+                this.publishSnapshot(snapshot);
             }
         } catch (error) {
             if (!this.stopped) {
@@ -193,7 +194,7 @@ export class CodeGotchiClient {
             try {
                 const snapshot = JSON.parse(event.data) as SimulationSnapshot;
                 this.reconnectAttempt = 0;
-                this.observer.onSnapshot?.(snapshot);
+                this.publishSnapshot(snapshot);
                 this.notifyStatus("connected");
             } catch (error) {
                 this.notifyError({
@@ -240,11 +241,16 @@ export class CodeGotchiClient {
         action: "feed" | "clean",
         body: Record<string, string>,
     ): Promise<CareResponse> {
-        return this.request<CareResponse>(`/api/v1/care/${action}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-        });
+        const response = await this.request<CareResponse>(
+            `/api/v1/care/${action}`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            },
+        );
+        this.publishSnapshot(response);
+        return response;
     }
 
     private async request<T>(path: string, init: RequestInit): Promise<T> {
@@ -276,9 +282,71 @@ export class CodeGotchiClient {
         this.observer.onStatus?.(status);
     }
 
+    private publishSnapshot(snapshot: SimulationSnapshot): boolean {
+        if (!shouldAcceptSnapshot(this.latestSnapshot, snapshot)) {
+            return false;
+        }
+        this.latestSnapshot = snapshot;
+        this.observer.onSnapshot?.(snapshot);
+        return true;
+    }
+
     private notifyError(error: ClientError): void {
         this.observer.onError?.(error);
     }
+}
+
+function shouldAcceptSnapshot(
+    current: SimulationSnapshot | null,
+    incoming: SimulationSnapshot,
+): boolean {
+    if (!current) {
+        return true;
+    }
+
+    const currentTime = Date.parse(current.lastUpdatedAt);
+    const incomingTime = Date.parse(incoming.lastUpdatedAt);
+    if (!Number.isFinite(currentTime) || !Number.isFinite(incomingTime)) {
+        return false;
+    }
+    if (incomingTime > currentTime) {
+        return true;
+    }
+    if (incomingTime < currentTime) {
+        return false;
+    }
+
+    const careIdsAdvance = continuationSetAdvances(
+        current.processedCareIds,
+        incoming.processedCareIds,
+    );
+    const eventIdsAdvance = continuationSetAdvances(
+        current.processedEventIds,
+        incoming.processedEventIds,
+    );
+    const continuationSetsContainCurrent =
+        containsAll(current.processedCareIds, incoming.processedCareIds) &&
+        containsAll(current.processedEventIds, incoming.processedEventIds);
+
+    return (
+        continuationSetsContainCurrent &&
+        incoming.poopSequence >= current.poopSequence &&
+        (careIdsAdvance ||
+            eventIdsAdvance ||
+            incoming.poopSequence > current.poopSequence)
+    );
+}
+
+function continuationSetAdvances(
+    current: string[],
+    incoming: string[],
+): boolean {
+    return incoming.length > current.length;
+}
+
+function containsAll(current: string[], incoming: string[]): boolean {
+    const incomingIds = new Set(incoming);
+    return current.every((id) => incomingIds.has(id));
 }
 
 export function createActionId(): string {
