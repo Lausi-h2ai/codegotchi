@@ -205,8 +205,9 @@ hook_events=session_started:idle:-:-,turn_started:thinking:-:-,tool_started:thin
 patch_marker_created=true
 ~~~
 
-The second session_started marks the real trusted interaction after the
-initial trust review. The Bash and apply_patch actions emitted both
+The captured sequence contains two SessionStart boundaries; the labels are
+reported verbatim without inferring which process phase produced each one.
+The Bash and apply_patch actions emitted both
 PreToolUse/PostToolUse pairs. The final safe-development
 tool_started:testing:cargo:development has no tool_completed event: its
 Strict PreToolUse was denied by the loopback response. The session then
