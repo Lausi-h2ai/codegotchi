@@ -95,6 +95,16 @@ async fn next_snapshot(
         .expect("runtime snapshot channel remains open")
 }
 
+async fn assert_no_snapshot(
+    snapshots: &mut tokio::sync::broadcast::Receiver<codegotchi_domain::SimulationSnapshot>,
+) {
+    match tokio::time::timeout(std::time::Duration::from_millis(100), snapshots.recv()).await {
+        Err(_) => {}
+        Ok(Ok(snapshot)) => panic!("duplicate delivery broadcast a snapshot: {snapshot:?}"),
+        Ok(Err(error)) => panic!("snapshot channel failed while checking duplicate: {error}"),
+    }
+}
+
 async fn wait_for_server(server: &RunningServer) {
     for _ in 0..50 {
         if let Ok(mut stream) = TcpStream::connect(server.local_addr()).await {
@@ -200,6 +210,22 @@ async fn installed_hook_fixtures_drive_the_complete_authoritative_runtime_flow()
     let success_snapshot = next_snapshot(&mut snapshots).await;
     assert_eq!(success_snapshot.activity, AgentActivityState::Idle);
     assert_eq!(success_snapshot.recent_outcome, AgentOutcome::Success);
+
+    let changed_post_tool = br#"{
+        "session_id": "00000000-0000-0000-0000-000000000001",
+        "turn_id": "turn-00000000000000000000000000000001",
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "cargo test -p secret-project", "workdir": "/workspace/codegatchi"},
+        "tool_response": {"exit_code": 1, "duration_ms": 999, "stderr": "changed-status"},
+        "cwd": "/workspace/codegatchi",
+        "tool_use_id": "call-post-bash-success"
+    }"#;
+    let before_duplicate = runtime.snapshot();
+    let duplicate_post = invoke_hook(&metadata_path, changed_post_tool).await;
+    assert_allow(&duplicate_post);
+    assert_eq!(runtime.snapshot(), before_duplicate);
+    assert_no_snapshot(&mut snapshots).await;
 
     let failure = invoke_hook(&metadata_path, &fixture("bash_post_failure.json")).await;
     assert_allow(&failure);

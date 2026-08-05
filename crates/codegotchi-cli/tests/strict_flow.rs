@@ -127,6 +127,35 @@ fn shell_fixture(tool_use_id: &str, command: &str, tool_name: &str) -> Vec<u8> {
     .expect("matrix fixture serializes")
 }
 
+fn incomplete_apply_patch_fixture(tool_use_id: &str, tool_input: Option<Value>) -> Vec<u8> {
+    let mut payload = serde_json::Map::from_iter([
+        (
+            String::from("session_id"),
+            Value::String(String::from("00000000-0000-0000-0000-000000000001")),
+        ),
+        (
+            String::from("turn_id"),
+            Value::String(String::from("incomplete-apply-patch-turn")),
+        ),
+        (
+            String::from("hook_event_name"),
+            Value::String(String::from("PreToolUse")),
+        ),
+        (
+            String::from("tool_name"),
+            Value::String(String::from("apply_patch")),
+        ),
+        (
+            String::from("tool_use_id"),
+            Value::String(tool_use_id.to_owned()),
+        ),
+    ]);
+    if let Some(tool_input) = tool_input {
+        payload.insert(String::from("tool_input"), tool_input);
+    }
+    serde_json::to_vec(&Value::Object(payload)).expect("incomplete fixture serializes")
+}
+
 async fn next_snapshot(
     snapshots: &mut tokio::sync::broadcast::Receiver<codegotchi_domain::SimulationSnapshot>,
 ) -> codegotchi_domain::SimulationSnapshot {
@@ -368,6 +397,30 @@ async fn strict_denial_is_verified_fail_open_and_recoverable_through_normal_care
         neglect_again.stderr
     );
     let _ = next_snapshot(&mut snapshots).await;
+
+    let incomplete_apply_patch_cases = [
+        ("missing", None),
+        ("array", Some(serde_json::json!([]))),
+        ("string", Some(Value::String(String::from("patch text")))),
+        (
+            "non-string-command",
+            Some(serde_json::json!({"command": 42})),
+        ),
+        ("empty-command", Some(serde_json::json!({"command": ""}))),
+        (
+            "whitespace-command",
+            Some(serde_json::json!({"command": "   "})),
+        ),
+    ];
+    for (identity, tool_input) in incomplete_apply_patch_cases {
+        let output = invoke_hook(
+            &metadata_path,
+            &incomplete_apply_patch_fixture(identity, tool_input),
+        )
+        .await;
+        assert_allow(&output);
+        let _ = next_snapshot(&mut snapshots).await;
+    }
 
     let fail_open_cases = [
         (

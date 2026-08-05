@@ -10,10 +10,14 @@ use codegotchi_domain::{ActivityKind, CommandCategory, CommandClassification, Co
 /// with an uncertain purpose and therefore fails open in Strict mode.
 pub fn classify_command(tool_name: &str, command: &str) -> CommandClassification {
     if tool_name.eq_ignore_ascii_case("apply_patch") {
-        return CommandClassification::new(
-            CommandCategory::Development,
-            CommandPurpose::SafeDevelopment,
-        );
+        return if apply_patch_input_is_verified(command) {
+            CommandClassification::new(
+                CommandCategory::Development,
+                CommandPurpose::SafeDevelopment,
+            )
+        } else {
+            CommandClassification::new(CommandCategory::Unknown, CommandPurpose::Uncertain)
+        };
     }
     if !tool_name.eq_ignore_ascii_case("bash") || command_is_ambiguous(command) {
         return CommandClassification::new(CommandCategory::Unknown, CommandPurpose::Uncertain);
@@ -109,7 +113,11 @@ pub fn activity_for_command(
         return ActivityKind::Error;
     }
     if tool_name.eq_ignore_ascii_case("apply_patch") {
-        return ActivityKind::Editing;
+        return if apply_patch_input_is_verified(command) {
+            ActivityKind::Editing
+        } else {
+            ActivityKind::UnknownWork
+        };
     }
     if !tool_name.eq_ignore_ascii_case("bash") || command_is_ambiguous(command) {
         return ActivityKind::UnknownWork;
@@ -159,6 +167,10 @@ fn development_classification(
             CommandPurpose::Uncertain
         },
     )
+}
+
+fn apply_patch_input_is_verified(command: &str) -> bool {
+    !command.trim().is_empty()
 }
 
 fn cargo_subcommand_is_safe(command: &str) -> bool {

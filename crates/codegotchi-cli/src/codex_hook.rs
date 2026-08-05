@@ -225,32 +225,43 @@ fn deterministic_event_id(
     activity: Option<ActivityKind>,
     event_metadata: &EventMetadata,
 ) -> Uuid {
-    let canonical = format!(
-        "codegotchi-hook-v2|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        metadata.runtime_id,
-        session_id,
-        event_identity.unwrap_or_default(),
-        event_name,
-        kind_name(kind),
-        activity_name(activity),
-        event_metadata
-            .executable_name
-            .as_deref()
-            .unwrap_or_default(),
-        event_metadata
-            .command_category
-            .as_deref()
-            .unwrap_or_default(),
-        event_metadata
-            .exit_status
-            .map_or_else(String::new, |value| value.to_string()),
-        event_metadata
-            .duration_ms
-            .map_or_else(String::new, |value| value.to_string()),
-        event_metadata.blocked,
-        metadata.repository_root.to_string_lossy(),
-        metadata.loopback_base_url,
-    );
+    let canonical = if let Some(event_identity) = event_identity {
+        format!(
+            "codegotchi-hook-v3-stable|{}|{}|{}|{}|{}",
+            metadata.runtime_id,
+            session_id,
+            event_name,
+            kind_name(kind),
+            event_identity,
+        )
+    } else {
+        format!(
+            "codegotchi-hook-v2|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            metadata.runtime_id,
+            session_id,
+            "",
+            event_name,
+            kind_name(kind),
+            activity_name(activity),
+            event_metadata
+                .executable_name
+                .as_deref()
+                .unwrap_or_default(),
+            event_metadata
+                .command_category
+                .as_deref()
+                .unwrap_or_default(),
+            event_metadata
+                .exit_status
+                .map_or_else(String::new, |value| value.to_string()),
+            event_metadata
+                .duration_ms
+                .map_or_else(String::new, |value| value.to_string()),
+            event_metadata.blocked,
+            metadata.repository_root.to_string_lossy(),
+            metadata.loopback_base_url,
+        )
+    };
     Uuid::new_v5(&Uuid::NAMESPACE_URL, canonical.as_bytes())
 }
 

@@ -108,6 +108,7 @@ Created:
 - `crates/codegotchi-cli/tests/hook_runtime_flow.rs`
 - `crates/codegotchi-cli/tests/strict_flow.rs`
 - `.superpowers/sdd/2026-08-05-codex-first-runnable-mvp/task-4-report.md`
+- `.superpowers/sdd/2026-08-05-codex-first-runnable-mvp/task-4-correction-report.md`
 
 No web UI, launcher/profile lifecycle, embedded asset, README, domain source,
 persistence schema, plan, ledger, backlog, or review file was changed.
@@ -134,3 +135,49 @@ Strict is intentionally a fail-open product policy/demo flow, not a security
 boundary. Runtime liveness discovery uses the existing metadata plus owner PID
 check, and all hook transport, metadata, parsing, and uncertainty failures
 remain successful `{}` allows as required.
+
+## Focused correction
+
+The independent review identified two MVP blockers; both were corrected without
+touching the web UI, launcher, domain policy, persistence schema, or the
+review's optional debug-guard backlog item.
+
+- Stable lifecycle/turn/tool identities now use only runtime ID, session ID,
+  hook/event kind, and the supplied stable identity in the deterministic event
+  ID. The existing privacy-safe metadata fallback remains unchanged when no
+  stable identity is available. PreToolUse and PostToolUse remain distinct.
+- `apply_patch` is SafeDevelopment only when the adapter has a non-empty,
+  non-whitespace command string from an object-shaped `tool_input`. Missing,
+  non-object, non-string, and empty/whitespace inputs classify as
+  Unknown/Uncertain and therefore allow under Strict. The verified installed
+  apply_patch fixture remains Editing/SafeDevelopment.
+
+TDD correction evidence:
+
+- RED: the new PostToolUse replay assertion observed a second broadcast with
+  changed exit status/duration; the incomplete apply_patch cases returned the
+  exact Strict denial instead of `{}`.
+- GREEN: the corrected process-level flows pass. The replay case asserts both
+  unchanged authoritative snapshot and no broadcast; the Strict flow covers
+  missing input, non-object input, non-string input, non-string command,
+  empty command, and whitespace-only command.
+
+Fresh correction verification:
+
+```text
+cargo test --offline -p codegotchi-cli --test hook_runtime_flow -- --nocapture
+PASS — 1 passed
+cargo test --offline -p codegotchi-cli --test strict_flow -- --nocapture
+PASS — 1 passed
+cargo fmt --all -- --check
+PASS
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+PASS
+cargo test --workspace
+PASS — 88 executed tests passed; 1 pre-existing manual Codex test ignored
+```
+
+The combined two-test command was also attempted; this sandbox intermittently
+rejects concurrent loopback binds with `Operation not permitted`, so the two
+focused binaries were rerun and verified independently. The workspace gate
+passed as a standalone command.
