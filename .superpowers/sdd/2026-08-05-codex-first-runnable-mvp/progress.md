@@ -28,7 +28,9 @@ Task 1: complete; supervisor approved after bounded correction loop
 - Second correction tests: focused hook/profile PASS; routine installed-Codex predicate PASS with manual paid/authenticated gate ignored; cargo fmt PASS; strict workspace clippy PASS; cargo test --workspace PASS
 - Supervisor adjudication: APPROVED; denial/non-execution and lifecycle-source blockers resolved. Identical ID-less SessionEnd occurrence distinction deferred to backlog because Codex 0.146 exposes no discriminator.
 - Deferred findings: docs/backlog/codex-first-mvp-followups.md
-Task 2: pending
+Task 2: implementation in progress
+- Implementer: Codex CLI Luna/max dispatch pending session ID
+- Base: 8667af0
 Task 3: pending
 Task 4: pending
 Task 5: pending
