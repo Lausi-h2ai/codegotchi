@@ -8,8 +8,9 @@
         "build": "tsc -b && vite build",
         "lint": "eslint .",
         "test": "vitest run",
-        "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"e2e/**/*.ts\" \"playwright.config.ts\" \"vite.config.ts\" \"scripts/*.mjs\" \"*.html\" \"*.json\" \"*.js\"",
-        "playwright:test": "playwright test --config playwright.config.ts"
+        "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"e2e/**/*.{ts,mjs}\" \"playwright.config.ts\" \"vite.config.ts\" \"scripts/*.mjs\" \"*.html\" \"*.json\" \"*.js\"",
+        "playwright:test": "corepack pnpm playwright:test:production",
+        "playwright:test:production": "corepack pnpm build && node scripts/embed-web.mjs && playwright test --config playwright.config.ts"
     },
     "dependencies": {
         "react": "19.2.8",

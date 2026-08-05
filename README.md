@@ -1,115 +1,135 @@
 # CodeGotchi
 
 CodeGotchi is a local coding companion for Codex. Rust owns the pet
-simulation, persistence, authenticated loopback server, Codex hook bridge, and
-process lifecycle; the React client is a projection of that authoritative
-state.
+simulation, repository-scoped SQLite persistence, authenticated loopback
+server, Codex hook bridge, and launcher lifecycle. The React room is only a
+projection of that authoritative state.
 
 ## Install and launch
 
-Install the self-contained binary with Rust and run the exact launcher command:
+From a checkout with the embedded production bundle present:
 
 ```sh
-cargo install --path crates/codegotchi-cli
+cargo install --path crates/codegotchi-cli --locked
 codegotchi run -- codex [ordinary Codex arguments...]
 ```
 
-CodeGotchi starts the runtime before Codex, prints a local `CodeGotchi UI:` URL,
-and attempts to open it with the native browser helper. The token is present
-only in the URL fragment; the UI removes it from the visible address bar and
-uses same-origin authenticated HTTP/WebSocket requests. Set
-`CODEGOTCHI_BROWSER=none` to suppress browser spawning in tests or headless
-sessions. If the helper cannot start or exits unsuccessfully, CodeGotchi warns
-and leaves the printed URL usable without stopping Codex.
+The launcher starts the runtime before Codex, prints a URL beginning with
+`CodeGotchi UI:`, and best-effort opens it with the native browser helper. The
+server binds only to `127.0.0.1` on an ephemeral port. Set
+`CODEGOTCHI_BROWSER=none` to suppress automatic browser launch, or set it to a
+browser-helper executable path. If the helper fails, the printed URL remains
+usable.
 
-On the first run, Codex may pause for its normal `/hooks` trust review. Review
-and accept the generated CodeGotchi hook profile in Codex; CodeGotchi does not
-bypass that trust flow. Existing Codex configuration, authentication, and
-other credentials are layered normally and are not copied or modified.
+The token is supplied only in the URL fragment as `#token=...`. The UI removes
+the fragment from the visible address bar and keeps the token only in the
+current tab's history state for reload. Authenticated HTTP uses a bearer
+header; the live WebSocket uses the same token as its subprotocol.
+
+On first use, Codex may pause for its normal `/hooks` trust review. Review and
+accept the generated CodeGotchi hook profile there; CodeGotchi does not bypass
+or silently approve that trust flow. The profile is additive. Existing Codex
+configuration, hooks, authentication, and credentials are preserved and are
+not copied or overwritten.
 
 Trailing Codex arguments are preserved in order. CodeGotchi rejects an
 explicit `-p`, attached short profile form, `--profile`, or `--profile=...`
-because it must inject its own additive temporary profile.
+because it must inject its own temporary additive profile.
 
 ## State, runtime files, and cleanup
 
-The SQLite snapshot is stored at
+SQLite is stored at
 `$XDG_STATE_HOME/codegotchi/state.sqlite`, falling back to
 `$HOME/.local/state/codegotchi/state.sqlite`. A stable canonical repository
-identity gives each worktree its own persisted pet while repeated launches
-reload the same pet, needs, inventory, care state, poop state, and replay IDs.
+identity gives each Git worktree its own pet. Restarts restore identity, needs,
+inventory, activity, poop state, enforcement mode, and event/care replay IDs;
+new pets receive 50 kibble, 25 treats, and 25 fruit once.
 
-Short-lived runtime metadata is stored in the mode-0700
+Short-lived metadata is stored in the mode-0700
 `$XDG_RUNTIME_DIR/codegotchi/` directory, falling back to the CodeGotchi state
-directory. Its `session-<uuid>.json` file is mode 0600 and contains the
-loopback URL, owner PID, repository root, runtime ID, and a high-entropy local
-token. The unique additive profile is created in `$CODEX_HOME`, or
-`$HOME/.codex`, as `codegotchi-<uuid>.config.toml`.
+directory. Its mode-0600 `session-<uuid>.json` contains the loopback URL,
+owner PID, repository root, runtime ID, and local bearer token. The unique
+mode-0600 additive profile is created in `$CODEX_HOME`, or `$HOME/.codex`, as
+`codegotchi-<uuid>.config.toml`.
 
-On normal exit, child spawn/wait errors, and forwarded termination signals,
-CodeGotchi removes only the metadata and profile created for that run. SQLite
-state remains. If the launcher is killed abnormally, the next launch removes
-only stale, valid CodeGotchi session metadata whose owner is no longer active;
-unrelated files and active sessions are retained.
+Normal exit, child spawn/wait failure, and forwarded termination remove only
+the metadata and profile owned by that run. SQLite state remains. After an
+abnormal launcher death, a later run removes only stale valid CodeGotchi
+session metadata whose owner is no longer active; hard-killed temporary
+profiles are not yet reclaimed automatically.
 
 ## Strict mode and guarded demos
 
-The default mode is Decorative. From the active Codex environment, use:
+Run these commands from the active Codex environment so
+`CODEGOTCHI_SESSION_FILE` identifies the live runtime:
 
 ```sh
 codegotchi mode strict
 ```
 
-Strict can deny only the Task 4 policy's recognized safe development actions
-when the pet has a critical need. Uncertain work and hook/transport failures
-remain fail-open. Strict is a pet-care interaction, not a security boundary or
-an operating-system sandbox; it does not prevent independent processes or
-deliberate bypasses.
+Strict can deny only recognized safe development actions when hunger or
+cleanliness is critical. The denial tells the user to care for the pet in the
+UI and retry. Uncertain work, recovery/control work, and hook/transport
+failures remain fail-open. Strict is a pet-care interaction, not a security
+boundary or operating-system sandbox.
 
-The fixed demonstration controls require `CODEGOTCHI_ENABLE_DEBUG=1` and do
-not accept arbitrary values:
+The fixed demonstration controls require the exact `CODEGOTCHI_ENABLE_DEBUG=1`
+guard and do not accept arbitrary values:
 
 ```sh
-codegotchi debug neglect
-codegotchi debug generate-poop
+CODEGOTCHI_ENABLE_DEBUG=1 codegotchi debug neglect
+CODEGOTCHI_ENABLE_DEBUG=1 codegotchi debug generate-poop
 ```
 
-They operate only against the active runtime and are intended for a disposable
-demo session.
+They operate only against the active authenticated runtime and are intended
+for a disposable demo session.
 
-## Development
+## Privacy and runtime boundary
+
+Hooks accept bounded, forward-compatible Codex JSON but discard prompts,
+source content, full commands, transcripts, and complete tool output after
+classification. Persisted state contains only the canonical event plus
+bounded structured metadata. Hook and backend transport failures produce the
+valid empty hook result `{}`. No HTTP route executes a caller-supplied
+command. Static assets are embedded in the binary; an installed launch does
+not read this checkout, run Vite, require Node/pnpm, or start another UI
+process.
+
+## Development and verification
 
 Prerequisites are Rust stable with `cargo`, `rustfmt`, and `clippy`, plus
-Node.js 22.22.2 or newer on the Node 22 line and Corepack. The repository pins
-pnpm to 11.20.0:
+Node.js 22.22.2 or newer and Corepack. The repository pins pnpm to 11.20.0:
 
 ```sh
 corepack enable
 corepack pnpm install --frozen-lockfile
 ```
 
-The frontend production bundle is built from `web` and copied into
-`crates/codegotchi-cli/web-dist` with the existing embed script. The CLI build
-script generates a compile-time table and uses `include_bytes!`; an installed
-binary does not read the repository, invoke Vite, require pnpm, or start a
-second UI process.
-
-Run the current gates from the repository root:
+Run the quality gates from the repository root:
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
 
-corepack pnpm test
 corepack pnpm lint
+corepack pnpm test
 corepack pnpm format:check
 corepack pnpm build
+node web/scripts/embed-web.mjs
 corepack pnpm playwright:test
 ```
 
-Routine tests use a fake Codex executable and do not invoke a real or paid
-Codex session. The real installed command remains the final interactive check:
-run `codegotchi run -- codex`, complete the normal hook trust review, confirm
-the printed/opened embedded UI, exercise care and Strict behavior, restart to
-verify persistence, and confirm temporary-file cleanup.
+`corepack pnpm playwright:test` builds and embeds the production bundle,
+starts a Rust fixture that serves its embedded SPA, and runs the production
+browser flow. CI installs the pinned Playwright Chromium package before this
+command. On WSL, install the host libraries required by Playwright's browser;
+if they are exposed through WSL, the documented retry form is:
+
+```sh
+LD_LIBRARY_PATH=/usr/lib/wsl/lib corepack pnpm playwright:test
+```
+
+Routine tests use a fake Codex and never invoke a paid or real Codex session.
+The final real-Codex/browser acceptance remains a supervisor-owned manual
+gate; see [the verification record](docs/verification/codex-first-mvp.md).

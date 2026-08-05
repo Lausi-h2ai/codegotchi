@@ -62,3 +62,12 @@ jobs:
 
             - name: Build workspace
               run: corepack pnpm build
+
+            - name: Embed the production web bundle
+              run: node web/scripts/embed-web.mjs
+
+            - name: Install the pinned Playwright Chromium
+              run: corepack pnpm --filter @codegotchi/web exec playwright install --with-deps chromium
+
+            - name: Run the production Playwright flow
+              run: corepack pnpm playwright:test:production

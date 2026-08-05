@@ -2,12 +2,14 @@ import { expect, test } from "@playwright/test";
 
 const launchUrl = "/#token=task3-playwright-token";
 
-test.describe.serial("CodeGotchi Task 3 browser vertical slice", () => {
-    test("loads the functional room from a real Task 2 server", async ({
+test.describe.serial("CodeGotchi production browser vertical slice", () => {
+    test("loads embedded production bytes and follows authoritative activity", async ({
         page,
     }) => {
         await page.goto(launchUrl);
 
+        await expect(page.locator('script[src^="/src/"]')).toHaveCount(0);
+        await expect(page.locator('script[src^="/@vite"]')).toHaveCount(0);
         await expect(
             page.getByRole("region", { name: "CodeGotchi pet room" }),
         ).toBeVisible();
@@ -20,6 +22,47 @@ test.describe.serial("CodeGotchi Task 3 browser vertical slice", () => {
         ).toBeVisible();
         await expect(page.getByTestId("food-treat")).toContainText("25");
         await expect(page.getByTestId(/poop-/).first()).toBeVisible();
+        await expect(page.getByTestId("activity-label")).toContainText(
+            "Working",
+        );
+        await expect(page).not.toHaveURL(/#token=/);
+
+        const eventResponse = await page.evaluate(
+            async (request) => {
+                const response = await fetch("/api/v1/events", {
+                    method: "POST",
+                    headers: {
+                        Authorization: "Bearer task3-playwright-token",
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(request),
+                });
+                return { status: response.status, body: await response.json() };
+            },
+            {
+                event: {
+                    id: "00000000-0000-0000-0000-00000000f001",
+                    schema_version: 1,
+                    session_id: "00000000-0000-0000-0000-000000000007",
+                    repository_id: "playwright-fixture",
+                    source: "codex",
+                    kind: "turn_started",
+                    activity: null,
+                    timestamp: new Date().toISOString(),
+                    metadata: {
+                        executable_name: null,
+                        command_category: null,
+                        exit_status: null,
+                        duration_ms: null,
+                        blocked: false,
+                    },
+                },
+            },
+        );
+        expect(eventResponse.status).toBe(200);
+        await expect(page.getByTestId("activity-label")).toContainText(
+            "Thinking",
+        );
     });
 
     test("feeds with drag and drop and keeps the authoritative result after reload", async ({
@@ -103,20 +146,35 @@ test.describe.serial("CodeGotchi Task 3 browser vertical slice", () => {
     test("recovers from a disconnected stream and accepts the replacement snapshot", async ({
         page,
     }) => {
-        await page.goto(launchUrl);
-        await expect(page.getByText("Connected")).toBeVisible();
+        let connectionCount = 0;
+        let disconnect: (() => Promise<void>) | undefined;
 
-        await page.evaluate(() => {
-            const testWindow = window as Window & {
-                __codeGotchiTestDisconnect?: () => void;
-            };
-            testWindow.__codeGotchiTestDisconnect?.();
+        await page.routeWebSocket(/\/api\/v1\/stream(?:\?|$)/, (webSocket) => {
+            connectionCount += 1;
+            const server = webSocket.connectToServer();
+            disconnect = () => webSocket.close();
+
+            webSocket.onMessage((message) => server.send(message));
+            server.onMessage((message) => webSocket.send(message));
         });
 
-        await expect(page.getByText("Reconnecting…")).toBeVisible();
+        await page.goto(launchUrl);
+        await expect(page.getByText("Connected")).toBeVisible();
+        await expect.poll(() => connectionCount).toBe(1);
+        expect(disconnect).toBeDefined();
+
+        await disconnect?.();
+
+        await expect(page.getByText("Reconnecting…")).toBeVisible({
+            timeout: 5_000,
+        });
+        await expect.poll(() => connectionCount).toBe(2);
         await expect(page.getByText("Connected")).toBeVisible();
         await expect(page.getByRole("heading", { level: 2 })).toContainText(
             "Mochi",
+        );
+        await expect(page.getByTestId("activity-label")).toContainText(
+            "Thinking",
         );
     });
 });
