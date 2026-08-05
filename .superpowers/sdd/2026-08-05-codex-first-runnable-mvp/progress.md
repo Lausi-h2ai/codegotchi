@@ -40,7 +40,15 @@ Task 2: complete; supervisor approved after two bounded correction rounds
 - Second correction: original implementer resumed with Luna/max; shared interval/trigger maintenance runner plus production-server scheduler test
 - Supervisor adjudication: APPROVED; focused scheduler test, formatting, strict clippy, persistence/broadcast, bounded shutdown, and receiver-drop proof PASS
 - Deferred findings: none
-Task 3: pending
+Task 3: complete; accepted after one focused correction
+- Implementer: Codex CLI session 019fd194-480e-72b0-9ea8-84790a137b70, model gpt-5.6-luna, reasoning max
+- Base: e0b7fcf; brief commit: c0189e4; implementation commit: a4c00e6
+- Initial tests: frontend 23 PASS; lint/format/build PASS; Rust fmt/strict clippy/workspace tests PASS; Playwright 6/6 PASS in supervisor WSL environment
+- Review: CORRECT MVP-BLOCKERS — 2 MVP-blocking, 3 Backlog; reviewer session 019fd1b2-5cc8-7291-80ba-05f642a28831, model gpt-5.6-luna, reasoning max; review commit d1e24f4
+- Correction: original implementer resumed; direct poop-to-trash bypass removed and all HTTP/WebSocket/care snapshots routed through a monotonic complete-snapshot gate; commit 6a5a17a
+- Correction tests: frontend 29 PASS; lint/format/build PASS; embedded bundle byte-identical and free of Vite development markers; Rust fmt/strict clippy/workspace tests PASS; Playwright 7/7 PASS against real Task 2 server
+- Focused re-review: ACCEPTED; both original blockers resolved; no residual finding
+- Deferred findings: syntax-safe WebSocket subprotocol token contract, graceful fixture sidecar cleanup, stronger disconnected-state Playwright mutation proof; recorded in docs/backlog/codex-first-mvp-followups.md
 Task 4: pending
 Task 5: pending
 Task 6: pending

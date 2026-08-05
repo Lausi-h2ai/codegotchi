@@ -164,14 +164,14 @@
 - Produces: accessible room projection, mandatory activity labels/classes, authenticated drag/drop feed, shovel-poop-trash clean workflow, reconnecting WebSocket, backend error banner, and an embed script that replaces only `crates/codegotchi-cli/web-dist/`.
 - The client generates UUID care IDs once per user action and never mutates displayed needs/poops optimistically.
 
-- [ ] Rewrite the component tests first for initial/loading/disconnected states, all mandatory activity labels, authoritative snapshot render, and backend-error presentation; run them and record expected failures.
-- [ ] Add client tests for fragment token extraction/removal, authenticated care headers, invalid drop no request, WebSocket reconnect, and replacement by a complete reconnect snapshot.
-- [ ] Implement typed client/state hooks and the minimum real UI needed for tests; no browser-side need or poop calculation.
-- [ ] Add drag data for food and shovel, valid feed target handling, poop selection/application, trash confirmation, keyboard-accessible equivalents, and visible success feedback.
-- [ ] Add Playwright tests against a real Task 2 server fixture for room load, food drop persistence after reload, invalid drop, poop clean persistence after reload, disconnect/recovery, and backend error display.
-- [ ] Run `corepack pnpm test`, `corepack pnpm lint`, `corepack pnpm format:check`, and the focused Playwright suite.
-- [ ] Build Vite and run `node web/scripts/embed-web.mjs`; verify the copied bundle contains no development-server dependency.
-- [ ] Commit the task. Write the report at the plan workspace's `task-3-report.md`.
+- [x] Rewrite the component tests first for initial/loading/disconnected states, all mandatory activity labels, authoritative snapshot render, and backend-error presentation; run them and record expected failures.
+- [x] Add client tests for fragment token extraction/removal, authenticated care headers, invalid drop no request, WebSocket reconnect, and replacement by a complete reconnect snapshot.
+- [x] Implement typed client/state hooks and the minimum real UI needed for tests; no browser-side need or poop calculation.
+- [x] Add drag data for food and shovel, valid feed target handling, poop selection/application, trash confirmation, keyboard-accessible equivalents, and visible success feedback.
+- [x] Add Playwright tests against a real Task 2 server fixture for room load, food drop persistence after reload, invalid drop, poop clean persistence after reload, disconnect/recovery, and backend error display.
+- [x] Run `corepack pnpm test`, `corepack pnpm lint`, `corepack pnpm format:check`, and the focused Playwright suite.
+- [x] Build Vite and run `node web/scripts/embed-web.mjs`; verify the copied bundle contains no development-server dependency.
+- [x] Commit the task. Write the report at the plan workspace's `task-3-report.md`.
 
 ### Task 4: Hook-to-runtime activity mapping, strict decisions, and demo controls
 
