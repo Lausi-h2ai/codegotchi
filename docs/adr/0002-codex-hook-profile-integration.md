@@ -6,7 +6,9 @@ Date: 2026-08-05
 ## Decision
 
 Task 1 uses an additive, short-lived Codex profile and a short-lived
-`codegotchi hook` subprocess. The profile is created under the existing
+`codegotchi hook` subprocess. The `codegotchi-cli` package explicitly publishes
+the installed binary as `codegotchi`, so the generated command names a binary
+provided by `cargo install`. The profile is created under the existing
 `CODEX_HOME` as `$CODEX_HOME/<profile>.config.toml`, is opened with mode
 `0600` and create-new semantics, and is removed only by the owner that created
 it. The base Codex configuration is neither copied nor modified. The child
@@ -39,6 +41,21 @@ endpoint from `RuntimeMetadataV1`, and emits `{}` unless an authenticated,
 successfully evaluated Strict `PreToolUse` response explicitly denies the
 action. Transport, parsing, metadata, and translation failures fail open.
 
+The adapter models the official Codex 0.146.0 identity and response fields:
+turn-scoped hooks use `turn_id`, tool hooks use `tool_use_id`, and
+`PostToolUse` uses `tool_response`. The deterministic event ID includes
+`tool_use_id` or `turn_id` when present, plus the event boundary, so replaying
+one payload is idempotent while repeated prompt/tool invocations remain
+distinct. The old `tool_call_id` and `tool_output` spellings are accepted only
+as deserialization aliases for compatibility; fixtures use the official names.
+
+Only canonical labels from the adapter's bounded executable allowlist can
+enter `EventMetadata.executable_name`. Unknown one-token commands, paths, and
+assignment-only prefixes produce no executable label. Leading shell assignment
+prefixes are skipped for classification, so a known command such as
+`CODEGOTCHI_SECRET=... cargo test` remains Testing/Development without storing
+the assignment or command text.
+
 ## Installed facts verified
 
 The installed executable was:
@@ -54,8 +71,9 @@ codex-cli 0.146.0
 `--dangerously-bypass-hook-trust`. The latter was never passed.
 
 The observed installed payload fields were `session_id`,
-`hook_event_name`, `tool_name`, `tool_input.command`, `tool_output.exit_code`,
-`tool_output.duration_ms`, `cwd`, `prompt`, `source`,
+`hook_event_name`, `turn_id`, `tool_name`, `tool_use_id`,
+`tool_input.command`, `tool_response.exit_code`,
+`tool_response.duration_ms`, `cwd`, `prompt`, `source`,
 `stop_hook_active`, and `last_assistant_message`; the adapter accepts unknown
 future fields and discards prompt, source, command text, and tool output before
 constructing the domain event. Installed tool names observed in the spike
@@ -109,14 +127,24 @@ to the repository or generated runtime metadata.
 
 ## Coexistence and cleanup observations
 
-The actual user config at `/home/laurent/.codex/config.toml` had no existing
-`[hooks]` block in this environment. Its SHA-256 remained exactly
-`d1495adcbc6fab6465db015d92f4c5c7f126cc1a0e558537699973ec1f401833` before
-and after the spike. The profile lifecycle test also used a base config with
-an existing user `SessionStart` hook and verified checksum preservation while
-the six profile hook families were added in a separate profile layer. Direct
-execution with a real pre-existing user hook was not exercised because none
-was present.
+The committed ignored test at
+`crates/codegotchi-cli/tests/installed_codex.rs` now supplies the missing
+coexistence gate. It creates a disposable `CODEX_HOME` with a real
+pre-existing `SessionStart` command hook. That hook consumes stdin with
+`cat >/dev/null` and writes only a fixed marker, so it co-executes without
+persisting the Codex payload. The test uses the generated `codegotchi` binary
+through `PATH`, an authenticated `127.0.0.1` capture receiver, and a temporary
+mode-0600 runtime file. The receiver returns the strict denial for canonical
+`cargo` work and the test asserts the exact denial JSON from the generated
+binary as well as a denial during the real Codex run.
+
+The test never uses `--dangerously-bypass-hook-trust`; it inherits the
+operator's terminal so the normal repository trust and “Hooks need review”
+prompts are answered manually. It uses a temporary Codex home and an API key
+environment variable, never the user's base config or credentials. On
+success it verifies the disposable base config checksum, removes the owned
+profile and runtime file by exact path, removes the marker/hook, and removes
+the exact temporary root.
 
 The throwaway profile, runtime metadata, temporary receiver state, and
 temporary repository were removed. Cleanup used exact generated paths only;
@@ -128,6 +156,14 @@ This gives later tasks a tested event and permission-response seam without
 introducing a backend or persistence implementation into Task 1. The future
 runtime must generate a unique profile name, write and remove the mode-0600
 metadata file, bind the receiver only to loopback, and pass the user's normal
-Codex arguments without allowing a conflicting user profile override. Real
-existing-hook coexistence remains a follow-up acceptance check when the
-launcher exists.
+Codex arguments without allowing a conflicting user profile override.
+
+The exact manual command is:
+
+```text
+OPENAI_API_KEY="$OPENAI_API_KEY" cargo test -p codegotchi-cli --test installed_codex -- --ignored --nocapture
+```
+
+Alternatively, set `CODEGOTCHI_CODEX_BIN` to a specific installed `codex`
+executable and use `CODEX_API_KEY` instead of `OPENAI_API_KEY`. The ignored
+test is not part of routine test execution.

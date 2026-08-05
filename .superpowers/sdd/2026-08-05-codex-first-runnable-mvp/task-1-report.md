@@ -308,3 +308,88 @@ Added documentation:
 - The documentation commit containing this report follows the implementation
   commit; its hash is returned in the final handoff because a report cannot
   embed its own commit hash without changing that hash.
+
+## Correction round: RED/GREEN evidence
+
+Date: 2026-08-05
+Reviewed base: `568ebfb`
+Implementation commit: `8a1a0be` (`fix: close Task 1 Codex hook review blockers`)
+
+### RED
+
+The new correction assertions were run before their implementation:
+
+~~~text
+cargo test -p codegotchi-cli --test hook_fixtures
+error[E0609]: no field `tool_response` on type `HookInput`
+~~
+
+~~~text
+cargo test -p codegotchi-cli --test profile_lifecycle
+test installed_binary_target_is_codegotchi_and_runs_the_generated_hook_command ... FAILED
+the crate must install an explicit codegotchi binary
+~~
+
+These failures demonstrate the missing official response field and missing
+installed binary target rather than silently accepting the old behavior.
+
+### GREEN
+
+After the correction implementation:
+
+~~~text
+cargo test -p codegotchi-cli --test hook_fixtures
+test result: ok. 9 passed; 0 failed; 0 ignored
+
+cargo test -p codegotchi-cli --test profile_lifecycle
+test result: ok. 3 passed; 0 failed; 0 ignored
+
+cargo test -p codegotchi-cli --test installed_codex --no-run
+Finished `test` profile
+
+cargo fmt --all -- --check
+exit 0
+
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+Finished `dev` profile
+~~~
+
+The focused tests now use official `turn_id`, `tool_use_id`, and
+`tool_response` fixtures; prove replay idempotence and distinct repeated
+prompt/tool IDs; prove canonical executable labels do not retain one-token
+secrets, paths, or assignments; preserve known-command classification after an
+assignment prefix; and prove the generated `codegotchi hook` binary runs.
+
+The committed ignored manual gate is in
+`crates/codegotchi-cli/tests/installed_codex.rs`. It uses the generated binary,
+normal Codex 0.146.0 trust prompts without a bypass, a bearer-authenticated
+loopback receiver, a strict denial assertion, a temporary base config with a
+disposable pre-existing hook that consumes stdin via `cat >/dev/null`, and
+exact cleanup under a temporary `CODEX_HOME`. It is intentionally not run by
+routine tests. The exact command is documented in ADR 0002:
+
+~~~text
+OPENAI_API_KEY="$OPENAI_API_KEY" cargo test -p codegotchi-cli --test installed_codex -- --ignored --nocapture
+~~~
+
+### Exact implementation files
+
+Commit `8a1a0be` contains the correction in:
+
+- `crates/codegotchi-cli/Cargo.toml`
+- `crates/codegotchi-cli/src/classify.rs`
+- `crates/codegotchi-cli/src/codex_hook.rs`
+- `crates/codegotchi-cli/src/protocol.rs`
+- `crates/codegotchi-cli/tests/hook_fixtures.rs`
+- `crates/codegotchi-cli/tests/profile_lifecycle.rs`
+- `crates/codegotchi-cli/tests/installed_codex.rs`
+- `crates/codegotchi-cli/tests/fixtures/hooks/apply_patch_post.json`
+- `crates/codegotchi-cli/tests/fixtures/hooks/apply_patch_pre.json`
+- `crates/codegotchi-cli/tests/fixtures/hooks/bash_post_failure.json`
+- `crates/codegotchi-cli/tests/fixtures/hooks/bash_post_success.json`
+- `crates/codegotchi-cli/tests/fixtures/hooks/bash_pre.json`
+- `crates/codegotchi-cli/tests/fixtures/hooks/bash_pre_repeat.json`
+- `crates/codegotchi-cli/tests/fixtures/hooks/stop.json`
+- `crates/codegotchi-cli/tests/fixtures/hooks/user_prompt_submit.json`
+- `crates/codegotchi-cli/tests/fixtures/hooks/user_prompt_submit_future_fields.json`
+- `crates/codegotchi-cli/tests/fixtures/hooks/user_prompt_submit_repeat.json`
