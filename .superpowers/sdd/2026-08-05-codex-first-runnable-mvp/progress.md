@@ -49,7 +49,15 @@ Task 3: complete; accepted after one focused correction
 - Correction tests: frontend 29 PASS; lint/format/build PASS; embedded bundle byte-identical and free of Vite development markers; Rust fmt/strict clippy/workspace tests PASS; Playwright 7/7 PASS against real Task 2 server
 - Focused re-review: ACCEPTED; both original blockers resolved; no residual finding
 - Deferred findings: syntax-safe WebSocket subprotocol token contract, graceful fixture sidecar cleanup, stronger disconnected-state Playwright mutation proof; recorded in docs/backlog/codex-first-mvp-followups.md
-Task 4: pending
+Task 4: complete; accepted after one focused correction
+- Implementer: Codex CLI session 019fd1d3-e431-7b81-b5d8-ddbbee200bc4, model gpt-5.6-luna, reasoning max
+- Base: 8cb8cdd; brief commit: a60b29f; implementation commit: 34a6516
+- Initial tests: hook/runtime and Strict process flows PASS; cargo fmt PASS; strict workspace clippy PASS; cargo test --workspace PASS (88 executed, 1 manual installed-Codex test ignored); frontend lint/test/build PASS; Playwright 7/7 PASS
+- Review: CORRECTION REQUIRED — 2 MVP-blocking, 1 Backlog; reviewer session 019fd1fc-9a71-7ce2-a5ec-737cd8289d0f, model gpt-5.6-luna, reasoning max; review commit 094ecba
+- Correction: original implementer resumed with Luna/max; stable hook replay IDs no longer depend on mutable response metadata and incomplete apply_patch payloads now remain uncertain/fail-open; correction commit bc046cc
+- Correction tests: focused hook/runtime and Strict flows PASS; verified installed apply_patch fixture remains Editing/SafeDevelopment; cargo fmt PASS; strict workspace clippy PASS; cargo test --workspace PASS (88 executed, 1 ignored)
+- Focused re-review: ACCEPT; both original blockers resolved with no residual finding
+- Deferred finding: bind debug enablement to runtime startup configuration or a dedicated session capability; recorded in docs/backlog/codex-first-mvp-followups.md
 Task 5: pending
 Task 6: pending
 Final review: pending

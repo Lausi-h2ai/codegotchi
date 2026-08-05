@@ -191,12 +191,12 @@
 - Produces: event-ingest Strict decision, documented refusal text, `codegotchi mode decorative|strict`, and guarded `codegotchi debug neglect|generate-poop` commands against the active runtime.
 - Blockable commands are only recognized test/build/development commands; CodeGotchi, termination, shell/process recovery, Git, infrastructure shutdown, security remediation, diagnostics, and uncertain operations always allow.
 
-- [ ] Write an end-to-end hook/runtime test that posts every fixture and observes Session active, Thinking, Bash category activity, Editing, success/failure, Waiting, and Session end/idle snapshots without persisted raw fields.
-- [ ] Write the strict flow red: critical snapshot plus safe PreTool is denied with all four required explanation elements; decorative, fail-open transport, unknown/recovery/CodeGotchi operations allow; feed/clean through normal API then retry allows.
-- [ ] Implement atomic event application plus permission evaluation and exact Codex output selection, keeping transport failure fail-open.
-- [ ] Write guarded demo tests proving neglect creates critical authoritative persisted state and generate-poop uses canonical work plus normal domain feed/care transitions before broadcasting.
-- [ ] Implement mode/debug commands using active runtime discovery; require `CODEGOTCHI_ENABLE_DEBUG=1` for debug mutation and never expose arbitrary values or command execution.
-- [ ] Run Rust format/clippy/workspace tests and commit the task. Write the report at the plan workspace's `task-4-report.md`.
+- [x] Write an end-to-end hook/runtime test that posts every fixture and observes Session active, Thinking, Bash category activity, Editing, success/failure, Waiting, and Session end/idle snapshots without persisted raw fields.
+- [x] Write the strict flow red: critical snapshot plus safe PreTool is denied with all four required explanation elements; decorative, fail-open transport, unknown/recovery/CodeGotchi operations allow; feed/clean through normal API then retry allows.
+- [x] Implement atomic event application plus permission evaluation and exact Codex output selection, keeping transport failure fail-open.
+- [x] Write guarded demo tests proving neglect creates critical authoritative persisted state and generate-poop uses canonical work plus normal domain feed/care transitions before broadcasting.
+- [x] Implement mode/debug commands using active runtime discovery; require `CODEGOTCHI_ENABLE_DEBUG=1` for debug mutation and never expose arbitrary values or command execution.
+- [x] Run Rust format/clippy/workspace tests and commit the task. Write the report at the plan workspace's `task-4-report.md`.
 
 ### Task 5: Transparent `run -- codex`, embedded packaging, browser launch, and cleanup
 
