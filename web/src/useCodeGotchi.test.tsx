@@ -129,4 +129,38 @@ describe("useCodeGotchi authoritative projection", () => {
         expect(result.current.snapshot).toEqual(streamed);
         unmount();
     });
+
+    it("clears a transient state error after authoritative WebSocket recovery", async () => {
+        const recovered = snapshot("recovered stream state", {
+            lastUpdatedAt: "2026-08-05T12:00:02Z",
+            processedEventIds: ["recovery-event"],
+        });
+        const fetch = vi.fn((input: unknown) => {
+            if (String(input).endsWith("/api/v1/state")) {
+                return Promise.reject(new Error("transient state failure"));
+            }
+            return Promise.resolve(responseFor(recovered));
+        });
+        vi.stubGlobal("fetch", fetch);
+        vi.stubGlobal("WebSocket", FakeWebSocket);
+
+        const { result, unmount } = renderHook(() =>
+            useCodeGotchi("stream-secret"),
+        );
+        await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+        expect(result.current.error?.message).toBe("transient state failure");
+
+        const socket = FakeWebSocket.instances[0];
+        await act(async () => {
+            socket?.open();
+            socket?.message(recovered);
+        });
+
+        expect(result.current.snapshot).toEqual(recovered);
+        expect(result.current.error).toBeNull();
+        unmount();
+    });
 });

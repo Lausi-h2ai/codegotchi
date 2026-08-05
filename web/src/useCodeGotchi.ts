@@ -41,7 +41,10 @@ export function useCodeGotchi(token: string | null): CodeGotchiState {
         const client = new CodeGotchiClient(token);
         clientRef.current = client;
         const stop = client.start({
-            onSnapshot: (nextSnapshot) => setSnapshot(nextSnapshot),
+            onSnapshot: (nextSnapshot) => {
+                setSnapshot(nextSnapshot);
+                setError(null);
+            },
             onStatus: (nextStatus) => setConnectionStatus(nextStatus),
             onError: (nextError) => setError(nextError),
         });

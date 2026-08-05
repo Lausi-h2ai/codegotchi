@@ -6,8 +6,19 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     test("loads embedded production bytes and follows authoritative activity", async ({
         page,
     }) => {
+        let initialStateAborted = false;
+        await page.route(/\/api\/v1\/state(?:\?|$)/, async (route) => {
+            if (!initialStateAborted) {
+                initialStateAborted = true;
+                await route.abort("failed");
+                return;
+            }
+            await route.continue();
+        });
+
         await page.goto(launchUrl);
 
+        await expect.poll(() => initialStateAborted).toBe(true);
         await expect(page.locator('script[src^="/src/"]')).toHaveCount(0);
         await expect(page.locator('script[src^="/@vite"]')).toHaveCount(0);
         await expect(
@@ -17,6 +28,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
             "Mochi",
         );
         await expect(page.getByText("Connected")).toBeVisible();
+        await expect(page.getByRole("alert")).toHaveCount(0);
         await expect(
             page.getByRole("region", { name: "Desk and work area" }),
         ).toBeVisible();
