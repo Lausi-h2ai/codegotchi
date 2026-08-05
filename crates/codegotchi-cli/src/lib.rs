@@ -10,14 +10,19 @@ pub mod server;
 
 pub use classify::classify_command;
 pub use codex_hook::{
-    HookTransportError, hook_output_for_payload, run_hook_from_environment, send_event_to_runtime,
-    translate_hook, translate_hook_json,
+    HookTransportError, hook_output_for_payload, permission_context_for_hook,
+    run_hook_from_environment, runtime_metadata_is_active, send_debug_generate_poop_to_runtime,
+    send_debug_neglect_to_runtime, send_event_to_runtime, send_mode_to_runtime, translate_hook,
+    translate_hook_json,
 };
 pub use codex_profile::TemporaryCodexProfile;
 pub use persistence::{PersistenceError, SQLITE_SCHEMA_VERSION, SqliteStore};
 pub use protocol::{
-    CleanRequest, ErrorEnvelope, EventIngestRequest, EventIngestResponse, FeedRequest,
-    HealthResponse, HookInput, HookOutput, RuntimeMetadataV1, SnapshotMutationResponse,
+    CleanRequest, DebugRequest, ErrorEnvelope, EventIngestRequest, EventIngestResponse,
+    FeedRequest, HealthResponse, HookInput, HookOutput, ModeRequest, PermissionContext,
+    RuntimeMetadataV1, SnapshotMutationResponse,
 };
-pub use runtime::{AuthoritativeRuntime, MutationReceipt, RuntimeError, RuntimeInitial};
+pub use runtime::{
+    AuthoritativeRuntime, EventIngestReceipt, MutationReceipt, RuntimeError, RuntimeInitial,
+};
 pub use server::{MAX_REQUEST_BODY_BYTES, RunningServer, ServerError};

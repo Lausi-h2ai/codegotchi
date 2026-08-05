@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use codegotchi_domain::{AgentEvent, SimulationSnapshot};
+use codegotchi_domain::{
+    AgentEvent, CommandCategory, CommandClassification, CommandPurpose, EnforcementMode,
+    SimulationSnapshot,
+};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -135,13 +138,118 @@ pub enum HookInputError {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EventIngestRequest {
     pub event: AgentEvent,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission: Option<PermissionContext>,
 }
 
 impl EventIngestRequest {
     pub fn new(event: AgentEvent) -> Self {
-        Self { event }
+        Self {
+            event,
+            permission: None,
+        }
+    }
+
+    pub fn with_permission(event: AgentEvent, classification: CommandClassification) -> Self {
+        Self {
+            event,
+            permission: Some(PermissionContext::from_classification(classification)),
+        }
+    }
+
+    pub fn new_with_permission(event: AgentEvent, classification: CommandClassification) -> Self {
+        Self::with_permission(event, classification)
     }
 }
+
+/// The only optional context that may accompany a canonical PreToolUse event.
+/// It is deliberately limited to policy inputs and cannot carry source text,
+/// a raw command, tool output, or a transcript fragment.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PermissionContext {
+    pub category: String,
+    pub purpose: String,
+}
+
+impl PermissionContext {
+    pub fn from_classification(classification: CommandClassification) -> Self {
+        Self {
+            category: command_category_id(classification.category()).to_owned(),
+            purpose: command_purpose_id(classification.purpose()).to_owned(),
+        }
+    }
+
+    pub fn classification(&self) -> Option<CommandClassification> {
+        Some(CommandClassification::new(
+            parse_command_category(&self.category)?,
+            parse_command_purpose(&self.purpose)?,
+        ))
+    }
+}
+
+fn command_category_id(category: CommandCategory) -> &'static str {
+    match category {
+        CommandCategory::CodeGotchi => "code_gotchi",
+        CommandCategory::Development => "development",
+        CommandCategory::Process => "process",
+        CommandCategory::Shell => "shell",
+        CommandCategory::Git => "git",
+        CommandCategory::Infrastructure => "infrastructure",
+        CommandCategory::Security => "security",
+        CommandCategory::Unknown => "unknown",
+    }
+}
+
+fn command_purpose_id(purpose: CommandPurpose) -> &'static str {
+    match purpose {
+        CommandPurpose::SafeDevelopment => "safe_development",
+        CommandPurpose::CodeGotchiControl => "code_gotchi_control",
+        CommandPurpose::ProcessRecovery => "process_recovery",
+        CommandPurpose::ShellRecovery => "shell_recovery",
+        CommandPurpose::GitRecovery => "git_recovery",
+        CommandPurpose::InfrastructureShutdown => "infrastructure_shutdown",
+        CommandPurpose::SecurityRemediation => "security_remediation",
+        CommandPurpose::Uncertain => "uncertain",
+    }
+}
+
+fn parse_command_category(value: &str) -> Option<CommandCategory> {
+    Some(match value {
+        "code_gotchi" => CommandCategory::CodeGotchi,
+        "development" => CommandCategory::Development,
+        "process" => CommandCategory::Process,
+        "shell" => CommandCategory::Shell,
+        "git" => CommandCategory::Git,
+        "infrastructure" => CommandCategory::Infrastructure,
+        "security" => CommandCategory::Security,
+        "unknown" => CommandCategory::Unknown,
+        _ => return None,
+    })
+}
+
+fn parse_command_purpose(value: &str) -> Option<CommandPurpose> {
+    Some(match value {
+        "safe_development" => CommandPurpose::SafeDevelopment,
+        "code_gotchi_control" => CommandPurpose::CodeGotchiControl,
+        "process_recovery" => CommandPurpose::ProcessRecovery,
+        "shell_recovery" => CommandPurpose::ShellRecovery,
+        "git_recovery" => CommandPurpose::GitRecovery,
+        "infrastructure_shutdown" => CommandPurpose::InfrastructureShutdown,
+        "security_remediation" => CommandPurpose::SecurityRemediation,
+        "uncertain" => CommandPurpose::Uncertain,
+        _ => return None,
+    })
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModeRequest {
+    pub mode: EnforcementMode,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DebugRequest {}
 
 /// A deliberately tolerant response envelope shared by the hook and backend.
 ///
@@ -182,7 +290,7 @@ pub struct CleanRequest {
     pub poop_id: Uuid,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotMutationResponse {
     #[serde(flatten)]
@@ -219,7 +327,7 @@ impl ErrorEnvelope {
 
 impl EventIngestResponse {
     pub fn is_strict_denial(&self) -> bool {
-        if !self.accepted || !self.evaluated {
+        if !self.accepted || !self.evaluated || self.denial_reason().is_none() {
             return false;
         }
         if !(self.strict || self.enforcement_mode.as_deref() == Some("strict")) {

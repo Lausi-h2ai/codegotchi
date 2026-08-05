@@ -3,6 +3,11 @@ use std::path::Path;
 use codegotchi_domain::{ActivityKind, CommandCategory, CommandClassification, CommandPurpose};
 
 /// Classifies a Codex command without retaining the command text.
+///
+/// The parser is intentionally conservative. A command is blockable only when
+/// it has one recognized executable, no shell composition, and a recognized
+/// local development subcommand. Everything else remains structured metadata
+/// with an uncertain purpose and therefore fails open in Strict mode.
 pub fn classify_command(tool_name: &str, command: &str) -> CommandClassification {
     if tool_name.eq_ignore_ascii_case("apply_patch") {
         return CommandClassification::new(
@@ -10,7 +15,7 @@ pub fn classify_command(tool_name: &str, command: &str) -> CommandClassification
             CommandPurpose::SafeDevelopment,
         );
     }
-    if !tool_name.eq_ignore_ascii_case("bash") {
+    if !tool_name.eq_ignore_ascii_case("bash") || command_is_ambiguous(command) {
         return CommandClassification::new(CommandCategory::Unknown, CommandPurpose::Uncertain);
     }
 
@@ -23,12 +28,23 @@ pub fn classify_command(tool_name: &str, command: &str) -> CommandClassification
             CommandCategory::CodeGotchi,
             CommandPurpose::CodeGotchiControl,
         ),
-        "cargo" | "rustc" | "rustup" | "npm" | "pnpm" | "yarn" | "node" | "bun" | "python"
-        | "python3" | "pytest" | "go" | "make" | "cmake" | "mvn" | "gradle" | "javac" | "swift"
-        | "dotnet" | "gcc" | "g++" | "clang" => CommandClassification::new(
+        "cargo" => development_classification(command, cargo_subcommand_is_safe),
+        "npm" | "pnpm" | "yarn" => development_classification(command, package_subcommand_is_safe),
+        "go" => development_classification(command, go_subcommand_is_safe),
+        "make" | "cmake" | "mvn" | "gradle" | "dotnet" | "swift" => {
+            development_classification(command, build_subcommand_is_safe)
+        }
+        "pytest" => CommandClassification::new(
             CommandCategory::Development,
             CommandPurpose::SafeDevelopment,
         ),
+        "rustc" | "gcc" | "g++" | "clang" | "javac" => CommandClassification::new(
+            CommandCategory::Development,
+            CommandPurpose::SafeDevelopment,
+        ),
+        "rustup" | "node" | "bun" | "python" | "python3" => {
+            CommandClassification::new(CommandCategory::Development, CommandPurpose::Uncertain)
+        }
         "git" => CommandClassification::new(CommandCategory::Git, CommandPurpose::GitRecovery),
         "docker" | "podman" | "kubectl" | "helm" => CommandClassification::new(
             CommandCategory::Infrastructure,
@@ -43,7 +59,8 @@ pub fn classify_command(tool_name: &str, command: &str) -> CommandClassification
         ),
         "sh" | "bash" | "zsh" | "fish" | "ls" | "cat" | "pwd" | "rg" | "grep" | "find" | "sed"
         | "awk" | "head" | "tail" | "wc" | "sort" | "stat" | "which" | "command" | "env"
-        | "echo" | "printf" | "true" | "false" | "test" | "sleep" | "curl" | "wget" => {
+        | "echo" | "printf" | "true" | "false" | "test" | "sleep" | "curl" | "wget" | "exit"
+        | "return" => {
             CommandClassification::new(CommandCategory::Shell, CommandPurpose::ShellRecovery)
         }
         _ => CommandClassification::new(CommandCategory::Unknown, CommandPurpose::Uncertain),
@@ -94,7 +111,7 @@ pub fn activity_for_command(
     if tool_name.eq_ignore_ascii_case("apply_patch") {
         return ActivityKind::Editing;
     }
-    if !tool_name.eq_ignore_ascii_case("bash") {
+    if !tool_name.eq_ignore_ascii_case("bash") || command_is_ambiguous(command) {
         return ActivityKind::UnknownWork;
     }
     let Some(executable) = canonical_executable(tool_name, command) else {
@@ -103,14 +120,18 @@ pub fn activity_for_command(
     let first_subcommand = first_subcommand(command).unwrap_or_default();
     match executable {
         "cargo" | "npm" | "pnpm" | "yarn" | "go" | "make" | "cmake" | "mvn" | "gradle"
-        | "dotnet" => match first_subcommand {
-            "test" | "check" | "clippy" | "lint" | "verify" => ActivityKind::Testing,
-            "build" | "compile" | "run" => ActivityKind::Building,
+        | "dotnet" | "swift" => match first_subcommand {
+            "test" | "check" | "clippy" | "lint" | "verify" | "bench" | "vet" => {
+                ActivityKind::Testing
+            }
+            "build" | "compile" | "run" | "--build" => ActivityKind::Building,
             "install" | "add" => ActivityKind::Installing,
-            "fmt" | "format" => ActivityKind::Editing,
-            _ => ActivityKind::Building,
+            "fmt" | "format" | "fix" => ActivityKind::Editing,
+            "" => ActivityKind::Building,
+            _ => ActivityKind::Thinking,
         },
-        "rustc" | "gcc" | "g++" | "clang" | "javac" | "swift" => ActivityKind::Building,
+        "rustc" | "gcc" | "g++" | "clang" | "javac" => ActivityKind::Building,
+        "pytest" => ActivityKind::Testing,
         "git" => ActivityKind::GitOperation,
         "docker" | "podman" | "kubectl" | "helm" => ActivityKind::DockerOperation,
         "rg" | "grep" | "find" | "which" => ActivityKind::Searching,
@@ -121,9 +142,73 @@ pub fn activity_for_command(
         "sleep" => ActivityKind::Waiting,
         "ps" | "top" | "htop" | "kill" | "pkill" | "killall" => ActivityKind::Thinking,
         "sh" | "bash" | "zsh" | "fish" | "env" | "echo" | "printf" | "true" | "false" | "test"
-        | "command" => ActivityKind::Thinking,
+        | "command" | "exit" | "return" => ActivityKind::Thinking,
         _ => ActivityKind::UnknownWork,
     }
+}
+
+fn development_classification(
+    command: &str,
+    safe_subcommand: fn(&str) -> bool,
+) -> CommandClassification {
+    CommandClassification::new(
+        CommandCategory::Development,
+        if safe_subcommand(command) {
+            CommandPurpose::SafeDevelopment
+        } else {
+            CommandPurpose::Uncertain
+        },
+    )
+}
+
+fn cargo_subcommand_is_safe(command: &str) -> bool {
+    matches!(
+        first_subcommand(command),
+        Some(
+            "test"
+                | "check"
+                | "clippy"
+                | "build"
+                | "run"
+                | "fmt"
+                | "format"
+                | "bench"
+                | "doc"
+                | "fix"
+        )
+    )
+}
+
+fn package_subcommand_is_safe(command: &str) -> bool {
+    matches!(
+        first_subcommand(command),
+        Some("test" | "run" | "build" | "lint" | "check" | "format" | "fmt")
+    )
+}
+
+fn go_subcommand_is_safe(command: &str) -> bool {
+    matches!(
+        first_subcommand(command),
+        Some("test" | "build" | "run" | "fmt" | "vet")
+    )
+}
+
+fn build_subcommand_is_safe(command: &str) -> bool {
+    matches!(
+        first_subcommand(command),
+        Some(
+            "test"
+                | "check"
+                | "build"
+                | "compile"
+                | "run"
+                | "verify"
+                | "lint"
+                | "format"
+                | "fmt"
+                | "--build"
+        )
+    ) || first_subcommand(command).is_none()
 }
 
 fn canonical_executable(tool_name: &str, command: &str) -> Option<&'static str> {
@@ -204,6 +289,8 @@ fn canonical_executable(tool_name: &str, command: &str) -> Option<&'static str> 
         "sleep" => Some("sleep"),
         "curl" => Some("curl"),
         "wget" => Some("wget"),
+        "exit" => Some("exit"),
+        "return" => Some("return"),
         _ => None,
     }
 }
@@ -232,4 +319,32 @@ fn is_assignment_prefix(token: &str) -> bool {
     };
     (first == '_' || first.is_ascii_alphabetic())
         && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+fn command_is_ambiguous(command: &str) -> bool {
+    let trimmed = command.trim();
+    trimmed.is_empty()
+        || trimmed.chars().any(|character| {
+            matches!(
+                character,
+                ';' | '|'
+                    | '&'
+                    | '>'
+                    | '<'
+                    | '`'
+                    | '$'
+                    | '\\'
+                    | '\n'
+                    | '\r'
+                    | '"'
+                    | '\''
+                    | '('
+                    | ')'
+                    | '{'
+                    | '}'
+            )
+        })
+        || trimmed
+            .split_whitespace()
+            .any(|token| token.starts_with('#'))
 }

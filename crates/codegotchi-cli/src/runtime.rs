@@ -1,10 +1,11 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use codegotchi_domain::{
-    AgentEvent, AgentEventError, CareCommand, CareError, CareResult,
-    DefaultNeedProgressionStrategy, EnforcementMode, FoodInventory, Pet, PetSimulation,
-    SimulationSnapshot, SnapshotRestoreError, SystemClock,
+    ActivityKind, AgentEvent, AgentEventError, AgentEventKind, CareCommand, CareError, CareResult,
+    CommandCategory, CommandClassification, CommandPurpose, DefaultNeedProgressionStrategy,
+    EnforcementMode, FoodInventory, FoodKind, Pet, PetSettings, PetSimulation, SimulationSnapshot,
+    SnapshotRestoreError, SystemClock, WorkDecision, WorkPermissionPolicy,
 };
 use thiserror::Error;
 use tokio::sync::broadcast;
@@ -36,6 +37,13 @@ impl From<SimulationSnapshot> for RuntimeInitial {
 pub struct MutationReceipt {
     pub snapshot: SimulationSnapshot,
     pub duplicate: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EventIngestReceipt {
+    pub snapshot: SimulationSnapshot,
+    pub duplicate: bool,
+    pub decision: WorkDecision,
 }
 
 #[derive(Debug, Error)]
@@ -99,14 +107,67 @@ impl AuthoritativeRuntime {
     ) -> Result<MutationReceipt, RuntimeError> {
         let mut simulation = self.lock_simulation()?;
         let before = simulation.snapshot();
-        if before.enforcement_mode == mode {
-            return Ok(MutationReceipt {
-                snapshot: before,
+        let duplicate = before.enforcement_mode == mode;
+        let progress_at = before.last_updated_at + Duration::milliseconds(1);
+        simulation.current_state_at(progress_at);
+        simulation.set_enforcement_mode(mode);
+        self.persist_and_broadcast(&mut simulation, before, duplicate)
+    }
+
+    /// Evaluates an optional structured permission context and applies the
+    /// canonical event while holding the same simulation lock. A denied
+    /// PreToolUse is recorded as blocked so the browser sees one authoritative
+    /// state transition and the hook can make its decision from this response.
+    pub fn ingest_event(
+        &self,
+        event: &AgentEvent,
+        classification: Option<CommandClassification>,
+    ) -> Result<EventIngestReceipt, RuntimeError> {
+        let mut simulation = self.lock_simulation()?;
+        let before = simulation.snapshot();
+        let classification = classification.unwrap_or(CommandClassification::new(
+            CommandCategory::Unknown,
+            CommandPurpose::Uncertain,
+        ));
+        let decision = WorkPermissionPolicy::evaluate(
+            simulation.pet(),
+            &classification,
+            &PetSettings::new(before.enforcement_mode),
+        );
+        let duplicate = before.processed_event_ids.contains(&event.id);
+        let mut accepted_event = event.clone();
+        if decision.is_blocked() {
+            accepted_event.metadata.blocked = true;
+            accepted_event.activity = Some(ActivityKind::Blocked);
+        } else if accepted_event.kind == AgentEventKind::ToolCompleted
+            && accepted_event
+                .metadata
+                .exit_status
+                .is_some_and(|status| status != 0)
+            && accepted_event.activity == Some(ActivityKind::Error)
+            && accepted_event.metadata.command_category.as_deref() == Some("development")
+        {
+            // The installed hook contract labels a failed command as Error,
+            // while the domain's completion reducer uses Testing/Building to
+            // apply its failure outcome. This internal reducer hint is never
+            // persisted as event content; the canonical event remains privacy
+            // limited at the boundary.
+            accepted_event.activity = Some(ActivityKind::Testing);
+        }
+        simulation.apply_event(&accepted_event)?;
+        if duplicate {
+            return Ok(EventIngestReceipt {
+                snapshot: simulation.snapshot(),
                 duplicate: true,
+                decision,
             });
         }
-        simulation.set_enforcement_mode(mode);
-        self.persist_and_broadcast(&mut simulation, before, false)
+        let receipt = self.persist_and_broadcast(&mut simulation, before, false)?;
+        Ok(EventIngestReceipt {
+            snapshot: receipt.snapshot,
+            duplicate: receipt.duplicate,
+            decision,
+        })
     }
 
     pub fn apply_event(&self, event: &AgentEvent) -> Result<MutationReceipt, RuntimeError> {
@@ -168,6 +229,86 @@ impl AuthoritativeRuntime {
         }
         self.persist_and_broadcast(&mut simulation, before, false)?;
         Ok(true)
+    }
+
+    /// Fixed demo transition: advance the authoritative simulation enough for
+    /// idle hunger to become critical. No caller-supplied value is accepted.
+    pub fn debug_neglect(&self) -> Result<MutationReceipt, RuntimeError> {
+        let mut simulation = self.lock_simulation()?;
+        let before = simulation.snapshot();
+        let timestamp = before.last_updated_at + Duration::hours(100);
+        simulation.current_state_at(timestamp);
+        self.persist_and_broadcast(&mut simulation, before, false)
+    }
+
+    /// Fixed demo transition: feed a bounded amount of known food and apply a
+    /// bounded number of testing work events so the domain's normal threshold
+    /// logic creates a real authoritative poop. There is no arbitrary input.
+    pub fn debug_generate_poop(&self) -> Result<MutationReceipt, RuntimeError> {
+        let mut simulation = self.lock_simulation()?;
+        let before = simulation.snapshot();
+        let (food, feed_count) = if simulation.pet().inventory().count(FoodKind::Kibble) >= 3 {
+            (FoodKind::Kibble, 3_u128)
+        } else if simulation.pet().inventory().count(FoodKind::Treat) >= 5 {
+            (FoodKind::Treat, 5_u128)
+        } else if simulation.pet().inventory().count(FoodKind::Fruit) >= 4 {
+            (FoodKind::Fruit, 4_u128)
+        } else {
+            return Err(RuntimeError::Care(CareError::OutOfStock(
+                "debug_generate_poop needs fixed demo food".to_owned(),
+            )));
+        };
+
+        let transition = (|| {
+            for index in 0..feed_count {
+                let action_id = Uuid::new_v5(
+                    &before.pet_id,
+                    format!(
+                        "codegotchi-debug-generate-poop-feed:{}:{index}",
+                        before.poop_sequence
+                    )
+                    .as_bytes(),
+                );
+                simulation.apply_care(&CareCommand::Feed {
+                    action_id,
+                    food_id: food.id().to_owned(),
+                })?;
+            }
+            let session_id = Uuid::new_v5(&before.pet_id, b"codegotchi-debug-session");
+            for index in 0..10_u128 {
+                let event_id = Uuid::new_v5(
+                    &before.pet_id,
+                    format!(
+                        "codegotchi-debug-generate-poop-work:{}:{}:{}",
+                        before.poop_sequence, before.work_points, index
+                    )
+                    .as_bytes(),
+                );
+                let event = AgentEvent::new(
+                    event_id,
+                    session_id,
+                    "codegotchi-debug",
+                    codegotchi_domain::EventSource::Generic,
+                    AgentEventKind::ToolStarted,
+                    Some(ActivityKind::Testing),
+                    before.last_updated_at + Duration::milliseconds(index as i64 + 1),
+                    Default::default(),
+                );
+                simulation.apply_event(&event)?;
+            }
+            if simulation.pet().pending_poops().len() == before.pending_poops.len() {
+                return Err(RuntimeError::Care(CareError::UnsupportedCondition));
+            }
+            Ok::<(), RuntimeError>(())
+        })();
+
+        if let Err(error) = transition {
+            *simulation =
+                PetSimulation::from_snapshot(before, SystemClock, DefaultNeedProgressionStrategy)?;
+            return Err(error);
+        }
+
+        self.persist_and_broadcast(&mut simulation, before, false)
     }
 
     pub fn subscribe(

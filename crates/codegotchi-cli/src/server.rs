@@ -7,12 +7,15 @@ use axum::extract::{
     FromRequest, Request, State, WebSocketUpgrade,
     ws::{Message, WebSocket},
 };
+use axum::http::HeaderMap;
 use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use codegotchi_domain::{AgentEventError, CareError, EnforcementMode};
+use codegotchi_domain::{
+    AgentEventError, AgentEventKind, CareError, EnforcementMode, WorkDecision, WorkReasonCode,
+};
 use futures_util::StreamExt;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
@@ -22,8 +25,8 @@ use tokio::task::JoinHandle;
 
 use crate::persistence::PersistenceError;
 use crate::protocol::{
-    CleanRequest, ErrorEnvelope, EventIngestRequest, EventIngestResponse, FeedRequest,
-    HealthResponse, SnapshotMutationResponse,
+    CleanRequest, DebugRequest, ErrorEnvelope, EventIngestRequest, EventIngestResponse,
+    FeedRequest, HealthResponse, ModeRequest, SnapshotMutationResponse,
 };
 use crate::runtime::{AuthoritativeRuntime, MutationReceipt, RuntimeError};
 
@@ -189,6 +192,12 @@ fn router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/api/v1/state", get(state_handler))
         .route("/api/v1/events", post(events_handler))
+        .route("/api/v1/mode", post(mode_handler))
+        .route("/api/v1/debug/neglect", post(debug_neglect_handler))
+        .route(
+            "/api/v1/debug/generate-poop",
+            post(debug_generate_poop_handler),
+        )
         .route("/api/v1/care/feed", post(feed_handler))
         .route("/api/v1/care/clean", post(clean_handler))
         .route("/api/v1/stream", get(stream_handler))
@@ -249,21 +258,76 @@ async fn events_handler(
     State(state): State<AppState>,
     BoundedJson(request): BoundedJson<EventIngestRequest>,
 ) -> Response {
-    match state.runtime.apply_event(&request.event) {
+    let classification = (request.event.kind == AgentEventKind::ToolStarted)
+        .then(|| {
+            request
+                .permission
+                .as_ref()
+                .and_then(crate::protocol::PermissionContext::classification)
+        })
+        .flatten();
+    match state.runtime.ingest_event(&request.event, classification) {
         Ok(receipt) => {
             let mode = receipt.snapshot.enforcement_mode;
+            let blocked = receipt.decision.is_blocked();
             Json(EventIngestResponse {
                 accepted: true,
-                evaluated: false,
+                evaluated: true,
                 enforcement_mode: Some(enforcement_mode_id(mode).to_owned()),
                 strict: mode == EnforcementMode::Strict,
-                blocked: false,
-                decision: None,
-                reason: None,
+                blocked,
+                decision: Some(serde_json::json!(if blocked { "deny" } else { "allow" })),
+                reason: denial_reason(receipt.decision),
                 duplicate: receipt.duplicate,
             })
             .into_response()
         }
+        Err(error) => runtime_error_response(error),
+    }
+}
+
+async fn mode_handler(
+    State(state): State<AppState>,
+    BoundedJson(request): BoundedJson<ModeRequest>,
+) -> Response {
+    match state.runtime.set_enforcement_mode(request.mode) {
+        Ok(receipt) => mutation_response(receipt),
+        Err(error) => runtime_error_response(error),
+    }
+}
+
+async fn debug_neglect_handler(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    BoundedJson(_request): BoundedJson<DebugRequest>,
+) -> Response {
+    if !debug_header_is_present(&headers) {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "debug_disabled",
+            "debug commands require CODEGOTCHI_ENABLE_DEBUG=1",
+        );
+    }
+    match state.runtime.debug_neglect() {
+        Ok(receipt) => mutation_response(receipt),
+        Err(error) => runtime_error_response(error),
+    }
+}
+
+async fn debug_generate_poop_handler(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    BoundedJson(_request): BoundedJson<DebugRequest>,
+) -> Response {
+    if !debug_header_is_present(&headers) {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "debug_disabled",
+            "debug commands require CODEGOTCHI_ENABLE_DEBUG=1",
+        );
+    }
+    match state.runtime.debug_generate_poop() {
+        Ok(receipt) => mutation_response(receipt),
         Err(error) => runtime_error_response(error),
     }
 }
@@ -444,6 +508,28 @@ fn enforcement_mode_id(mode: EnforcementMode) -> &'static str {
         EnforcementMode::Gentle => "gentle",
         EnforcementMode::Strict => "strict",
     }
+}
+
+fn denial_reason(decision: WorkDecision) -> Option<String> {
+    let WorkDecision::Blocked { reason_code, .. } = decision else {
+        return None;
+    };
+    let reason = match reason_code {
+        WorkReasonCode::CriticalHunger => {
+            "The pet refuses this safe development action because its hunger is critical. Feed the pet in the CodeGotchi UI, then retry the Codex request afterward."
+        }
+        WorkReasonCode::CriticalCleanliness => {
+            "The pet refuses this safe development action because its cleanliness is critical. Clean the pet in the CodeGotchi UI, then retry the Codex request afterward."
+        }
+    };
+    Some(reason.to_owned())
+}
+
+fn debug_header_is_present(headers: &HeaderMap) -> bool {
+    headers
+        .get("x-codegotchi-debug")
+        .and_then(|value| value.to_str().ok())
+        == Some("1")
 }
 
 fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {

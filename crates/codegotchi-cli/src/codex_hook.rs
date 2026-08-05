@@ -11,7 +11,8 @@ use crate::classify::{
     activity_for_command, classify_command, command_category_name, executable_name,
 };
 use crate::protocol::{
-    EventIngestRequest, EventIngestResponse, HookInput, HookOutput, RuntimeMetadataV1,
+    DebugRequest, EventIngestRequest, EventIngestResponse, HookInput, HookOutput, ModeRequest,
+    PermissionContext, RuntimeMetadataV1, SnapshotMutationResponse,
 };
 use crate::runtime_metadata::read_metadata;
 
@@ -119,6 +120,19 @@ pub fn translate_hook_json(payload: &[u8], metadata: &RuntimeMetadataV1) -> Opti
         .and_then(|input| translate_hook(&input, metadata))
 }
 
+/// Produces the minimum structured policy context for a PreToolUse request.
+/// Raw hook values are consumed only inside this adapter.
+pub fn permission_context_for_hook(input: &HookInput) -> Option<PermissionContext> {
+    if input.hook_event_name != "PreToolUse" {
+        return None;
+    }
+    let tool_name = input.tool_name.as_deref().unwrap_or_default();
+    let command = input.command().unwrap_or_default();
+    Some(PermissionContext::from_classification(classify_command(
+        tool_name, command,
+    )))
+}
+
 pub fn hook_output_for_payload(payload: &[u8], metadata: &RuntimeMetadataV1) -> HookOutput {
     if payload.len() > MAX_HOOK_INPUT_BYTES {
         return HookOutput::allow();
@@ -145,6 +159,9 @@ pub fn run_hook_from_environment() -> HookOutput {
         Ok(metadata) => metadata,
         Err(_) => return HookOutput::allow(),
     };
+    if !runtime_metadata_is_active(&metadata) {
+        return HookOutput::allow();
+    }
     let input = match HookInput::from_json(&payload) {
         Ok(input) => input,
         Err(_) => return HookOutput::allow(),
@@ -153,7 +170,13 @@ pub fn run_hook_from_environment() -> HookOutput {
         Some(event) => event,
         None => return HookOutput::allow(),
     };
-    let request = EventIngestRequest::new(event);
+    let request = match permission_context_for_hook(&input) {
+        Some(permission) => EventIngestRequest {
+            event,
+            permission: Some(permission),
+        },
+        None => EventIngestRequest::new(event),
+    };
     let response = match send_event_to_runtime(&metadata, &request) {
         Ok(response) => response,
         Err(_) => return HookOutput::allow(),
@@ -177,6 +200,20 @@ fn read_bounded_stdin() -> Result<Vec<u8>, io::Error> {
         .take((MAX_HOOK_INPUT_BYTES as u64).saturating_add(1))
         .read_to_end(&mut payload)?;
     Ok(payload)
+}
+
+/// Returns false for a missing/stale owner process so hooks never contact an
+/// unrelated service using an abandoned metadata file.
+pub fn runtime_metadata_is_active(metadata: &RuntimeMetadataV1) -> bool {
+    if metadata.owning_pid == 0 || metadata.bearer_token.is_empty() {
+        return false;
+    }
+    if metadata.owning_pid == std::process::id() {
+        return true;
+    }
+    std::path::Path::new("/proc")
+        .join(metadata.owning_pid.to_string())
+        .exists()
 }
 
 fn deterministic_event_id(
@@ -260,8 +297,49 @@ pub fn send_event_to_runtime(
     metadata: &RuntimeMetadataV1,
     request: &EventIngestRequest,
 ) -> Result<EventIngestResponse, HookTransportError> {
-    let endpoint = parse_loopback_endpoint(&metadata.loopback_base_url)?;
     let body = serde_json::to_vec(request).map_err(|_| HookTransportError::Response)?;
+    let body = send_json_request(metadata, EVENT_INGEST_PATH, &body)?;
+    serde_json::from_slice(&body).map_err(|_| HookTransportError::Response)
+}
+
+pub fn send_mode_to_runtime(
+    metadata: &RuntimeMetadataV1,
+    mode: codegotchi_domain::EnforcementMode,
+) -> Result<SnapshotMutationResponse, HookTransportError> {
+    let body =
+        serde_json::to_vec(&ModeRequest { mode }).map_err(|_| HookTransportError::Response)?;
+    let body = send_json_request(metadata, "/api/v1/mode", &body)?;
+    serde_json::from_slice(&body).map_err(|_| HookTransportError::Response)
+}
+
+pub fn send_debug_neglect_to_runtime(
+    metadata: &RuntimeMetadataV1,
+) -> Result<SnapshotMutationResponse, HookTransportError> {
+    send_debug_request(metadata, "/api/v1/debug/neglect")
+}
+
+pub fn send_debug_generate_poop_to_runtime(
+    metadata: &RuntimeMetadataV1,
+) -> Result<SnapshotMutationResponse, HookTransportError> {
+    send_debug_request(metadata, "/api/v1/debug/generate-poop")
+}
+
+fn send_debug_request(
+    metadata: &RuntimeMetadataV1,
+    path: &str,
+) -> Result<SnapshotMutationResponse, HookTransportError> {
+    let body =
+        serde_json::to_vec(&DebugRequest::default()).map_err(|_| HookTransportError::Response)?;
+    let body = send_json_request(metadata, path, &body)?;
+    serde_json::from_slice(&body).map_err(|_| HookTransportError::Response)
+}
+
+fn send_json_request(
+    metadata: &RuntimeMetadataV1,
+    path: &str,
+    body: &[u8],
+) -> Result<Vec<u8>, HookTransportError> {
+    let endpoint = parse_loopback_endpoint(&metadata.loopback_base_url)?;
     let mut stream =
         TcpStream::connect_timeout(&endpoint, HOOK_IO_TIMEOUT).map_err(HookTransportError::Io)?;
     stream
@@ -270,18 +348,23 @@ pub fn send_event_to_runtime(
     stream
         .set_write_timeout(Some(HOOK_IO_TIMEOUT))
         .map_err(HookTransportError::Io)?;
+    let debug_header = if path.starts_with("/api/v1/debug/") {
+        "X-CodeGotchi-Debug: 1\r\n"
+    } else {
+        ""
+    };
     let request_head = format!(
-        "POST {EVENT_INGEST_PATH} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "POST {path} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\n{debug_header}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         endpoint,
         metadata.bearer_token,
         body.len()
     );
     stream
         .write_all(request_head.as_bytes())
-        .and_then(|()| stream.write_all(&body))
         .map_err(HookTransportError::Io)?;
+    stream.write_all(body).map_err(HookTransportError::Io)?;
     let response = read_http_response(&mut stream)?;
-    parse_http_response(&response)
+    parse_http_response_body(&response)
 }
 
 fn read_http_response(stream: &mut TcpStream) -> Result<Vec<u8>, HookTransportError> {
@@ -414,7 +497,7 @@ fn parse_loopback_endpoint(base_url: &str) -> Result<SocketAddr, HookTransportEr
         .ok_or(HookTransportError::NonLoopback)
 }
 
-fn parse_http_response(response: &[u8]) -> Result<EventIngestResponse, HookTransportError> {
+fn parse_http_response_body(response: &[u8]) -> Result<Vec<u8>, HookTransportError> {
     let header_end = response
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
@@ -471,7 +554,7 @@ fn parse_http_response(response: &[u8]) -> Result<EventIngestResponse, HookTrans
             .ok_or(HookTransportError::Response)?
             .to_vec()
     };
-    serde_json::from_slice(&body).map_err(|_| HookTransportError::Response)
+    Ok(body)
 }
 
 fn decode_chunked_body(mut bytes: &[u8]) -> Result<Vec<u8>, HookTransportError> {
