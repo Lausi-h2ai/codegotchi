@@ -1,0 +1,33 @@
+mod behavior;
+pub mod care;
+pub mod clock;
+pub mod event;
+pub mod permission;
+pub mod pet;
+pub mod poop;
+pub mod progression;
+pub mod random;
+
+pub use care::{CareCommand, CareError, CareResult};
+pub use clock::{Clock, FakeClock, SystemClock};
+pub use event::{
+    AGENT_EVENT_SCHEMA_VERSION, ActivityKind, AgentEvent, AgentEventError, AgentEventKind,
+    EventMetadata, EventSource,
+};
+pub use permission::{
+    CommandCategory, CommandClassification, CommandPurpose, EnforcementMode, PetSettings,
+    RequiredAction, WorkDecision, WorkPermissionPolicy, WorkPermissionStrategy, WorkReasonCode,
+};
+pub use pet::{
+    AgentActivityState, AgentOutcome, FoodInventory, FoodKind, Pet, PetBehavior, PetNeeds,
+    PetSpecies, Poop,
+};
+pub use poop::{
+    DefaultPoopGenerationStrategy, PoopGenerationStrategy, PoopGenerationThreshold,
+    PoopThresholdError,
+};
+pub use progression::{
+    DefaultNeedProgressionStrategy, NeedProgressionStrategy, PetSimulation, SessionActivity,
+    SimulationSnapshot,
+};
+pub use random::{RandomSource, SeededRandomSource};

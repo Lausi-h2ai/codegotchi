@@ -1,0 +1,513 @@
+use std::collections::BTreeMap;
+
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::event::ActivityKind;
+
+const NEED_MIN: f32 = 0.0;
+const NEED_MAX: f32 = 100.0;
+
+fn clamp_need(value: f32) -> f32 {
+    if value.is_nan() || value == f32::NEG_INFINITY {
+        NEED_MIN
+    } else if value == f32::INFINITY {
+        NEED_MAX
+    } else {
+        value.clamp(NEED_MIN, NEED_MAX)
+    }
+}
+
+/// The four bounded needs owned by a pet.
+///
+/// Hunger is inverted relative to the other needs: zero means full and 100 means starving.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PetNeeds {
+    hunger: f32,
+    energy: f32,
+    happiness: f32,
+    cleanliness: f32,
+}
+
+impl PetNeeds {
+    pub fn new(hunger: f32, energy: f32, happiness: f32, cleanliness: f32) -> Self {
+        Self {
+            hunger: clamp_need(hunger),
+            energy: clamp_need(energy),
+            happiness: clamp_need(happiness),
+            cleanliness: clamp_need(cleanliness),
+        }
+    }
+
+    pub fn hunger(self) -> f32 {
+        self.hunger
+    }
+
+    pub fn energy(self) -> f32 {
+        self.energy
+    }
+
+    pub fn happiness(self) -> f32 {
+        self.happiness
+    }
+
+    pub fn cleanliness(self) -> f32 {
+        self.cleanliness
+    }
+
+    pub fn set_hunger(&mut self, value: f32) {
+        self.hunger = clamp_need(value);
+    }
+
+    pub fn set_energy(&mut self, value: f32) {
+        self.energy = clamp_need(value);
+    }
+
+    pub fn set_happiness(&mut self, value: f32) {
+        self.happiness = clamp_need(value);
+    }
+
+    pub fn set_cleanliness(&mut self, value: f32) {
+        self.cleanliness = clamp_need(value);
+    }
+
+    pub fn adjust_hunger(&mut self, delta: f32) {
+        self.set_hunger(self.hunger + delta);
+    }
+
+    pub fn adjust_energy(&mut self, delta: f32) {
+        self.set_energy(self.energy + delta);
+    }
+
+    pub fn adjust_happiness(&mut self, delta: f32) {
+        self.set_happiness(self.happiness + delta);
+    }
+
+    pub fn adjust_cleanliness(&mut self, delta: f32) {
+        self.set_cleanliness(self.cleanliness + delta);
+    }
+}
+
+impl Default for PetNeeds {
+    fn default() -> Self {
+        Self::new(0.0, 100.0, 100.0, 100.0)
+    }
+}
+
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum PetSpecies {
+    #[default]
+    Cat,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum PetBehavior {
+    #[default]
+    Wandering,
+    Sleeping,
+    Working,
+    CriticalNeed,
+    Blocked,
+    RecentSuccess,
+    RecentFailure,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum AgentActivityState {
+    #[default]
+    Idle,
+    WaitingForUser,
+    Active(ActivityKind),
+    Blocked,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum AgentOutcome {
+    #[default]
+    None,
+    Success,
+    Failure,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum FoodKind {
+    Kibble,
+    Treat,
+    Fruit,
+}
+
+impl FoodKind {
+    pub fn from_id(food_id: &str) -> Option<Self> {
+        match food_id {
+            "kibble" => Some(Self::Kibble),
+            "treat" => Some(Self::Treat),
+            "fruit" => Some(Self::Fruit),
+            _ => None,
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Kibble => "kibble",
+            Self::Treat => "treat",
+            Self::Fruit => "fruit",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FoodInventory {
+    quantities: BTreeMap<FoodKind, u32>,
+}
+
+impl FoodInventory {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn count(&self, food: FoodKind) -> u32 {
+        self.quantities.get(&food).copied().unwrap_or_default()
+    }
+
+    pub fn add(&mut self, food: FoodKind, amount: u32) {
+        if amount == 0 {
+            return;
+        }
+
+        let count = self.quantities.entry(food).or_default();
+        *count = count.saturating_add(amount);
+    }
+
+    pub fn remove(&mut self, food: FoodKind, amount: u32) -> bool {
+        let count = self.count(food);
+        if count < amount {
+            return false;
+        }
+
+        if amount == count {
+            self.quantities.remove(&food);
+        } else if let Some(existing) = self.quantities.get_mut(&food) {
+            *existing -= amount;
+        }
+
+        true
+    }
+
+    pub fn contains(&self, food: FoodKind) -> bool {
+        self.count(food) > 0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.quantities.is_empty()
+    }
+
+    pub fn total(&self) -> u32 {
+        self.quantities
+            .values()
+            .copied()
+            .fold(0, u32::saturating_add)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Poop {
+    id: Uuid,
+    created_at: DateTime<Utc>,
+}
+
+impl Poop {
+    pub fn new(id: Uuid, created_at: DateTime<Utc>) -> Self {
+        Self { id, created_at }
+    }
+
+    pub fn id(self) -> Uuid {
+        self.id
+    }
+
+    pub fn created_at(self) -> DateTime<Utc> {
+        self.created_at
+    }
+}
+
+#[derive(Clone)]
+pub struct Pet {
+    id: Uuid,
+    name: String,
+    species: PetSpecies,
+    needs: PetNeeds,
+    behavior: PetBehavior,
+    work_points: u64,
+    digestion_points: u64,
+    last_updated_at: DateTime<Utc>,
+    pub(crate) pending_poops: Vec<Poop>,
+    activity: AgentActivityState,
+    recent_outcome: AgentOutcome,
+    inventory: FoodInventory,
+    poop_sequence: u64,
+}
+
+impl Pet {
+    pub fn new<N>(id: Uuid, name: N, species: PetSpecies, initial_timestamp: DateTime<Utc>) -> Self
+    where
+        N: Into<String>,
+    {
+        Self {
+            id,
+            name: name.into(),
+            species,
+            needs: PetNeeds::default(),
+            behavior: PetBehavior::default(),
+            work_points: 0,
+            digestion_points: 0,
+            last_updated_at: initial_timestamp,
+            pending_poops: Vec::new(),
+            activity: AgentActivityState::default(),
+            recent_outcome: AgentOutcome::default(),
+            inventory: FoodInventory::default(),
+            poop_sequence: 0,
+        }
+    }
+
+    /// Constructs a pet with an initial inventory seed. The inventory remains
+    /// read-only through the aggregate after construction.
+    pub fn with_inventory<N>(
+        id: Uuid,
+        name: N,
+        species: PetSpecies,
+        initial_timestamp: DateTime<Utc>,
+        inventory: FoodInventory,
+    ) -> Self
+    where
+        N: Into<String>,
+    {
+        let mut pet = Self::new(id, name, species, initial_timestamp);
+        pet.inventory = inventory;
+        pet
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn species(&self) -> PetSpecies {
+        self.species
+    }
+
+    pub fn needs(&self) -> PetNeeds {
+        self.needs
+    }
+
+    pub(crate) fn needs_mut(&mut self) -> &mut PetNeeds {
+        &mut self.needs
+    }
+
+    pub fn behavior(&self) -> PetBehavior {
+        self.behavior
+    }
+
+    pub fn activity(&self) -> AgentActivityState {
+        self.activity
+    }
+
+    pub fn recent_outcome(&self) -> AgentOutcome {
+        self.recent_outcome
+    }
+
+    pub fn inventory(&self) -> &FoodInventory {
+        &self.inventory
+    }
+
+    pub fn pending_poops(&self) -> &[Poop] {
+        &self.pending_poops
+    }
+
+    pub fn work_points(&self) -> u64 {
+        self.work_points
+    }
+
+    pub(crate) fn add_work_points(&mut self, points: u64) {
+        self.work_points = self.work_points.saturating_add(points);
+    }
+
+    pub fn digestion_points(&self) -> u64 {
+        self.digestion_points
+    }
+
+    pub fn poop_sequence(&self) -> u64 {
+        self.poop_sequence
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn add_digestion_points(&mut self, points: u64) {
+        self.digestion_points = self.digestion_points.saturating_add(points);
+    }
+
+    pub(crate) fn consume_work_points(&mut self, points: u64) {
+        self.work_points = self.work_points.saturating_sub(points);
+    }
+
+    pub(crate) fn consume_food(&mut self, food: FoodKind) -> bool {
+        self.inventory.remove(food, 1)
+    }
+
+    pub(crate) fn consume_digestion_points(&mut self, points: u64) {
+        self.digestion_points = self.digestion_points.saturating_sub(points);
+    }
+
+    pub(crate) fn push_poop(&mut self, poop: Poop) {
+        self.pending_poops.push(poop);
+    }
+
+    pub(crate) fn advance_poop_sequence(&mut self) {
+        self.poop_sequence = self.poop_sequence.saturating_add(1);
+    }
+
+    pub(crate) fn set_activity(&mut self, activity: AgentActivityState) {
+        self.activity = activity;
+    }
+
+    pub(crate) fn set_outcome(&mut self, outcome: AgentOutcome) {
+        self.recent_outcome = outcome;
+    }
+
+    pub fn last_updated_at(&self) -> DateTime<Utc> {
+        self.last_updated_at
+    }
+
+    /// Returns positive elapsed time and preserves the last timestamp on clock rollback.
+    pub(crate) fn advance_to(&mut self, timestamp: DateTime<Utc>) -> Duration {
+        if timestamp <= self.last_updated_at {
+            return Duration::zero();
+        }
+
+        let elapsed = timestamp.signed_duration_since(self.last_updated_at);
+        self.last_updated_at = timestamp;
+        elapsed
+    }
+
+    pub(crate) fn set_behavior(&mut self, behavior: PetBehavior) {
+        self.behavior = behavior;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, TimeZone, Utc};
+    use uuid::Uuid;
+
+    use super::{
+        AgentActivityState, AgentOutcome, FoodInventory, Pet, PetBehavior, PetNeeds, PetSpecies,
+        Poop,
+    };
+
+    #[test]
+    fn needs_clamp_at_both_bounds() {
+        let mut needs = PetNeeds::default();
+
+        needs.adjust_hunger(150.0);
+        needs.adjust_energy(-150.0);
+        needs.adjust_happiness(-150.0);
+        needs.adjust_cleanliness(150.0);
+
+        assert_eq!(needs.hunger(), 100.0);
+        assert_eq!(needs.energy(), 0.0);
+        assert_eq!(needs.happiness(), 0.0);
+        assert_eq!(needs.cleanliness(), 100.0);
+
+        needs.set_hunger(-1.0);
+        needs.set_energy(101.0);
+        needs.set_happiness(101.0);
+        needs.set_cleanliness(-1.0);
+
+        assert_eq!(needs.hunger(), 0.0);
+        assert_eq!(needs.energy(), 100.0);
+        assert_eq!(needs.happiness(), 100.0);
+        assert_eq!(needs.cleanliness(), 0.0);
+    }
+
+    #[test]
+    fn pet_defaults_are_stable_and_explicit() {
+        let start = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        let pet = Pet::new(
+            Uuid::from_u128(1),
+            String::from("Mochi"),
+            PetSpecies::Cat,
+            start,
+        );
+
+        assert_eq!(pet.id(), Uuid::from_u128(1));
+        assert_eq!(pet.name(), "Mochi");
+        assert_eq!(pet.species(), PetSpecies::Cat);
+        assert_eq!(pet.needs(), PetNeeds::default());
+        assert_eq!(pet.behavior(), PetBehavior::Wandering);
+        assert_eq!(pet.activity(), AgentActivityState::Idle);
+        assert_eq!(pet.recent_outcome(), AgentOutcome::None);
+        assert!(pet.pending_poops().is_empty());
+        assert_eq!(pet.inventory(), &FoodInventory::default());
+        assert_eq!(pet.work_points(), 0);
+        assert_eq!(pet.digestion_points(), 0);
+        assert_eq!(pet.last_updated_at(), start);
+    }
+
+    #[test]
+    fn poop_and_inventory_have_small_domain_values() {
+        let timestamp = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        let poop = Poop::new(Uuid::from_u128(7), timestamp);
+        assert_eq!(poop.id(), Uuid::from_u128(7));
+        assert_eq!(poop.created_at(), timestamp);
+
+        let mut inventory = FoodInventory::default();
+        inventory.add(super::FoodKind::Kibble, 2);
+        assert_eq!(inventory.count(super::FoodKind::Kibble), 2);
+        assert!(inventory.remove(super::FoodKind::Kibble, 1));
+        assert_eq!(inventory.count(super::FoodKind::Kibble), 1);
+        assert!(!inventory.remove(super::FoodKind::Kibble, 2));
+        assert_eq!(inventory.count(super::FoodKind::Kibble), 1);
+    }
+
+    #[test]
+    fn pet_treats_backward_clock_movement_as_zero_elapsed_time() {
+        let start = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        let mut pet = Pet::new(
+            Uuid::from_u128(2),
+            String::from("Mochi"),
+            PetSpecies::Cat,
+            start,
+        );
+
+        assert_eq!(
+            pet.advance_to(start + Duration::hours(1)),
+            Duration::hours(1)
+        );
+
+        assert_eq!(pet.advance_to(start - Duration::hours(1)), Duration::zero());
+        assert_eq!(pet.last_updated_at(), start + Duration::hours(1));
+
+        assert_eq!(
+            pet.advance_to(start + Duration::hours(2)),
+            Duration::hours(1)
+        );
+    }
+
+    #[test]
+    fn point_additions_saturate_inside_the_pet_module() {
+        let start = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        let mut pet = Pet::new(Uuid::from_u128(3), "Mochi", PetSpecies::Cat, start);
+
+        pet.add_work_points(3);
+        pet.add_digestion_points(5);
+        assert_eq!(pet.work_points(), 3);
+        assert_eq!(pet.digestion_points(), 5);
+
+        pet.add_work_points(u64::MAX);
+        pet.add_digestion_points(u64::MAX);
+        assert_eq!(pet.work_points(), u64::MAX);
+        assert_eq!(pet.digestion_points(), u64::MAX);
+    }
+}

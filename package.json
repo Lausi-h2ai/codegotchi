@@ -1,0 +1,14 @@
+{
+    "name": "codegotchi",
+    "private": true,
+    "packageManager": "pnpm@11.20.0",
+    "engines": {
+        "node": ">=22.22.2"
+    },
+    "scripts": {
+        "test": "corepack pnpm --filter @codegotchi/web test",
+        "build": "corepack pnpm --filter @codegotchi/web build",
+        "lint": "corepack pnpm --filter @codegotchi/web lint",
+        "format:check": "corepack pnpm --filter @codegotchi/web format:check"
+    }
+}

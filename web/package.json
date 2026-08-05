@@ -1,0 +1,33 @@
+{
+    "name": "@codegotchi/web",
+    "private": true,
+    "version": "0.1.0",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc -b && vite build",
+        "lint": "eslint .",
+        "test": "vitest run",
+        "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"*.html\" \"*.json\" \"*.js\""
+    },
+    "dependencies": {
+        "react": "19.2.8",
+        "react-dom": "19.2.8"
+    },
+    "devDependencies": {
+        "@eslint/js": "10.0.1",
+        "@testing-library/jest-dom": "7.0.0",
+        "@testing-library/react": "16.3.2",
+        "@types/node": "22.20.1",
+        "@types/react": "19.2.18",
+        "@types/react-dom": "19.2.4",
+        "@vitejs/plugin-react": "6.0.5",
+        "eslint": "10.8.0",
+        "jsdom": "30.0.1",
+        "prettier": "3.9.6",
+        "typescript": "5.9.3",
+        "typescript-eslint": "8.66.0",
+        "vite": "8.2.0",
+        "vitest": "4.1.10"
+    }
+}
