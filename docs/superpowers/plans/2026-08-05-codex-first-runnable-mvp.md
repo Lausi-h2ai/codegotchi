@@ -253,29 +253,29 @@
 
 ## Manual verification sequence
 
-- [ ] Install with `cargo install --path crates/codegotchi-cli --force` and resolve `codegotchi` from the installed location.
-- [ ] Run `codegotchi run -- codex`, complete Codex's `/hooks` trust review without bypass flags, and confirm the browser opens from the embedded bundle.
-- [ ] Submit: `Inspect Cargo.toml, tell me the workspace package names, and run one harmless metadata or test-listing command. Do not modify files.`
-- [ ] Observe authoritative session active, thinking, Bash/unified-exec category, command activity, result feedback, waiting, and idle/end transitions in the UI.
-- [ ] In a disposable tracked fixture, ask Codex to make one harmless `apply_patch` edit, observe editing plus completion, then restore/remove only that fixture.
-- [ ] Use food drag/drop and record hunger before/after plus the same value after refresh.
-- [ ] Enable guarded demo mode, generate poop, complete shovel-poop-trash disposal, and record removal/cleanliness plus refresh persistence.
-- [ ] Exit Codex/CodeGotchi, launch the exact command again, and record the same pet identity, needs, inventory, and poop state.
-- [ ] Enable Strict, trigger neglect, have Codex attempt a safe test-listing command, record denial text, care through the UI, retry, and record allowance.
-- [ ] Verify Codex exit status, Ctrl+C behavior, runtime/profile removal, unchanged base config/credential checksums, loopback bind, and absence of sensitive persisted fields.
+- [x] Install with `cargo install --path crates/codegotchi-cli --force` and resolve `codegotchi` from the installed location.
+- [x] Run `codegotchi run -- codex`, complete Codex's `/hooks` trust review without bypass flags, and confirm the browser opens from the embedded bundle.
+- [x] Submit: `Inspect Cargo.toml, tell me the workspace package names, and run one harmless metadata or test-listing command. Do not modify files.`
+- [x] Observe authoritative session active, thinking, Bash/unified-exec category, command activity, result feedback, waiting, and idle/end transitions in the UI.
+- [x] In a disposable tracked fixture, ask Codex to make one harmless `apply_patch` edit, observe editing plus completion, then restore/remove only that fixture.
+- [x] Use food drag/drop and record hunger before/after plus the same value after refresh.
+- [x] Enable guarded demo mode, generate poop, complete shovel-poop-trash disposal, and record removal/cleanliness plus refresh persistence.
+- [x] Exit Codex/CodeGotchi, launch the exact command again, and record the same pet identity, needs, inventory, and poop state.
+- [x] Enable Strict, trigger neglect, have Codex attempt a safe test-listing command, record denial text, care through the UI, retry, and record allowance.
+- [x] Verify Codex exit status, Ctrl+C behavior, runtime/profile removal, unchanged base config/credential checksums, loopback bind, and absence of sensitive persisted fields.
 
 ## Complete verification suite
 
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- [ ] `cargo test --workspace`
-- [ ] `corepack pnpm lint`
-- [ ] `corepack pnpm test`
-- [ ] `corepack pnpm format:check`
-- [ ] `corepack pnpm build`
-- [ ] `corepack pnpm playwright:test`
-- [ ] Local `cargo install --path crates/codegotchi-cli --force`
-- [ ] Real interactive `codegotchi run -- codex`
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- [x] `cargo test --workspace`
+- [x] `corepack pnpm lint`
+- [x] `corepack pnpm test`
+- [x] `corepack pnpm format:check`
+- [x] `corepack pnpm build`
+- [x] `corepack pnpm playwright:test`
+- [x] Local `cargo install --path crates/codegotchi-cli --force`
+- [x] Real interactive `codegotchi run -- codex`
 
 ## Explicit deferred requirements
 
@@ -284,9 +284,9 @@
 
 ## Exact definition of done
 
-- [ ] Every mandatory acceptance criterion in the user milestone has direct automated or recorded manual evidence.
-- [ ] The final broad Luna/max review has no unresolved MVP-blocking finding after its single permitted correction pass.
-- [ ] All quality gates and local installation pass from fresh commands.
-- [ ] The supervisor personally ran the installed `codegotchi run -- codex` command with real Codex, real trusted hooks, the embedded browser UI, feeding, cleaning, restart persistence, Strict refusal/recovery, and cleanup.
-- [ ] `docs/verification/codex-first-mvp.md` contains exact results and limitations without “should work” language.
-- [ ] No backlog item was implemented after the mandatory path passed.
+- [x] Every mandatory acceptance criterion in the user milestone has direct automated or recorded manual evidence.
+- [x] The final broad Luna/max review has no unresolved MVP-blocking finding after its single permitted correction pass.
+- [x] All quality gates and local installation pass from fresh commands.
+- [x] The supervisor personally ran the installed `codegotchi run -- codex` command with real Codex, real trusted hooks, the embedded browser UI, feeding, cleaning, restart persistence, Strict refusal/recovery, and cleanup.
+- [x] `docs/verification/codex-first-mvp.md` contains exact results and limitations without “should work” language.
+- [x] No backlog item was implemented after the mandatory path passed.

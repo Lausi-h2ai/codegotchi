@@ -26,11 +26,13 @@ the fragment from the visible address bar and keeps the token only in the
 current tab's history state for reload. Authenticated HTTP uses a bearer
 header; the live WebSocket uses the same token as its subprotocol.
 
-On first use, Codex may pause for its normal `/hooks` trust review. Review and
-accept the generated CodeGotchi hook profile there; CodeGotchi does not bypass
-or silently approve that trust flow. The profile is additive. Existing Codex
-configuration, hooks, authentication, and credentials are preserved and are
-not copied or overwritten.
+Codex may pause for its normal `/hooks` trust review. Choose the review flow,
+inspect the generated CodeGotchi command hooks, and select **Trust all and
+continue**; CodeGotchi does not bypass or silently approve that trust flow.
+The profile is additive. Existing Codex configuration, hooks, authentication,
+and credentials are preserved and are not copied or overwritten. Because each
+run currently owns a uniquely named temporary profile, Codex 0.146.0 may ask
+for this review again on a later launch.
 
 Trailing Codex arguments are preserved in order. CodeGotchi rejects an
 explicit `-p`, attached short profile form, `--profile`, or `--profile=...`
@@ -131,5 +133,5 @@ LD_LIBRARY_PATH=/usr/lib/wsl/lib corepack pnpm playwright:test
 ```
 
 Routine tests use a fake Codex and never invoke a paid or real Codex session.
-The final real-Codex/browser acceptance remains a supervisor-owned manual
-gate; see [the verification record](docs/verification/codex-first-mvp.md).
+The completed supervisor-owned real Codex/browser acceptance is recorded in
+[the verification record](docs/verification/codex-first-mvp.md).

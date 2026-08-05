@@ -79,14 +79,20 @@ codex-cli 0.146.0
 
 The observed installed payload fields were `session_id`,
 `hook_event_name`, `turn_id`, `tool_name`, `tool_use_id`,
-`tool_input.command`, `tool_response.exit_code`,
-`tool_response.duration_ms`, `cwd`, `prompt`, `source`, `reason`,
+`tool_input.command`, `tool_response`, `cwd`, `prompt`, `source`, `reason`,
 `stop_hook_active`, and `last_assistant_message`; the adapter accepts unknown
 future fields and discards prompt, source, reason, command text, and tool output
-from the domain event. Source/reason are used only as bounded lifecycle ID
-inputs. Installed tool names observed in the spike were `Bash` and
-`apply_patch`. The pinned 0.146 schema defines the four SessionStart source
-values and fixes SessionEnd reason to `other`.
+from the domain event. Structured fixture payloads exercise
+`tool_response.exit_code` and `tool_response.duration_ms`. In the final real
+Codex 0.146.0 acceptance, `tool_response` was a model-facing string: both
+silent `true` and silent `false` produced the same empty string, so their exit
+status is honestly left unknown. For recognized test/build activity, the
+adapter can infer an outcome from narrow observable result markers such as a
+Cargo test-list count or a leading Cargo error, without retaining the raw
+response; unrecognized text stays neutral. Source/reason are used only as
+bounded lifecycle ID inputs. Installed tool names observed in the spike were
+`Bash` and `apply_patch`. The pinned 0.146 schema defines the four SessionStart
+source values and fixes SessionEnd reason to `other`.
 
 The tested denial response is exactly:
 

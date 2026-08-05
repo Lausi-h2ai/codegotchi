@@ -1,8 +1,8 @@
 # Codex-first runnable MVP verification
 
-Date of this record: 2026-08-05. This document separates automated evidence
-from the supervisor-owned real Codex/browser gate. No real or paid Codex
-session was run by the automated checks below.
+Date of this record: 2026-08-05. Routine automation used only fake Codex
+processes. The final sections separately record the supervisor-owned real
+installed Codex/browser acceptance.
 
 ## Environment
 
@@ -82,9 +82,9 @@ Playwright port, and does not start Vite or add a production mutation route.
 | `cargo test -p codegotchi-cli --test full_vertical_flow -- --nocapture` | PASS — 2 passed, 0 failed |
 | `cargo fmt --all -- --check` | PASS |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | PASS |
-| `cargo test --workspace` | PASS — 110 passed, 0 failed, 1 intentionally ignored manual installed-Codex test; doc-tests 0 |
+| `cargo test --workspace` | PASS — 111 passed, 0 failed, 1 intentionally ignored manual installed-Codex test; doc-tests 0 |
 | `corepack pnpm lint` | PASS |
-| `corepack pnpm test` | PASS — 3 files, 29 tests |
+| `corepack pnpm test` | PASS — 3 files, 30 tests |
 | `corepack pnpm format:check` | PASS |
 | `corepack pnpm build` | PASS — Vite production bundle built |
 | `node web/scripts/embed-web.mjs` | PASS — `web/dist` copied to `crates/codegotchi-cli/web-dist` |
@@ -150,29 +150,104 @@ Codex 0.146.0 trust/coexistence gate.
 - The UI token is fragment-only at launch, removed from the visible URL, and
   retained only for same-tab reload in history state.
 
-## Supervisor pending manual observations
+## Real installed Codex and browser acceptance
 
-These are deliberately pending; no automated result below is a substitute for
-the supervisor's real interactive acceptance.
+The supervisor installed and resolved the real binaries:
 
-- [ ] Install the binary with `cargo install --path crates/codegotchi-cli --locked`
-  and resolve that installed `codegotchi` executable.
-- [ ] Run `codegotchi run -- codex` with the installed Codex 0.146.0 and
-  complete the normal `/hooks` trust review without bypass flags.
-- [ ] Confirm the printed/opened UI is served from embedded production bytes
-  and inspect the visible fragment/token behavior.
-- [ ] Observe real SessionStart, thinking, Bash/unified-exec, apply_patch,
-  completion/result, waiting, idle/session-end activity transitions in the
-  browser.
-- [ ] Exercise food care, shovel→poop→trash cleanup, refresh persistence,
-  reconnect, and a typed backend error in the real browser.
-- [ ] Enable Strict, observe one recognized safe development denial with care
-  and retry guidance, care in the UI, and confirm a fresh retry is allowed.
-- [ ] In a disposable session, run the guarded `neglect` and `generate-poop`
-  demos with `CODEGOTCHI_ENABLE_DEBUG=1` and confirm no arbitrary values are
-  accepted.
-- [ ] Restart the real launcher in the same repository, verify pet identity
-  and cared-for state, and confirm only owned runtime/profile files were
-  removed while existing Codex config/credentials remain unchanged.
-- [ ] Confirm no paid/real Codex session was used by routine automation; the
-  supervisor owns this final gate.
+```text
+cargo install --path crates/codegotchi-cli --locked --force
+/home/laurent/.cargo/bin/codegotchi
+/home/laurent/.nvm/versions/node/v24.15.0/bin/codex
+codex-cli 0.146.0
+```
+
+The exact command was run twice from `/home/laurent/codegatchi` in a real PTY:
+
+```text
+codegotchi run -- codex
+```
+
+On the first launch Codex displayed its normal `Hooks need review` screen for
+the six generated hooks. The supervisor selected `Trust all and continue`;
+no hook-trust bypass flag was used. Codex then launched interactively with
+inherited colors and terminal input/output. The launcher bound an ephemeral
+`127.0.0.1` port, wrote mode-0600 runtime metadata under
+`/run/user/1000/codegotchi/`, and printed the fragment-token UI URL. The WSL
+browser helper exited with status 2, so the printed URL was opened directly;
+the embedded room showed Pixel, Connected, the desk, food, feed target,
+shovel, trash, needs, and authoritative activity. The fragment was removed
+from the address after token capture.
+
+The real smoke prompt was:
+
+```text
+Inspect Cargo.toml, tell me the workspace package names, and run one harmless metadata or test-listing command. Do not modify files.
+```
+
+Codex correctly reported `codegotchi-domain` and `codegotchi-cli` and ran
+`cargo metadata --no-deps --format-version 1`. Live authoritative polling and
+the browser observed session registration, Thinking, Bash work, Idle, and
+Waiting. A second disposable prompt asked real Codex to create
+`CODEGOTCHI_REAL_SMOKE.txt` with `apply_patch`; the browser/state observed
+Thinking then Editing, Codex created the marker, and the supervisor removed
+only that untracked fixture. A real Cargo test-list retry later produced the
+complete visible sequence `Thinking → Testing → Celebrating → Waiting`, with
+`recentOutcome: Success` and no browser alert.
+
+The installed PostToolUse contract was checked without retaining output. In
+Codex 0.146.0 it supplies a model-facing string, and silent `true` and `false`
+both supply an empty string, so those outcomes remain neutral. Recognized
+test/build output now uses only narrow observable success/failure markers;
+unknown result text remains neutral. The focused red/green regression test is
+`installed_string_tool_responses_infer_only_observable_cargo_outcomes`.
+
+## Real care, Strict, persistence, and cleanup evidence
+
+- Guarded `debug generate-poop` created one authoritative poop. In the real
+  embedded UI the supervisor selected Shovel, selected that poop, and selected
+  Trash. Poop count changed from 1 to 0, cleanliness rose from `99.98752` to
+  `100`, `Cleaned up` appeared, and a full reload still showed zero poop.
+- Guarded `debug neglect` set hunger to `100` and behavior to `CriticalNeed`;
+  `codegotchi mode strict` persisted Strict mode. Real Codex attempted exactly
+  `cargo test -p codegotchi-domain -- --list`. The real PreToolUse hook denied
+  it, authoritative activity became `Blocked`, and Codex reported that the
+  pet's hunger was critical and no alternative command ran.
+- Dragging a treat to the feed target reduced hunger `100 → 90` and inventory
+  `25 → 24`; dragging fruit reduced hunger `90 → 75` and inventory `25 → 24`.
+  Both showed Eating feedback and survived reload. At hunger 75 the identical
+  fresh retry was allowed, ran 64 test listings with exit code 0, and drove
+  the real Testing/Celebrating UI states.
+- Before the first exit the persisted state was pet ID
+  `291d078c-76d7-55a4-a892-162a807f4dd4`, Pixel, hunger 75, energy 100,
+  happiness 100, cleanliness 100, inventory 47/24/24, zero pending poop,
+  poop sequence 1, and Strict mode. The first `/exit` returned status 0.
+  The second exact launch restored the same ID, needs, inventory, zero-poop
+  state, poop sequence, Strict mode, and care replay history; its UI was
+  Connected after reload and its `/exit` also returned status 0.
+- Runtime metadata and generated `codegotchi-*.config.toml` files were absent
+  after each normal exit; SQLite remained. `~/.codex/config.toml` retained
+  SHA-256 `d1495adcbc6fab6465db015d92f4c5c7f126cc1a0e558537699973ec1f401833`
+  and `~/.codex/auth.json` retained
+  `947f7529303450e9c394d3605b763a4935a216e317b6b40b460fcff81e434062`.
+- Direct byte searches of SQLite found none of the unique real prompt,
+  apply-patch instruction, complete Cargo command, or deliberate failure
+  command. No credential file was copied or modified. The server was reachable
+  only on its printed `127.0.0.1` address and exposed no command-execution API.
+
+Routine automation separately proves signal forwarding/Ctrl+C, typed backend
+errors, WebSocket disconnect/recovery, duplicate idempotency, authentication,
+fail-open transport behavior, and synthetic coexistence with a pre-existing
+hook. The real sessions confirmed normal terminal interaction and exit status.
+
+## Known limitations
+
+- The native browser helper returned status 2 in this WSL2 environment. The
+  launcher surfaced the complete usable local URL, and the embedded UI was
+  opened from that URL without a development server.
+- Codex 0.146.0 may repeat hook review because every run uses a uniquely named
+  temporary profile. The trust flow remains explicit and is never bypassed.
+- A hard-killed launcher can leave its temporary profile until manual cleanup;
+  stale runtime metadata is reclaimed on a later run.
+- Hosted/unsupported tools and command outcomes absent from the installed hook
+  payload remain generic/neutral. This MVP does not treat hooks as a security
+  boundary.

@@ -63,16 +63,19 @@ impl HookInput {
     }
 
     pub fn exit_status(&self) -> Option<i32> {
-        let response = self.tool_response.as_ref()?.as_object()?;
-        ["exit_code", "exitCode", "status"]
-            .iter()
-            .find_map(|key| response.get(*key).and_then(value_as_i32))
-            .or_else(|| {
-                response
-                    .get("success")
-                    .and_then(Value::as_bool)
-                    .map(|success| if success { 0 } else { 1 })
-            })
+        let response = self.tool_response.as_ref()?;
+        if let Some(response) = response.as_object() {
+            return ["exit_code", "exitCode", "status"]
+                .iter()
+                .find_map(|key| response.get(*key).and_then(value_as_i32))
+                .or_else(|| {
+                    response
+                        .get("success")
+                        .and_then(Value::as_bool)
+                        .map(|success| if success { 0 } else { 1 })
+                });
+        }
+        response.as_str().and_then(infer_exit_status_from_text)
     }
 
     pub fn duration_ms(&self) -> Option<u64> {
@@ -126,6 +129,28 @@ impl HookInput {
 
 fn value_as_i32(value: &Value) -> Option<i32> {
     value.as_i64().and_then(|number| i32::try_from(number).ok())
+}
+
+fn infer_exit_status_from_text(response: &str) -> Option<i32> {
+    let response = response.to_ascii_lowercase();
+    if response
+        .lines()
+        .any(|line| line.trim_start().starts_with("error:"))
+        || response.contains("test result: failed")
+        || response.contains("tests failed")
+        || response.contains("build failed")
+    {
+        return Some(1);
+    }
+    if response.contains("test result: ok")
+        || response.contains("tests, 0 benchmarks")
+        || response.contains("passed in ")
+        || (response.contains("test suites:") && response.contains("passed"))
+        || response.contains("finished `")
+    {
+        return Some(0);
+    }
+    None
 }
 
 #[derive(Debug, Error)]

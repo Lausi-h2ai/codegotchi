@@ -77,5 +77,27 @@ Task 6: complete; accepted after one focused correction
 - Correction: original implementer resumed; fresh Strict retry identity, complete duplicate-care no-op equality, and non-vacuous process-level HTTP/SQLite privacy evidence fixed; commit 0006f59
 - Focused re-review: ACCEPTED; all three original findings resolved; full vertical flow 2 PASS
 - Deferred findings: stronger changed-state reconnect proof and graceful Playwright fixture sidecar cleanup were already recorded in docs/backlog/codex-first-mvp-followups.md
-Final review: pending
-Real acceptance: pending
+Final review: complete; one broad review, one focused correction
+- Reviewer: Codex CLI session 019fd2af-5278-72d0-8108-76e4276c7977, model gpt-5.6-luna, reasoning max
+- Reviewed range: 488c9a1..3a5b566
+- Review commit: 69a2510
+- Verdict: 2 MVP-blocking, 0 new Backlog — stale UI recovery alert plus supervisor-owned real installed acceptance
+- Final correction brief: 12819ad
+- Final correction: original Task 6 implementer session 019fd285-b098-7a41-a21e-f3f2b34924a4 resumed with gpt-5.6-luna/max; commit 4ddb194
+- Correction evidence: focused Vitest red 1 failed/1 passed, green 2/2; frontend 30 PASS; production embedded Playwright 7/7 PASS under supervisor WSL library path; Rust workspace 110 PASS before the final installed-schema characterization
+- Supervisor disposition: stale-alert blocker resolved; final real acceptance personally executed and recorded below
+
+Real acceptance: complete
+- Installed command: cargo install --path crates/codegotchi-cli --locked --force — PASS; resolved /home/laurent/.cargo/bin/codegotchi
+- Real Codex: /home/laurent/.nvm/versions/node/v24.15.0/bin/codex, codex-cli 0.146.0
+- Exact launch: codegotchi run -- codex — PASS twice in a real inherited PTY; both /exit paths returned 0
+- Trust: normal Hooks need review flow used; Trust all and continue selected; no bypass flag
+- Embedded UI: Connected on loopback; production room rendered; WSL browser helper exited 2 and printed URL was opened directly
+- Real hooks: session start/end, prompt/thinking, Bash/unified-exec, cargo testing, apply_patch editing, success celebration, Stop/waiting all observed in authoritative state and browser
+- Care: real UI treat and fruit drags reduced hunger 100→90→75 and persisted after reload; shovel→poop→trash removed 1→0 and cleanliness rose to 100 after reload
+- Strict: guarded neglect plus Strict denied the real safe Cargo test at critical hunger; UI care restored work; identical fresh retry ran 64 listings and celebrated
+- Restart: second exact launch restored pet 291d078c-76d7-55a4-a892-162a807f4dd4, Pixel, needs, 47/24/24 inventory, no poop, poop sequence 1, Strict, and care history
+- Cleanup/privacy: runtime/profile files removed; SQLite retained; base config/auth checksums unchanged; four unique prompt/command needles absent from SQLite
+- Installed-schema diagnostic: sanitized temporary coexisting PostToolUse hook proved Codex 0.146.0 emits model-facing string responses and identical empty strings for silent true/false; temporary hook/config/capture removed
+- Supervisor TDD correction: focused hook fixture red with expected None vs Some(0), then green 12/12; narrow observable Cargo test/build markers infer outcomes, unknown strings stay neutral, raw response remains unpersisted
+- Deferred findings: unchanged in docs/backlog/codex-first-mvp-followups.md

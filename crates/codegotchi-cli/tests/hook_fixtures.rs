@@ -387,3 +387,38 @@ fn post_success_and_failure_keep_command_metadata_but_discard_raw_values() {
             .contains("sensitive-tool-output")
     );
 }
+
+#[test]
+fn installed_string_tool_responses_infer_only_observable_cargo_outcomes() {
+    let metadata = metadata();
+    let cases = [
+        ("64 tests, 0 benchmarks", Some(0), ActivityKind::Testing),
+        (
+            "error: package ID specification `missing` did not match any packages",
+            Some(1),
+            ActivityKind::Error,
+        ),
+        ("opaque model-facing output", None, ActivityKind::Testing),
+    ];
+
+    for (tool_response, expected_exit, expected_activity) in cases {
+        let payload = serde_json::json!({
+            "session_id": "00000000-0000-0000-0000-000000000001",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_use_id": format!("tool-string-{expected_exit:?}"),
+            "tool_input": { "command": "cargo test -p codegotchi-domain -- --list" },
+            "tool_response": tool_response,
+        });
+        let input = HookInput::from_json(&serde_json::to_vec(&payload).unwrap()).unwrap();
+        let event = translate_hook(&input, &metadata).unwrap();
+
+        assert_eq!(event.metadata.exit_status, expected_exit);
+        assert_eq!(event.activity, Some(expected_activity));
+        assert!(
+            !serde_json::to_string(&event)
+                .unwrap()
+                .contains(tool_response)
+        );
+    }
+}
