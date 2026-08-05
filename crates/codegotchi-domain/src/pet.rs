@@ -22,7 +22,7 @@ fn clamp_need(value: f32) -> f32 {
 /// The four bounded needs owned by a pet.
 ///
 /// Hunger is inverted relative to the other needs: zero means full and 100 means starving.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PetNeeds {
     hunger: f32,
     energy: f32,
@@ -87,6 +87,12 @@ impl PetNeeds {
     pub fn adjust_cleanliness(&mut self, delta: f32) {
         self.set_cleanliness(self.cleanliness + delta);
     }
+
+    pub(crate) fn is_valid(self) -> bool {
+        [self.hunger, self.energy, self.happiness, self.cleanliness]
+            .into_iter()
+            .all(|value| value.is_finite() && (NEED_MIN..=NEED_MAX).contains(&value))
+    }
 }
 
 impl Default for PetNeeds {
@@ -96,7 +102,8 @@ impl Default for PetNeeds {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PetSpecies {
     #[default]
     Cat,
@@ -131,7 +138,8 @@ pub enum AgentOutcome {
     Failure,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FoodKind {
     Kibble,
     Treat,
@@ -157,8 +165,9 @@ impl FoodKind {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FoodInventory {
+    #[serde(flatten)]
     quantities: BTreeMap<FoodKind, u32>,
 }
 
@@ -209,9 +218,16 @@ impl FoodInventory {
             .copied()
             .fold(0, u32::saturating_add)
     }
+
+    pub fn quantities(&self) -> impl Iterator<Item = (FoodKind, u32)> + '_ {
+        self.quantities
+            .iter()
+            .map(|(food, amount)| (*food, *amount))
+    }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Poop {
     id: Uuid,
     created_at: DateTime<Utc>,
@@ -285,6 +301,39 @@ impl Pet {
         let mut pet = Self::new(id, name, species, initial_timestamp);
         pet.inventory = inventory;
         pet
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_snapshot(
+        id: Uuid,
+        name: String,
+        species: PetSpecies,
+        needs: PetNeeds,
+        behavior: PetBehavior,
+        work_points: u64,
+        digestion_points: u64,
+        last_updated_at: DateTime<Utc>,
+        pending_poops: Vec<Poop>,
+        activity: AgentActivityState,
+        recent_outcome: AgentOutcome,
+        inventory: FoodInventory,
+        poop_sequence: u64,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            species,
+            needs,
+            behavior,
+            work_points,
+            digestion_points,
+            last_updated_at,
+            pending_poops,
+            activity,
+            recent_outcome,
+            inventory,
+            poop_sequence,
+        }
     }
 
     pub fn id(&self) -> Uuid {

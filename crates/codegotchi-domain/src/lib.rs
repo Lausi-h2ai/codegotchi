@@ -27,7 +27,7 @@ pub use poop::{
     PoopThresholdError,
 };
 pub use progression::{
-    DefaultNeedProgressionStrategy, NeedProgressionStrategy, PetSimulation, SessionActivity,
-    SimulationSnapshot,
+    DefaultNeedProgressionStrategy, NeedProgressionStrategy, PetSimulation,
+    SIMULATION_SNAPSHOT_SCHEMA_VERSION, SessionActivity, SimulationSnapshot, SnapshotRestoreError,
 };
 pub use random::{RandomSource, SeededRandomSource};

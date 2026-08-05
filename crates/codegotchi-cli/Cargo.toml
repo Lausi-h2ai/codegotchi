@@ -13,12 +13,17 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+axum.workspace = true
 chrono.workspace = true
 codegotchi-domain = { path = "../codegotchi-domain" }
+futures-util.workspace = true
+rusqlite.workspace = true
 serde.workspace = true
 serde_json = "1"
+tokio.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
 sha2 = "0.10"
+tokio-tungstenite.workspace = true

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use codegotchi_domain::AgentEvent;
+use codegotchi_domain::{AgentEvent, SimulationSnapshot};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -131,7 +131,7 @@ pub enum HookInputError {
     Json(#[source] serde_json::Error),
 }
 
-/// The event envelope accepted by the future loopback backend.
+/// The event envelope accepted by the authenticated loopback backend.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EventIngestRequest {
     pub event: AgentEvent,
@@ -143,7 +143,7 @@ impl EventIngestRequest {
     }
 }
 
-/// A deliberately tolerant response envelope for the future loopback backend.
+/// A deliberately tolerant response envelope shared by the hook and backend.
 ///
 /// `decision` is a JSON value because the backend is not part of Task 1 and
 /// can evolve its structured decision representation without making the hook
@@ -164,6 +164,57 @@ pub struct EventIngestResponse {
     pub decision: Option<Value>,
     #[serde(default, alias = "permission_decision_reason")]
     pub reason: Option<String>,
+    #[serde(default)]
+    pub duplicate: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedRequest {
+    pub action_id: Uuid,
+    pub food_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanRequest {
+    pub action_id: Uuid,
+    pub poop_id: Uuid,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotMutationResponse {
+    #[serde(flatten)]
+    pub snapshot: SimulationSnapshot,
+    pub duplicate: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct HealthResponse {
+    pub status: &'static str,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ErrorEnvelope {
+    pub error: ErrorBody,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ErrorBody {
+    pub code: &'static str,
+    pub message: String,
+}
+
+impl ErrorEnvelope {
+    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            error: ErrorBody {
+                code,
+                message: message.into(),
+            },
+        }
+    }
 }
 
 impl EventIngestResponse {

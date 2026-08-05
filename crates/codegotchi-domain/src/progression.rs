@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
@@ -8,6 +10,7 @@ use crate::{
     care::{CareCommand, CareError, CareResult},
     clock::Clock,
     event::{ActivityKind, AgentEvent, AgentEventError, AgentEventKind},
+    permission::{EnforcementMode, PetSettings},
     pet::{AgentActivityState, AgentOutcome, FoodKind, Pet, PetBehavior, PetNeeds, Poop},
     poop::{DefaultPoopGenerationStrategy, PoopGenerationStrategy},
 };
@@ -51,7 +54,8 @@ impl NeedProgressionStrategy for DefaultNeedProgressionStrategy {
 }
 
 /// The activity and logical update time of one registered agent session.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionActivity {
     activity: AgentActivityState,
     updated_at: DateTime<Utc>,
@@ -67,9 +71,11 @@ impl SessionActivity {
     }
 }
 
-/// A deterministic in-memory test/read model, not a persistence DTO.
-#[derive(Clone, Debug, PartialEq)]
+/// The complete versioned state needed to continue one deterministic simulation.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SimulationSnapshot {
+    pub schema_version: u16,
     pub pet_id: Uuid,
     pub name: String,
     pub species: crate::pet::PetSpecies,
@@ -89,6 +95,19 @@ pub struct SimulationSnapshot {
     pub last_activity_at: Option<DateTime<Utc>>,
     pub last_outcome_at: Option<DateTime<Utc>>,
     pub consecutive_failures: u32,
+    pub enforcement_mode: EnforcementMode,
+}
+
+pub const SIMULATION_SNAPSHOT_SCHEMA_VERSION: u16 = 1;
+
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
+pub enum SnapshotRestoreError {
+    #[error(
+        "unsupported simulation snapshot schema version {0}; expected {SIMULATION_SNAPSHOT_SCHEMA_VERSION}"
+    )]
+    UnsupportedSchemaVersion(u16),
+    #[error("simulation snapshot invariant violation: {0}")]
+    InvariantViolation(String),
 }
 
 /// Owns external time and the strategy that advances the clock-free aggregate.
@@ -103,6 +122,7 @@ pub struct PetSimulation<C, N, P = DefaultPoopGenerationStrategy> {
     last_activity_at: Option<DateTime<Utc>>,
     last_outcome_at: Option<DateTime<Utc>>,
     consecutive_failures: u32,
+    settings: PetSettings,
 }
 
 impl<C, N> PetSimulation<C, N, DefaultPoopGenerationStrategy>
@@ -112,6 +132,19 @@ where
 {
     pub fn new(pet: Pet, clock: C, progression: N) -> Self {
         Self::with_poop_strategy(pet, clock, progression, DefaultPoopGenerationStrategy)
+    }
+
+    pub fn from_snapshot(
+        snapshot: SimulationSnapshot,
+        clock: C,
+        progression: N,
+    ) -> Result<Self, SnapshotRestoreError> {
+        Self::with_poop_strategy_from_snapshot(
+            snapshot,
+            clock,
+            progression,
+            DefaultPoopGenerationStrategy,
+        )
     }
 }
 
@@ -135,6 +168,7 @@ where
             last_activity_at: Some(initial_timestamp),
             last_outcome_at: None,
             consecutive_failures: 0,
+            settings: PetSettings::default(),
         }
     }
 
@@ -166,6 +200,14 @@ where
         self.consecutive_failures
     }
 
+    pub fn enforcement_mode(&self) -> EnforcementMode {
+        self.settings.enforcement_mode()
+    }
+
+    pub fn set_enforcement_mode(&mut self, mode: EnforcementMode) {
+        self.settings = PetSettings::new(mode);
+    }
+
     /// Advances elapsed effects to the injected clock and stores behavior.
     pub fn advance_time(&mut self) -> Duration {
         let previous_activity = self.pet.activity();
@@ -184,6 +226,7 @@ where
     /// Returns the stored aggregate state without advancing time.
     pub fn snapshot(&self) -> SimulationSnapshot {
         SimulationSnapshot {
+            schema_version: SIMULATION_SNAPSHOT_SCHEMA_VERSION,
             pet_id: self.pet.id(),
             name: self.pet.name().to_owned(),
             species: self.pet.species(),
@@ -203,6 +246,7 @@ where
             last_activity_at: self.last_activity_at,
             last_outcome_at: self.last_outcome_at,
             consecutive_failures: self.consecutive_failures,
+            enforcement_mode: self.settings.enforcement_mode(),
         }
     }
 
@@ -521,36 +565,7 @@ where
     }
 
     fn aggregate_activity(&self) -> AgentActivityState {
-        if self
-            .session_activities
-            .values()
-            .any(|session| session.activity == AgentActivityState::Blocked)
-        {
-            return AgentActivityState::Blocked;
-        }
-
-        if let Some((_, session)) = self
-            .session_activities
-            .iter()
-            .filter(|(_, session)| is_active(session.activity))
-            .max_by(|(left_id, left), (right_id, right)| {
-                left.updated_at
-                    .cmp(&right.updated_at)
-                    .then_with(|| left_id.cmp(right_id))
-            })
-        {
-            return session.activity;
-        }
-
-        if self
-            .session_activities
-            .values()
-            .any(|session| session.activity == AgentActivityState::WaitingForUser)
-        {
-            return AgentActivityState::WaitingForUser;
-        }
-
-        AgentActivityState::Idle
+        aggregate_activity(&self.session_activities)
     }
 
     fn refresh_behavior(&mut self, logical_time: DateTime<Utc>) {
@@ -564,11 +579,199 @@ where
     }
 }
 
+impl<C, N, P> PetSimulation<C, N, P>
+where
+    C: Clock,
+    N: NeedProgressionStrategy,
+    P: PoopGenerationStrategy,
+{
+    pub fn with_poop_strategy_from_snapshot(
+        snapshot: SimulationSnapshot,
+        clock: C,
+        progression: N,
+        poop_strategy: P,
+    ) -> Result<Self, SnapshotRestoreError> {
+        validate_snapshot(&snapshot)?;
+        let pet = Pet::from_snapshot(
+            snapshot.pet_id,
+            snapshot.name.clone(),
+            snapshot.species,
+            snapshot.needs,
+            snapshot.behavior,
+            snapshot.work_points,
+            snapshot.digestion_points,
+            snapshot.last_updated_at,
+            snapshot.pending_poops.clone(),
+            snapshot.activity,
+            snapshot.recent_outcome,
+            snapshot.inventory.clone(),
+            snapshot.poop_sequence,
+        );
+        Ok(Self {
+            pet,
+            clock,
+            progression,
+            poop_strategy,
+            session_activities: snapshot.session_activities,
+            processed_event_ids: snapshot.processed_event_ids,
+            processed_care_ids: snapshot.processed_care_ids,
+            last_activity_at: snapshot.last_activity_at,
+            last_outcome_at: snapshot.last_outcome_at,
+            consecutive_failures: snapshot.consecutive_failures,
+            settings: PetSettings::new(snapshot.enforcement_mode),
+        })
+    }
+}
+
+fn validate_snapshot(snapshot: &SimulationSnapshot) -> Result<(), SnapshotRestoreError> {
+    if snapshot.schema_version != SIMULATION_SNAPSHOT_SCHEMA_VERSION {
+        return Err(SnapshotRestoreError::UnsupportedSchemaVersion(
+            snapshot.schema_version,
+        ));
+    }
+    if snapshot.pet_id.is_nil() {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "pet id must not be nil".to_owned(),
+        ));
+    }
+    if snapshot.name.trim().is_empty() {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "pet name must not be empty".to_owned(),
+        ));
+    }
+    if !snapshot.needs.is_valid() {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "needs must be finite and bounded".to_owned(),
+        ));
+    }
+    if snapshot
+        .pending_poops
+        .iter()
+        .map(|poop| poop.id())
+        .collect::<BTreeSet<_>>()
+        .len()
+        != snapshot.pending_poops.len()
+    {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "pending poop ids must be unique".to_owned(),
+        ));
+    }
+    if !snapshot.pending_poops.is_empty() && snapshot.poop_sequence == 0 {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "pending poops require a positive poop sequence".to_owned(),
+        ));
+    }
+    if snapshot
+        .processed_event_ids
+        .iter()
+        .chain(snapshot.processed_care_ids.iter())
+        .any(Uuid::is_nil)
+    {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "replay ids must not be nil".to_owned(),
+        ));
+    }
+    if snapshot
+        .inventory
+        .quantities()
+        .any(|(_, quantity)| quantity == 0)
+    {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "inventory must not store zero quantities".to_owned(),
+        ));
+    }
+    if snapshot
+        .session_activities
+        .values()
+        .any(|session| session.updated_at() > snapshot.last_updated_at)
+    {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "session activity cannot be newer than the aggregate".to_owned(),
+        ));
+    }
+    if snapshot
+        .last_activity_at
+        .is_some_and(|timestamp| timestamp > snapshot.last_updated_at)
+        || snapshot
+            .last_outcome_at
+            .is_some_and(|timestamp| timestamp > snapshot.last_updated_at)
+    {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "activity and outcome timestamps cannot be newer than the aggregate".to_owned(),
+        ));
+    }
+
+    let expected_activity = aggregate_activity(&snapshot.session_activities);
+    if snapshot.activity != expected_activity {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "stored activity does not match registered sessions".to_owned(),
+        ));
+    }
+
+    let pet = Pet::from_snapshot(
+        snapshot.pet_id,
+        snapshot.name.clone(),
+        snapshot.species,
+        snapshot.needs,
+        snapshot.behavior,
+        snapshot.work_points,
+        snapshot.digestion_points,
+        snapshot.last_updated_at,
+        snapshot.pending_poops.clone(),
+        snapshot.activity,
+        snapshot.recent_outcome,
+        snapshot.inventory.clone(),
+        snapshot.poop_sequence,
+    );
+    let expected_behavior = BehaviorCoordinator::derive(
+        &pet,
+        snapshot.last_updated_at,
+        snapshot.last_activity_at,
+        snapshot.last_outcome_at,
+    );
+    if snapshot.behavior != expected_behavior {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "stored behavior is not derivable from the snapshot".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn completion_activity(event: &AgentEvent) -> Option<ActivityKind> {
     match event.kind {
         AgentEventKind::ToolCompleted | AgentEventKind::CommandCompleted => event.activity,
         _ => None,
     }
+}
+
+fn aggregate_activity(sessions: &BTreeMap<Uuid, SessionActivity>) -> AgentActivityState {
+    if sessions
+        .values()
+        .any(|session| session.activity == AgentActivityState::Blocked)
+    {
+        return AgentActivityState::Blocked;
+    }
+
+    if let Some((_, session)) = sessions
+        .iter()
+        .filter(|(_, session)| is_active(session.activity))
+        .max_by(|(left_id, left), (right_id, right)| {
+            left.updated_at
+                .cmp(&right.updated_at)
+                .then_with(|| left_id.cmp(right_id))
+        })
+    {
+        return session.activity;
+    }
+
+    if sessions
+        .values()
+        .any(|session| session.activity == AgentActivityState::WaitingForUser)
+    {
+        return AgentActivityState::WaitingForUser;
+    }
+
+    AgentActivityState::Idle
 }
 
 fn is_work_bearing_event(kind: AgentEventKind) -> bool {

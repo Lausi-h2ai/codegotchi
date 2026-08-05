@@ -1,10 +1,12 @@
 use crate::pet::Pet;
+use serde::{Deserialize, Serialize};
 
 const MINIMUM_HUNGER_RECOVERY: f32 = 20.0;
 const MINIMUM_CLEANLINESS_RECOVERY: f32 = 20.0;
 
 /// The level at which the policy changes how it reports critical neglect.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EnforcementMode {
     /// Record the pet state without affecting or warning about work.
     #[default]
