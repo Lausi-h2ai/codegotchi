@@ -671,15 +671,58 @@ fn sigwinch_is_forwarded_while_child_keeps_inherited_stdio() {
 
 #[cfg(unix)]
 fn process_group_id(pid: u32) -> i32 {
+    process_group_info(pid).0
+}
+
+#[cfg(unix)]
+fn process_group_info(pid: u32) -> (i32, i32) {
     let output = Command::new("ps")
-        .args(["-o", "pgid=", "-p", &pid.to_string()])
+        .args(["-o", "pgid=,tpgid=", "-p", &pid.to_string()])
+        .output()
+        .expect("ps starts");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut fields = stdout.split_whitespace();
+    (
+        fields
+            .next()
+            .expect("process group id exists")
+            .parse()
+            .expect("process group id parses"),
+        fields
+            .next()
+            .expect("terminal process group id exists")
+            .parse()
+            .expect("terminal process group id parses"),
+    )
+}
+
+#[cfg(unix)]
+fn parent_process_id(pid: u32) -> u32 {
+    let output = Command::new("ps")
+        .args(["-o", "ppid=", "-p", &pid.to_string()])
         .output()
         .expect("ps starts");
     assert!(output.status.success());
     String::from_utf8_lossy(&output.stdout)
         .trim()
         .parse()
-        .expect("process group id parses")
+        .expect("parent process id parses")
+}
+
+#[cfg(unix)]
+fn signal_seen_before_deadline(path: &Path, expected: &str) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        if fs::read_to_string(path)
+            .ok()
+            .is_some_and(|contents| contents.lines().any(|line| line == expected))
+        {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    false
 }
 
 #[cfg(unix)]
@@ -756,6 +799,163 @@ fn foreground_terminal_group_signal_is_not_forwarded_a_second_time() {
     assert!(
         status.success() || status.code() == Some(130),
         "PTY launcher status: {status}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_wrapper_terminal_signals_are_forwarded_once_to_the_child() {
+    let temp = TempDir::new("pty-direct-signal");
+    let cwd = temp.join("cwd");
+    let home = temp.join("home");
+    let codex_home = temp.join("codex-home");
+    let state = temp.join("state");
+    let runtime = temp.join("runtime");
+    for path in [&cwd, &home, &codex_home, &state, &runtime] {
+        fs::create_dir_all(path).unwrap();
+    }
+    let log = temp.join("codex.log");
+    let input = temp.join("stdin");
+    let ready = temp.join("signal-ready");
+    let release = temp.join("signal-release");
+    let signal_log = temp.join("signals");
+    fs::write(&release, b"").unwrap();
+    let command_line = format!("exec {} run -- codex", shell_quote_path(&binary()));
+    let mut command = Command::new("setsid");
+    command
+        .args(["script", "-q", "-e", "-f", "-c", &command_line, "/dev/null"])
+        .current_dir(&cwd)
+        .env_clear()
+        .env("HOME", &home)
+        .env("CODEX_HOME", &codex_home)
+        .env("XDG_STATE_HOME", &state)
+        .env("XDG_RUNTIME_DIR", &runtime)
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("CODEGOTCHI_REAL_CODEX", fake_codex())
+        .env("CODEGOTCHI_BROWSER", "none")
+        .env("FAKE_CODEX_LOG", &log)
+        .env("FAKE_STDIN_FILE", &input)
+        .env("FAKE_SIGNAL_FILE", &ready)
+        .env("FAKE_SIGNAL_LOG", &signal_log)
+        .env("FAKE_SIGNAL_RELEASE_FILE", &release)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = command.spawn().expect("script creates a real PTY");
+    wait_for(&ready);
+
+    let fake_pid = log_fields(&log, "PID")
+        .first()
+        .expect("fake Codex logs its PID")
+        .parse()
+        .expect("fake Codex PID parses");
+    let wrapper_pid = parent_process_id(fake_pid);
+    let (wrapper_group, wrapper_foreground) = process_group_info(wrapper_pid);
+    let (fake_group, fake_foreground) = process_group_info(fake_pid);
+    assert_ne!(
+        wrapper_group, fake_group,
+        "Codex must run in a distinct process group"
+    );
+    assert_eq!(
+        fake_group, wrapper_foreground,
+        "the wrapper must observe Codex as the PTY foreground group"
+    );
+    assert_eq!(
+        fake_group, fake_foreground,
+        "Codex process group must own the PTY while it is interactive"
+    );
+
+    assert!(
+        Command::new("kill")
+            .args(["-WINCH", &wrapper_pid.to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let saw_window_change = signal_seen_before_deadline(&signal_log, "SIGWINCH");
+
+    assert!(
+        Command::new("kill")
+            .args(["-INT", &wrapper_pid.to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let saw_interrupt = signal_seen_before_deadline(&signal_log, "SIGINT");
+    let _ = fs::remove_file(&release);
+    let status = child.wait().unwrap();
+    let signals = fs::read_to_string(&signal_log).unwrap_or_default();
+    assert!(
+        saw_window_change,
+        "direct SIGWINCH did not reach Codex: {signals}"
+    );
+    assert!(
+        saw_interrupt,
+        "direct SIGINT did not reach Codex: {signals}"
+    );
+    assert_eq!(
+        signals.lines().filter(|line| *line == "SIGWINCH").count(),
+        1,
+        "direct SIGWINCH was delivered more than once: {signals}"
+    );
+    assert_eq!(
+        signals.lines().filter(|line| *line == "SIGINT").count(),
+        1,
+        "direct SIGINT was delivered more than once: {signals}"
+    );
+    assert_eq!(status.code(), Some(130), "PTY launcher status: {status}");
+}
+
+#[cfg(unix)]
+#[test]
+fn terminal_foreground_is_restored_after_codex_exits() {
+    let temp = TempDir::new("pty-restore");
+    let cwd = temp.join("cwd");
+    let home = temp.join("home");
+    let codex_home = temp.join("codex-home");
+    let state = temp.join("state");
+    let runtime = temp.join("runtime");
+    for path in [&cwd, &home, &codex_home, &state, &runtime] {
+        fs::create_dir_all(path).unwrap();
+    }
+    let log = temp.join("codex.log");
+    let input = temp.join("stdin");
+    let restored = temp.join("restored-group");
+    let command_line = format!(
+        "{} run -- codex; status=$?; ps -o pgid=,tpgid= -p $$ > \"$RESTORED_GROUP\"; exit $status",
+        shell_quote_path(&binary())
+    );
+    let output = Command::new("setsid")
+        .args(["script", "-q", "-e", "-f", "-c", &command_line, "/dev/null"])
+        .current_dir(&cwd)
+        .env_clear()
+        .env("HOME", &home)
+        .env("CODEX_HOME", &codex_home)
+        .env("XDG_STATE_HOME", &state)
+        .env("XDG_RUNTIME_DIR", &runtime)
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("CODEGOTCHI_REAL_CODEX", fake_codex())
+        .env("CODEGOTCHI_BROWSER", "none")
+        .env("FAKE_CODEX_LOG", &log)
+        .env("FAKE_STDIN_FILE", &input)
+        .env("RESTORED_GROUP", &restored)
+        .stdin(Stdio::null())
+        .output()
+        .expect("script creates a real PTY");
+    assert!(
+        output.status.success(),
+        "PTY launcher failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let values = fs::read_to_string(&restored).expect("shell recorded restored terminal group");
+    let mut fields = values.split_whitespace();
+    let shell_group: i32 = fields.next().unwrap().parse().unwrap();
+    let terminal_group: i32 = fields.next().unwrap().parse().unwrap();
+    assert!(shell_group > 0);
+    assert_eq!(
+        shell_group, terminal_group,
+        "the caller's process group must own the PTY after CodeGotchi exits"
     );
 }
 

@@ -145,3 +145,48 @@ Playwright's Chromium because the system library `libnspr4.so` is unavailable
 library. The real/paid Codex trust and interactive browser check remains a
 manual gate, as required; Strict mode remains a fail-open pet-care feature and
 is not a security boundary.
+
+## Second correction: foreground process-group handoff
+
+The focused re-review exposed one remaining launcher defect: the shared-PTY
+group suppression correctly avoided double delivery for terminal-group
+SIGINT/SIGWINCH, but also swallowed the same signals when sent directly to the
+wrapper PID. The original Luna/max implementer added a deterministic real-PTY
+fixture and observed it fail because direct SIGWINCH never reached fake Codex.
+
+The requested distinction while wrapper and child shared one process group was
+then tested at the Linux `siginfo_t` boundary. A disposable C probe sent the
+same signal once to a positive PID and once to a negative process-group ID.
+Both deliveries reported `si_code=SI_USER` (`0`) and the same sender PID/UID;
+the receiving process cannot determine the original target form. The
+supervisor therefore adjudicated the impossible shared-group premise in favor
+of standard POSIX job control.
+
+The launcher now uses `CommandExt::process_group(0)` to place Codex in a
+distinct process group when CodeGotchi owns a controlling terminal, gives that
+group the foreground with safe `nix` terminal APIs, and restores the original
+launcher group after Codex exits. SIGTTOU is blocked only around restoration
+and the previous thread signal mask is restored exactly. Direct signals to the
+background wrapper are forwarded once; terminal-generated/group signals reach
+the foreground Codex group directly once. Non-TTY launches retain the prior
+forwarding path. A failed handoff terminates and reaps the unusable child before
+normal profile/runtime/server cleanup.
+
+TDD and mutation evidence:
+
+- The new real-PTY direct-signal test first failed because wrapper and fake
+  Codex had the same PGID (`left: 370759`, `right: 370759`).
+- After the handoff implementation, direct SIGWINCH and SIGINT each reached
+  fake Codex exactly once and the launcher returned status 130.
+- The existing negative-PGID SIGINT test still recorded exactly one delivery.
+- A restoration test runs a caller shell after CodeGotchi exits and compares
+  its PGID with the PTY TPGID. Deliberately mutating restoration to a no-op made
+  it fail (`left: 372961`, `right: 372964`); restoring `tcsetpgrp` made it pass.
+
+Final focused results after this correction:
+
+- `cargo fmt --all -- --check`: passed.
+- `cargo test -p codegotchi-cli --test process_wrapper -- --nocapture`:
+  16 passed, 0 failed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`:
+  passed.

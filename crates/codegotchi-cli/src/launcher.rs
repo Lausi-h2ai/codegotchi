@@ -8,6 +8,12 @@ use std::time::Duration;
 
 use chrono::Utc;
 use codegotchi_domain::{Pet, PetSpecies};
+#[cfg(unix)]
+use nix::sys::signal::{SigSet, Signal, killpg};
+#[cfg(unix)]
+use nix::unistd::{Pid, getpgid, getpgrp, setpgid, tcgetpgrp, tcsetpgrp};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use thiserror::Error;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
@@ -307,6 +313,12 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
+    #[cfg(unix)]
+    let terminal_handoff = TerminalHandoff::detect();
+    #[cfg(unix)]
+    if terminal_handoff.is_some() {
+        child_command.process_group(0);
+    }
     let child = match child_command.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -322,6 +334,9 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
         }
     };
 
+    #[cfg(unix)]
+    let wait_result = wait_with_terminal_handoff(child, signals, terminal_handoff).await;
+    #[cfg(not(unix))]
     let wait_result = wait_for_child(child, signals).await;
     let metadata_cleanup = owned_metadata.cleanup();
     let profile_cleanup = profile.cleanup();
@@ -833,6 +848,103 @@ fn is_wsl() -> bool {
         || fs::read_to_string("/proc/version")
             .map(|version| version.to_ascii_lowercase().contains("microsoft"))
             .unwrap_or(false)
+}
+
+#[cfg(unix)]
+struct TerminalHandoff {
+    launcher_group: Pid,
+    active: bool,
+}
+
+#[cfg(unix)]
+impl TerminalHandoff {
+    fn detect() -> Option<Self> {
+        let launcher_group = getpgrp();
+        (tcgetpgrp(io::stdin()).ok() == Some(launcher_group)).then_some(Self {
+            launcher_group,
+            active: false,
+        })
+    }
+
+    fn activate(&mut self, child_pid: u32) -> Result<(), LauncherError> {
+        let raw_pid = i32::try_from(child_pid)
+            .map_err(|_| LauncherError::message("Codex process ID does not fit in a Unix PID"))?;
+        let child_group = Pid::from_raw(raw_pid);
+        if let Err(set_error) = setpgid(child_group, child_group)
+            && getpgid(Some(child_group)).ok() != Some(child_group)
+        {
+            return Err(LauncherError::message(format!(
+                "could not create the Codex process group: {set_error}"
+            )));
+        }
+        tcsetpgrp(io::stdin(), child_group).map_err(|error| {
+            LauncherError::message(format!(
+                "could not give the terminal foreground to Codex: {error}"
+            ))
+        })?;
+        self.active = true;
+        let _ = killpg(child_group, Signal::SIGCONT);
+        Ok(())
+    }
+
+    fn restore(&mut self) -> Result<(), LauncherError> {
+        if !self.active {
+            return Ok(());
+        }
+
+        let previous_mask = SigSet::thread_get_mask().map_err(|error| {
+            LauncherError::message(format!(
+                "could not inspect the signal mask before restoring the terminal: {error}"
+            ))
+        })?;
+        let mut blocked_mask = previous_mask;
+        blocked_mask.add(Signal::SIGTTOU);
+        blocked_mask.thread_set_mask().map_err(|error| {
+            LauncherError::message(format!(
+                "could not block SIGTTOU while restoring the terminal: {error}"
+            ))
+        })?;
+        let restore_result = tcsetpgrp(io::stdin(), self.launcher_group);
+        let mask_result = previous_mask.thread_set_mask();
+        if restore_result.is_ok() {
+            self.active = false;
+        }
+        restore_result.map_err(|error| {
+            LauncherError::message(format!(
+                "could not restore the terminal foreground to CodeGotchi: {error}"
+            ))
+        })?;
+        mask_result.map_err(|error| {
+            LauncherError::message(format!(
+                "could not restore the signal mask after terminal handoff: {error}"
+            ))
+        })
+    }
+}
+
+#[cfg(unix)]
+async fn wait_with_terminal_handoff(
+    mut child: Child,
+    signals: SignalController,
+    mut handoff: Option<TerminalHandoff>,
+) -> Result<ExitStatus, LauncherError> {
+    if let Some(handoff) = handoff.as_mut()
+        && let Err(error) = handoff.activate(child.id())
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
+
+    let wait_result = wait_for_child(child, signals).await;
+    let restore_result = match handoff.as_mut() {
+        Some(handoff) => handoff.restore(),
+        None => Ok(()),
+    };
+    match (wait_result, restore_result) {
+        (Ok(status), Ok(())) => Ok(status),
+        (Err(error), _) | (_, Err(error)) => Err(error),
+    }
 }
 
 async fn wait_for_child(
