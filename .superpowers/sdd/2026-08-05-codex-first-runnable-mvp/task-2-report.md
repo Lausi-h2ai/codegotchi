@@ -19,6 +19,12 @@ runs a one-second maintenance task that stops with the server.
 No Python subprocess, Python runtime dependency, handwritten HTTP parser, or
 handwritten WebSocket implementation remains in the Task 2 backend.
 
+The focused post-review correction pass also aligns the production Task 1 hook
+with `/api/v1/events`, consumes the server's length-delimited or chunked HTTP
+response without waiting for connection EOF, resubscribes WebSocket lagged
+receivers before sending recovery state, and returns typed JSON for known-route
+405 responses.
+
 ## Red-green record
 
 Tests were added before the corresponding restore/runtime/server APIs existed.
@@ -73,6 +79,48 @@ and unauthenticated HTTP, bounded bodies, typed errors, loopback binding, the
 absence of a command route, authenticated WebSocket snapshots, mutation
 broadcast, disconnect/reconnect, and authoritative reconnect state.
 
+## Focused post-review correction evidence
+
+The correction pass started from `49ff122` and was limited to the four findings
+in `task-2-review.md`. Tests were extended before the corresponding fixes.
+
+### RED
+
+~~~text
+cargo test --offline -p codegotchi-cli --test backend_integration
+exit 101: missing send_event_to_runtime and maintenance_tick_at
+
+cargo test --offline -p codegotchi-cli --lib lagged_websocket_recovery_discards_retained_stale_snapshots
+exit 101: missing next_authoritative_snapshot
+~~~
+
+### GREEN
+
+~~~text
+cargo test --offline -p codegotchi-cli --test backend_integration
+5 passed; 0 failed
+
+cargo test --offline -p codegotchi-cli --lib lagged_websocket_recovery_discards_retained_stale_snapshots
+1 passed; 0 failed
+
+cargo test --offline -p codegotchi-cli --test websocket_integration
+1 passed; 0 failed
+~~~
+
+The hook test launches the production `codegotchi hook` binary with runtime
+metadata, observes the translated canonical event in the live runtime and a
+fresh SQLite reload, then sends the replay through the same production
+transport and asserts the parsed accepted/duplicate response. The response
+reader now stops at HTTP framing instead of waiting for EOF.
+
+The lag test publishes 33 snapshots against the capacity-32 channel, verifies
+recovery returns the current authoritative snapshot, verifies no retained stale
+snapshot follows it, and verifies the next mutation is delivered on the fresh
+subscription. The maintenance test covers deterministic unchanged/changed
+ticks, persisted state observed with the broadcast snapshot, no extra
+broadcast, and bounded server shutdown completion. HTTP tests cover typed 405
+JSON for wrong methods on `/api/v1/state` and `/api/v1/events`.
+
 ## Repository gates
 
 Commands and results:
@@ -88,14 +136,11 @@ cargo test --offline --workspace
 exit 0
 ~~~
 
-The workspace test run passed the 3 backend integration tests, 11 hook
-fixture tests, 1 non-ignored installed-Codex test, 3 profile tests, 1
-WebSocket integration test, 18 domain unit tests, 13 care-flow tests, 2 event
-replay tests, 5 permission-matrix tests, 4 restore tests, 3 Task 1 contract
-tests, 8 Task 2 contract tests, and 11 Task 2 correction tests. One earlier
-parallel workspace invocation hit a transient loopback bind `EPERM`; the
-focused HTTP test passed immediately in isolation and the complete workspace
-command was rerun successfully.
+The workspace test run passed the 1 CLI unit test, 5 backend integration
+tests, 11 hook fixture tests, 1 non-ignored installed-Codex test, 3 profile
+tests, 1 WebSocket integration test, 18 domain unit tests, 13 care-flow tests,
+2 event replay tests, 5 permission-matrix tests, 4 restore tests, 3 Task 1
+contract tests, 8 Task 2 contract tests, and 11 Task 2 correction tests.
 
 `--offline` was required because crates.io DNS was unavailable. The requested
 cached versions resolved as Axum 0.8.9, rusqlite 0.37.0 with bundled SQLite,
@@ -134,27 +179,36 @@ WebSocket contract. No command-execution route was added.
 
 - `Cargo.toml`, `Cargo.lock`
 - `crates/codegotchi-cli/Cargo.toml`
-- `crates/codegotchi-cli/src/lib.rs`, `protocol.rs`, `persistence.rs`,
-  `runtime.rs`, `server.rs`
+- `crates/codegotchi-cli/src/codex_hook.rs`, `lib.rs`, `protocol.rs`,
+  `persistence.rs`, `runtime.rs`, `server.rs`
 - `crates/codegotchi-cli/tests/backend_integration.rs`,
   `websocket_integration.rs`
 - `crates/codegotchi-domain/src/lib.rs`, `permission.rs`, `pet.rs`,
   `progression.rs`
 - `crates/codegotchi-domain/tests/persistence_restore.rs`
 
+Correction-pass files:
+
+- `.superpowers/sdd/2026-08-05-codex-first-runnable-mvp/task-2-report.md`
+- `crates/codegotchi-cli/src/codex_hook.rs`, `lib.rs`, `runtime.rs`,
+  `server.rs`
+- `crates/codegotchi-cli/tests/backend_integration.rs`
+- `crates/codegotchi-domain/src/progression.rs`
+
 ## Commit and worktree status
 
-The implementation and report are ready, but the execution sandbox mounts
-`.git` read-only. `git add ...` fails before creating an index lock with:
+The correction commit was attempted after the final gates, but Git metadata is
+read-only in this execution sandbox:
 
 ~~~text
+git add .superpowers/sdd/2026-08-05-codex-first-runnable-mvp/task-2-report.md crates/codegotchi-cli/src/codex_hook.rs crates/codegotchi-cli/src/lib.rs crates/codegotchi-cli/src/runtime.rs crates/codegotchi-cli/src/server.rs crates/codegotchi-cli/tests/backend_integration.rs crates/codegotchi-domain/src/progression.rs
 fatal: Unable to create '/home/laurent/codegatchi/.git/index.lock': Read-only file system
 ~~~
 
-No stale `index.lock` exists. Consequently no commit hash can honestly be
-reported and the worktree cannot be made clean from this session. The source
-worktree changes are preserved for the supervisor to commit once Git metadata
-write access is restored.
+No stale `.git/index.lock` exists. No correction commit hash can honestly be
+reported, and the seven changed files listed above remain unstaged in the
+worktree for the supervisor to commit when Git metadata write access is
+restored.
 
 ## Deferred findings
 

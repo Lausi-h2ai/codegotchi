@@ -148,6 +148,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/health", get(health_handler))
         .merge(protected)
         .fallback(not_found_handler)
+        .method_not_allowed_fallback(method_not_allowed_handler)
         .with_state(state)
 }
 
@@ -243,19 +244,14 @@ async fn websocket_session(
     }
     loop {
         tokio::select! {
-            message = snapshots.recv() => {
+            message = next_authoritative_snapshot(&runtime, &mut snapshots) => {
                 match message {
-                    Ok(snapshot) => {
+                    Some(snapshot) => {
                         if send_snapshot(&mut socket, snapshot).await.is_err() {
                             return;
                         }
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
-                        if send_snapshot(&mut socket, runtime.snapshot()).await.is_err() {
-                            return;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Closed) => return,
+                    None => return,
                 }
             }
             incoming = socket.next() => {
@@ -271,6 +267,21 @@ async fn websocket_session(
                 }
             }
         }
+    }
+}
+
+async fn next_authoritative_snapshot(
+    runtime: &Arc<AuthoritativeRuntime>,
+    snapshots: &mut broadcast::Receiver<codegotchi_domain::SimulationSnapshot>,
+) -> Option<codegotchi_domain::SimulationSnapshot> {
+    match snapshots.recv().await {
+        Ok(snapshot) => Some(snapshot),
+        Err(broadcast::error::RecvError::Lagged(_)) => {
+            let (snapshot, fresh_receiver) = runtime.subscribe().ok()?;
+            *snapshots = fresh_receiver;
+            Some(snapshot)
+        }
+        Err(broadcast::error::RecvError::Closed) => None,
     }
 }
 
@@ -346,6 +357,14 @@ async fn not_found_handler() -> Response {
     error_response(StatusCode::NOT_FOUND, "not_found", "route not found")
 }
 
+async fn method_not_allowed_handler() -> Response {
+    error_response(
+        StatusCode::METHOD_NOT_ALLOWED,
+        "method_not_allowed",
+        "method not allowed for this route",
+    )
+}
+
 fn error_response(status: StatusCode, code: &'static str, message: impl Into<String>) -> Response {
     (status, Json(ErrorEnvelope::new(code, message))).into_response()
 }
@@ -404,5 +423,67 @@ where
             .map_err(|error| {
                 error_response(StatusCode::BAD_REQUEST, "invalid_json", error.to_string())
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+    use codegotchi_domain::{
+        AgentEvent, AgentEventKind, EventMetadata, EventSource, Pet, PetSpecies,
+    };
+    use tokio::sync::broadcast::error::TryRecvError;
+    use uuid::Uuid;
+
+    use super::{AuthoritativeRuntime, next_authoritative_snapshot};
+    use crate::persistence::SqliteStore;
+
+    #[tokio::test]
+    async fn lagged_websocket_recovery_discards_retained_stale_snapshots() {
+        let start = Utc.with_ymd_and_hms(2026, 8, 5, 12, 0, 0).unwrap();
+        let runtime = AuthoritativeRuntime::new(
+            SqliteStore::open(":memory:").unwrap(),
+            Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, start),
+        )
+        .unwrap();
+        let (_, mut snapshots) = runtime.subscribe().unwrap();
+
+        for id in 1..=33 {
+            let event = AgentEvent::new(
+                Uuid::from_u128(id),
+                Uuid::from_u128(7),
+                "repo",
+                EventSource::Codex,
+                AgentEventKind::TurnStarted,
+                None,
+                start,
+                EventMetadata::default(),
+            );
+            runtime.apply_event(&event).unwrap();
+        }
+
+        let recovered = next_authoritative_snapshot(&runtime, &mut snapshots)
+            .await
+            .unwrap();
+        assert_eq!(recovered, runtime.snapshot());
+        assert!(matches!(snapshots.try_recv(), Err(TryRecvError::Empty)));
+
+        let next_event = AgentEvent::new(
+            Uuid::from_u128(34),
+            Uuid::from_u128(7),
+            "repo",
+            EventSource::Codex,
+            AgentEventKind::TurnStarted,
+            None,
+            start,
+            EventMetadata::default(),
+        );
+        let next = runtime.apply_event(&next_event).unwrap().snapshot;
+        assert_eq!(
+            next_authoritative_snapshot(&runtime, &mut snapshots)
+                .await
+                .unwrap(),
+            next
+        );
     }
 }

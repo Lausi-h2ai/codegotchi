@@ -219,7 +219,14 @@ where
     /// Advances to the injected clock, refreshes the stored behavior, and
     /// returns the current in-memory read model.
     pub fn current_state(&mut self) -> SimulationSnapshot {
-        self.advance_time();
+        self.current_state_at(self.clock.now())
+    }
+
+    /// Advances to an explicit logical timestamp for deterministic maintenance.
+    pub fn current_state_at(&mut self, timestamp: DateTime<Utc>) -> SimulationSnapshot {
+        let previous_activity = self.pet.activity();
+        self.advance_elapsed_to(timestamp, previous_activity);
+        self.refresh_behavior(self.pet.last_updated_at());
         self.snapshot()
     }
 

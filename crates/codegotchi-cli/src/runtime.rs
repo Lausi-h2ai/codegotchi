@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use chrono::{DateTime, Utc};
 use codegotchi_domain::{
     AgentEvent, AgentEventError, CareCommand, CareError, CareResult,
     DefaultNeedProgressionStrategy, EnforcementMode, FoodInventory, Pet, PetSimulation,
@@ -155,9 +156,13 @@ impl AuthoritativeRuntime {
     }
 
     pub fn maintenance_tick(&self) -> Result<bool, RuntimeError> {
+        self.maintenance_tick_at(Utc::now())
+    }
+
+    pub fn maintenance_tick_at(&self, timestamp: DateTime<Utc>) -> Result<bool, RuntimeError> {
         let mut simulation = self.lock_simulation()?;
         let before = simulation.snapshot();
-        simulation.current_state();
+        simulation.current_state_at(timestamp);
         if simulation.snapshot() == before {
             return Ok(false);
         }

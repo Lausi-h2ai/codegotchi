@@ -1,13 +1,19 @@
+use std::io::Write;
 use std::path::PathBuf;
+use std::process::{Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use chrono::{TimeZone, Utc};
-use codegotchi_cli::{AuthoritativeRuntime, EventIngestRequest, RunningServer, SqliteStore};
+use chrono::{Duration, TimeZone, Utc};
+use codegotchi_cli::runtime_metadata::write_metadata;
+use codegotchi_cli::{
+    AuthoritativeRuntime, EventIngestRequest, RunningServer, RuntimeMetadataV1, SqliteStore,
+};
 use codegotchi_domain::{AgentEvent, AgentEventKind, EventMetadata, EventSource, Pet, PetSpecies};
 use rusqlite::Connection;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::broadcast::error::TryRecvError;
 use uuid::Uuid;
 
 const TOKEN: &str = "task-2-test-token";
@@ -114,8 +120,71 @@ async fn request(
         .unwrap()
         .parse()
         .unwrap();
-    let body = serde_json::from_slice(&bytes[separator + 4..]).unwrap();
+    let body = serde_json::from_slice(&bytes[separator + 4..]).unwrap_or(Value::Null);
     HttpResponse { status, body }
+}
+
+#[tokio::test]
+async fn production_hook_reaches_authoritative_state_and_parses_the_server_response() {
+    let db = TestDatabase::new();
+    let runtime = runtime(&db);
+    let server = RunningServer::start(runtime.clone(), TOKEN).await.unwrap();
+    let metadata_path = db.path.with_extension("runtime.json");
+    let metadata = RuntimeMetadataV1::new(
+        Uuid::from_u128(99),
+        "/tmp/codegotchi-correction-repository",
+        server.base_url(),
+        TOKEN,
+        std::process::id(),
+    );
+    write_metadata(&metadata_path, &metadata).unwrap();
+    let payload = br#"{
+        "session_id":"00000000-0000-0000-0000-000000000002",
+        "turn_id":"correction-turn",
+        "hook_event_name":"UserPromptSubmit"
+    }"#;
+    let event = codegotchi_cli::translate_hook_json(payload, &metadata).unwrap();
+
+    let hook_metadata_path = metadata_path.clone();
+    let hook_payload = payload.to_vec();
+    let output =
+        tokio::task::spawn_blocking(move || invoke_hook(&hook_metadata_path, &hook_payload))
+            .await
+            .unwrap();
+    assert!(output.status.success(), "hook stderr: {:?}", output.stderr);
+    assert_eq!(output.stdout, b"{}\n");
+    assert!(runtime.snapshot().processed_event_ids.contains(&event.id));
+    assert_eq!(
+        SqliteStore::open(&db.path).unwrap().load().unwrap(),
+        Some(runtime.snapshot())
+    );
+
+    let request = EventIngestRequest::new(event);
+    let response_metadata = metadata.clone();
+    let response = tokio::task::spawn_blocking(move || {
+        codegotchi_cli::send_event_to_runtime(&response_metadata, &request)
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(response.accepted);
+    assert!(response.duplicate);
+
+    std::fs::remove_file(&metadata_path).unwrap();
+    server.shutdown().await.unwrap();
+}
+
+fn invoke_hook(metadata_path: &std::path::Path, payload: &[u8]) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_codegotchi"))
+        .arg("hook")
+        .env("CODEGOTCHI_SESSION_FILE", metadata_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(payload).unwrap();
+    child.wait_with_output().unwrap()
 }
 
 #[tokio::test]
@@ -290,6 +359,19 @@ async fn authenticated_loopback_http_is_authoritative_and_replay_safe() {
         404
     );
 
+    let wrong_method_state = request(&server, "POST", "/api/v1/state", Some(TOKEN), b"{}").await;
+    assert_eq!(wrong_method_state.status, 405);
+    assert_eq!(
+        wrong_method_state.body["error"]["code"],
+        "method_not_allowed"
+    );
+    let wrong_method_events = request(&server, "GET", "/api/v1/events", Some(TOKEN), b"").await;
+    assert_eq!(wrong_method_events.status, 405);
+    assert_eq!(
+        wrong_method_events.body["error"]["code"],
+        "method_not_allowed"
+    );
+
     server.shutdown().await.unwrap();
 }
 
@@ -395,4 +477,37 @@ async fn sqlite_reload_keeps_inventory_enforcement_and_replay_ids_without_reseed
             .unwrap()
             .duplicate
     );
+}
+
+#[tokio::test]
+async fn maintenance_is_deterministic_persisted_before_broadcast_and_shutdown_completes() {
+    let db = TestDatabase::new();
+    let runtime = runtime(&db);
+    let (initial, mut snapshots) = runtime.subscribe().unwrap();
+
+    assert_eq!(initial.last_updated_at, start());
+    assert!(!runtime.maintenance_tick_at(start()).unwrap());
+    assert!(matches!(snapshots.try_recv(), Err(TryRecvError::Empty)));
+    assert_eq!(
+        SqliteStore::open(&db.path).unwrap().load().unwrap(),
+        Some(initial.clone())
+    );
+
+    let maintenance_time = start() + Duration::hours(1);
+    assert!(runtime.maintenance_tick_at(maintenance_time).unwrap());
+    let broadcast = snapshots.try_recv().unwrap();
+    assert_eq!(broadcast.last_updated_at, maintenance_time);
+    assert_eq!(
+        SqliteStore::open(&db.path).unwrap().load().unwrap(),
+        Some(broadcast.clone())
+    );
+    assert!(matches!(snapshots.try_recv(), Err(TryRecvError::Empty)));
+
+    let server = RunningServer::start(runtime, TOKEN).await.unwrap();
+    let address = server.local_addr();
+    tokio::time::timeout(std::time::Duration::from_secs(1), server.shutdown())
+        .await
+        .expect("server shutdown should complete")
+        .unwrap();
+    assert!(TcpStream::connect(address).await.is_err());
 }

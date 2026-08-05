@@ -10,7 +10,8 @@ pub mod server;
 
 pub use classify::classify_command;
 pub use codex_hook::{
-    hook_output_for_payload, run_hook_from_environment, translate_hook, translate_hook_json,
+    HookTransportError, hook_output_for_payload, run_hook_from_environment, send_event_to_runtime,
+    translate_hook, translate_hook_json,
 };
 pub use codex_profile::TemporaryCodexProfile;
 pub use persistence::{PersistenceError, SQLITE_SCHEMA_VERSION, SqliteStore};

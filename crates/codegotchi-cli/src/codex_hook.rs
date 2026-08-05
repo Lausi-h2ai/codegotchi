@@ -16,13 +16,13 @@ use crate::protocol::{
 use crate::runtime_metadata::read_metadata;
 
 pub const CODEGOTCHI_SESSION_FILE: &str = "CODEGOTCHI_SESSION_FILE";
-pub const EVENT_INGEST_PATH: &str = "/api/events";
+pub const EVENT_INGEST_PATH: &str = "/api/v1/events";
 pub const MAX_HOOK_INPUT_BYTES: usize = 1024 * 1024;
 const HOOK_IO_TIMEOUT: Duration = Duration::from_millis(250);
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Error)]
-enum HookTransportError {
+pub enum HookTransportError {
     #[error("invalid loopback URL")]
     InvalidUrl,
     #[error("loopback URL is not local")]
@@ -154,7 +154,7 @@ pub fn run_hook_from_environment() -> HookOutput {
         None => return HookOutput::allow(),
     };
     let request = EventIngestRequest::new(event);
-    let response = match post_event(&metadata, &request) {
+    let response = match send_event_to_runtime(&metadata, &request) {
         Ok(response) => response,
         Err(_) => return HookOutput::allow(),
     };
@@ -256,7 +256,7 @@ fn activity_name(activity: Option<ActivityKind>) -> &'static str {
     }
 }
 
-fn post_event(
+pub fn send_event_to_runtime(
     metadata: &RuntimeMetadataV1,
     request: &EventIngestRequest,
 ) -> Result<EventIngestResponse, HookTransportError> {
@@ -280,15 +280,114 @@ fn post_event(
         .write_all(request_head.as_bytes())
         .and_then(|()| stream.write_all(&body))
         .map_err(HookTransportError::Io)?;
-    let mut response = Vec::new();
-    stream
-        .take((MAX_RESPONSE_BYTES + 1) as u64)
-        .read_to_end(&mut response)
-        .map_err(HookTransportError::Io)?;
-    if response.len() > MAX_RESPONSE_BYTES {
-        return Err(HookTransportError::Response);
-    }
+    let response = read_http_response(&mut stream)?;
     parse_http_response(&response)
+}
+
+fn read_http_response(stream: &mut TcpStream) -> Result<Vec<u8>, HookTransportError> {
+    let mut response = Vec::new();
+    let mut buffer = [0_u8; 4096];
+    loop {
+        let count = match stream.read(&mut buffer) {
+            Ok(count) => count,
+            Err(error)
+                if !response.is_empty()
+                    && matches!(
+                        error.kind(),
+                        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                    ) =>
+            {
+                break;
+            }
+            Err(error) => return Err(HookTransportError::Io(error)),
+        };
+        if count == 0 {
+            break;
+        }
+        response.extend_from_slice(&buffer[..count]);
+        if response.len() > MAX_RESPONSE_BYTES {
+            return Err(HookTransportError::Response);
+        }
+        if response_body_complete(&response)? {
+            break;
+        }
+    }
+    Ok(response)
+}
+
+fn response_body_complete(response: &[u8]) -> Result<bool, HookTransportError> {
+    let Some(header_end) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return Ok(false);
+    };
+    let headers =
+        std::str::from_utf8(&response[..header_end]).map_err(|_| HookTransportError::Response)?;
+    let body_start = header_end + 4;
+    let mut content_length = None;
+    let mut chunked = false;
+    for line in headers.lines().skip(1) {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if name.eq_ignore_ascii_case("content-length") {
+            content_length = Some(
+                value
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|_| HookTransportError::Response)?,
+            );
+        } else if name.eq_ignore_ascii_case("transfer-encoding") {
+            chunked = value
+                .split(',')
+                .any(|encoding| encoding.trim().eq_ignore_ascii_case("chunked"));
+        }
+    }
+    if let Some(content_length) = content_length {
+        return Ok(response.len() >= body_start.saturating_add(content_length));
+    }
+    if chunked {
+        return chunked_body_complete(
+            response
+                .get(body_start..)
+                .ok_or(HookTransportError::Response)?,
+        );
+    }
+    Ok(false)
+}
+
+fn chunked_body_complete(mut bytes: &[u8]) -> Result<bool, HookTransportError> {
+    loop {
+        let Some(line_end) = bytes.windows(2).position(|window| window == b"\r\n") else {
+            return Ok(false);
+        };
+        let size = std::str::from_utf8(&bytes[..line_end])
+            .map_err(|_| HookTransportError::Response)?
+            .split(';')
+            .next()
+            .ok_or(HookTransportError::Response)?
+            .trim();
+        let size = usize::from_str_radix(size, 16).map_err(|_| HookTransportError::Response)?;
+        bytes = bytes
+            .get(line_end + 2..)
+            .ok_or(HookTransportError::Response)?;
+        if size == 0 {
+            return Ok(bytes.starts_with(b"\r\n")
+                || bytes
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .is_some());
+        }
+        let Some(chunk_and_crlf) = bytes.get(size..) else {
+            return Ok(false);
+        };
+        let Some(rest) = chunk_and_crlf.strip_prefix(b"\r\n") else {
+            return if chunk_and_crlf.len() < 2 {
+                Ok(false)
+            } else {
+                Err(HookTransportError::Response)
+            };
+        };
+        bytes = rest;
+    }
 }
 
 fn parse_loopback_endpoint(base_url: &str) -> Result<SocketAddr, HookTransportError> {
@@ -331,6 +430,84 @@ fn parse_http_response(response: &[u8]) -> Result<EventIngestResponse, HookTrans
     if !(200..300).contains(&status) {
         return Err(HookTransportError::Status);
     }
-    let body = &response[header_end + 4..];
-    serde_json::from_slice(body).map_err(|_| HookTransportError::Response)
+    let mut content_length = None;
+    let mut chunked = false;
+    for line in headers.lines().skip(1) {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if name.eq_ignore_ascii_case("content-length") {
+            content_length = Some(
+                value
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|_| HookTransportError::Response)?,
+            );
+        } else if name.eq_ignore_ascii_case("transfer-encoding") {
+            chunked = value
+                .split(',')
+                .any(|encoding| encoding.trim().eq_ignore_ascii_case("chunked"));
+        }
+    }
+
+    let body_start = header_end + 4;
+    let body = if chunked {
+        decode_chunked_body(
+            response
+                .get(body_start..)
+                .ok_or(HookTransportError::Response)?,
+        )?
+    } else if let Some(content_length) = content_length {
+        let body_end = body_start
+            .checked_add(content_length)
+            .ok_or(HookTransportError::Response)?;
+        response
+            .get(body_start..body_end)
+            .ok_or(HookTransportError::Response)?
+            .to_vec()
+    } else {
+        response
+            .get(body_start..)
+            .ok_or(HookTransportError::Response)?
+            .to_vec()
+    };
+    serde_json::from_slice(&body).map_err(|_| HookTransportError::Response)
+}
+
+fn decode_chunked_body(mut bytes: &[u8]) -> Result<Vec<u8>, HookTransportError> {
+    let mut body = Vec::new();
+    loop {
+        let line_end = bytes
+            .windows(2)
+            .position(|window| window == b"\r\n")
+            .ok_or(HookTransportError::Response)?;
+        let size = std::str::from_utf8(&bytes[..line_end])
+            .map_err(|_| HookTransportError::Response)?
+            .split(';')
+            .next()
+            .ok_or(HookTransportError::Response)?
+            .trim();
+        let size = usize::from_str_radix(size, 16).map_err(|_| HookTransportError::Response)?;
+        bytes = bytes
+            .get(line_end + 2..)
+            .ok_or(HookTransportError::Response)?;
+        if size == 0 {
+            if bytes.starts_with(b"\r\n")
+                || bytes
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .is_some()
+            {
+                return Ok(body);
+            }
+            return Err(HookTransportError::Response);
+        }
+        let chunk = bytes.get(..size).ok_or(HookTransportError::Response)?;
+        body.extend_from_slice(chunk);
+        bytes = bytes.get(size..).ok_or(HookTransportError::Response)?;
+        if !bytes.starts_with(b"\r\n") {
+            return Err(HookTransportError::Response);
+        }
+        bytes = &bytes[2..];
+    }
 }
