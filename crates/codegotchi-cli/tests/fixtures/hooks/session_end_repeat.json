@@ -2,6 +2,5 @@
   "session_id": "00000000-0000-0000-0000-000000000001",
   "hook_event_name": "SessionEnd",
   "reason": "other",
-  "cwd": "/workspace/codegatchi",
-  "transcript_path": "/private/transcript.jsonl"
+  "cwd": "/workspace/codegatchi"
 }

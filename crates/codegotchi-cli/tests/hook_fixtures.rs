@@ -171,6 +171,64 @@ fn official_event_identity_deduplicates_replay_but_distinguishes_repeats() {
 }
 
 #[test]
+fn lifecycle_identity_uses_official_sources_and_preserves_exact_replay() {
+    let metadata = metadata();
+    let startup = translate_hook(
+        &HookInput::from_json(fixture("session_start.json").as_bytes()).unwrap(),
+        &metadata,
+    )
+    .unwrap();
+    let startup_replay = translate_hook(
+        &HookInput::from_json(fixture("session_start.json").as_bytes()).unwrap(),
+        &metadata,
+    )
+    .unwrap();
+    let resume = translate_hook(
+        &HookInput::from_json(fixture("session_start_resume.json").as_bytes()).unwrap(),
+        &metadata,
+    )
+    .unwrap();
+    let clear = translate_hook(
+        &HookInput::from_json(fixture("session_start_clear.json").as_bytes()).unwrap(),
+        &metadata,
+    )
+    .unwrap();
+    let compact = translate_hook(
+        &HookInput::from_json(fixture("session_start_compact.json").as_bytes()).unwrap(),
+        &metadata,
+    )
+    .unwrap();
+
+    assert_eq!(startup.id, startup_replay.id);
+    assert_ne!(startup.id, resume.id);
+    assert_ne!(resume.id, clear.id);
+    assert_ne!(clear.id, compact.id);
+    assert_ne!(compact.id, startup.id);
+}
+
+#[test]
+fn session_end_replay_and_repeat_are_honestly_boundary_limited() {
+    let metadata = metadata();
+    let end = translate_hook(
+        &HookInput::from_json(fixture("session_end.json").as_bytes()).unwrap(),
+        &metadata,
+    )
+    .unwrap();
+    let replay = translate_hook(
+        &HookInput::from_json(fixture("session_end.json").as_bytes()).unwrap(),
+        &metadata,
+    )
+    .unwrap();
+    let repeated_delivery = translate_hook(
+        &HookInput::from_json(fixture("session_end_repeat.json").as_bytes()).unwrap(),
+        &metadata,
+    )
+    .unwrap();
+    assert_eq!(end.id, replay.id);
+    assert_eq!(end.id, repeated_delivery.id);
+}
+
+#[test]
 fn command_classification_is_structured_and_fail_open_for_unknown_shapes() {
     let test = classify_command("Bash", "cargo test -p codegotchi-cli");
     assert_eq!(test.category(), CommandCategory::Development);

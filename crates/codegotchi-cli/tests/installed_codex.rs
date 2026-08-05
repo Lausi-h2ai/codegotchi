@@ -11,10 +11,61 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use codegotchi_cli::runtime_metadata::{remove_metadata, write_metadata};
-use codegotchi_cli::{RuntimeMetadataV1, TemporaryCodexProfile};
+use codegotchi_cli::{EventIngestRequest, RuntimeMetadataV1, TemporaryCodexProfile};
+use codegotchi_domain::{AgentEvent, AgentEventKind, EventMetadata, EventSource};
 use uuid::Uuid;
 
 const MANUAL_DENIAL_REASON: &str = "manual Codex strict denial";
+
+#[test]
+fn receiver_decision_requires_a_canonical_started_cargo_event() {
+    let canonical = event_request(AgentEventKind::ToolStarted, Some("cargo"));
+    let completed = event_request(AgentEventKind::ToolCompleted, Some("cargo"));
+    let other_executable = event_request(AgentEventKind::ToolStarted, Some("cargo-test"));
+    let no_executable = event_request(AgentEventKind::ToolStarted, None);
+
+    assert!(should_deny_request(
+        &serde_json::to_vec(&canonical).unwrap()
+    ));
+    assert!(!should_deny_request(
+        &serde_json::to_vec(&completed).unwrap()
+    ));
+    assert!(!should_deny_request(
+        &serde_json::to_vec(&other_executable).unwrap()
+    ));
+    assert!(!should_deny_request(
+        &serde_json::to_vec(&no_executable).unwrap()
+    ));
+    assert!(!should_deny_request(br#"{"prompt":"cargo"}"#));
+}
+
+fn event_request(kind: AgentEventKind, executable_name: Option<&str>) -> EventIngestRequest {
+    EventIngestRequest::new(AgentEvent::new(
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        "/tmp/codegotchi-test",
+        EventSource::Codex,
+        kind,
+        None,
+        chrono::Utc::now(),
+        EventMetadata::new(
+            executable_name.map(str::to_owned),
+            Some("development".to_owned()),
+            None,
+            None,
+            false,
+        ),
+    ))
+}
+
+fn should_deny_request(body: &[u8]) -> bool {
+    serde_json::from_slice::<EventIngestRequest>(body)
+        .ok()
+        .is_some_and(|request| {
+            request.event.kind == AgentEventKind::ToolStarted
+                && request.event.metadata.executable_name.as_deref() == Some("cargo")
+        })
+}
 
 /// This is an intentionally manual gate. It needs a real authenticated Codex
 /// session and leaves trust approval to the operator instead of bypassing it.
@@ -54,6 +105,11 @@ fn installed_codex_0146_real_trust_and_coexistence_gate() {
 
     let marker = temporary.path().join("existing-hook.marker");
     let existing_hook = temporary.path().join("existing-hook.sh");
+    let fake_bin = temporary.path().join("fake-bin");
+    let fake_cargo = fake_bin.join("cargo");
+    let cargo_sentinel = temporary.path().join("fake-cargo-executed");
+    fs::create_dir_all(&fake_bin).unwrap();
+    write_fake_cargo(&fake_cargo, &cargo_sentinel);
     write_existing_hook(&existing_hook, &marker);
     let base_config = home.join("config.toml");
     fs::write(&base_config, render_base_config(&existing_hook, &marker)).unwrap();
@@ -116,7 +172,7 @@ fn installed_codex_0146_real_trust_and_coexistence_gate() {
 
     let binary_directory = binary.parent().expect("binary has a parent");
     let inherited_path = env::var_os("PATH").unwrap_or_default();
-    let mut path_entries = vec![binary_directory.to_path_buf()];
+    let mut path_entries = vec![binary_directory.to_path_buf(), fake_bin.clone()];
     path_entries.extend(env::split_paths(&inherited_path));
     let path = env::join_paths(path_entries).unwrap();
     let mut codex = profile.codex_command(&codex_program);
@@ -154,6 +210,10 @@ fn installed_codex_0146_real_trust_and_coexistence_gate() {
         captured.denied_requests > direct_denials,
         "the real Codex run must exercise strict PreToolUse denial"
     );
+    assert!(
+        !cargo_sentinel.exists(),
+        "the denied cargo command must not execute the disposable fake cargo"
+    );
     drop(captured);
 
     let existing_hook_output = fs::read_to_string(&marker).unwrap();
@@ -173,6 +233,8 @@ fn installed_codex_0146_real_trust_and_coexistence_gate() {
 
     fs::remove_file(&existing_hook).unwrap();
     fs::remove_file(&marker).unwrap();
+    fs::remove_file(&fake_cargo).unwrap();
+    fs::remove_dir(&fake_bin).unwrap();
     fs::remove_file(&base_config).unwrap();
     fs::remove_dir_all(temporary.path()).unwrap();
     assert!(!temporary.path().exists());
@@ -184,6 +246,20 @@ fn write_existing_hook(path: &Path, marker: &Path) {
         format!(
             "#!/bin/sh\ncat >/dev/null\nprintf 'pre-existing-hook-ran\\n' >> {}\n",
             shell_quote(marker)
+        ),
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(path).unwrap().permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(path, permissions).unwrap();
+}
+
+fn write_fake_cargo(path: &Path, sentinel: &Path) {
+    fs::write(
+        path,
+        format!(
+            "#!/bin/sh\nprintf 'fake-cargo-executed\\n' > {}\nexit 0\n",
+            shell_quote(sentinel)
         ),
     )
     .unwrap();
@@ -288,13 +364,11 @@ fn handle_request(mut stream: TcpStream, token: &str, capture: &Arc<Mutex<Captur
         return;
     }
 
-    let body_text = String::from_utf8_lossy(&body);
-    let is_cargo = body_text.contains("\"cargo\"");
-    let should_deny = is_cargo;
+    let should_deny = should_deny_request(&body);
     {
         let mut capture = capture.lock().unwrap();
         capture.authenticated_requests += 1;
-        if is_cargo {
+        if should_deny {
             capture.tool_started_requests += 1;
         }
         if should_deny {

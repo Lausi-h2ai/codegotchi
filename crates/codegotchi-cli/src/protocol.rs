@@ -35,6 +35,8 @@ pub struct HookInput {
     #[serde(default)]
     pub source: Option<Value>,
     #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
     pub cwd: Option<String>,
     #[serde(default)]
     pub stop_hook_active: Option<bool>,
@@ -85,10 +87,31 @@ impl HookInput {
     /// Turn-scoped hooks use `turn_id`; tool hooks use the more specific
     /// `tool_use_id` so two tools in one turn cannot collapse into one event.
     pub fn stable_event_identity(&self) -> Option<&str> {
-        self.tool_use_id
-            .as_deref()
-            .filter(|id| !id.is_empty())
-            .or_else(|| self.turn_id.as_deref().filter(|id| !id.is_empty()))
+        match self.hook_event_name.as_str() {
+            "SessionStart" | "SessionEnd" => self.lifecycle_identity(),
+            "PreToolUse" | "PostToolUse" => self
+                .tool_use_id
+                .as_deref()
+                .filter(|id| !id.is_empty())
+                .or_else(|| self.turn_id.as_deref().filter(|id| !id.is_empty())),
+            _ => self.turn_id.as_deref().filter(|id| !id.is_empty()),
+        }
+    }
+
+    /// Returns the lifecycle discriminator Codex provides when one exists.
+    ///
+    /// `SessionStart.source` distinguishes the official startup/resume/clear/
+    /// compact boundaries. `SessionEnd.reason` is retained for the same
+    /// purpose when a release provides more than one reason. An otherwise
+    /// identical lifecycle payload has no occurrence ID in the Codex schema,
+    /// so it must remain an idempotent replay of the same event.
+    pub fn lifecycle_identity(&self) -> Option<&str> {
+        let identity = match self.hook_event_name.as_str() {
+            "SessionStart" => self.source.as_ref().and_then(Value::as_str),
+            "SessionEnd" => self.reason.as_deref(),
+            _ => None,
+        }?;
+        (!identity.is_empty()).then_some(identity)
     }
 
     pub fn parsed_session_id(&self) -> Option<Uuid> {
@@ -109,7 +132,7 @@ pub enum HookInputError {
 }
 
 /// The event envelope accepted by the future loopback backend.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EventIngestRequest {
     pub event: AgentEvent,
 }

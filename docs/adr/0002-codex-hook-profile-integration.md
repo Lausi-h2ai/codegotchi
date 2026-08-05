@@ -46,8 +46,15 @@ turn-scoped hooks use `turn_id`, tool hooks use `tool_use_id`, and
 `PostToolUse` uses `tool_response`. The deterministic event ID includes
 `tool_use_id` or `turn_id` when present, plus the event boundary, so replaying
 one payload is idempotent while repeated prompt/tool invocations remain
-distinct. The old `tool_call_id` and `tool_output` spellings are accepted only
-as deserialization aliases for compatibility; fixtures use the official names.
+distinct. For ID-less lifecycle hooks it includes the official `SessionStart`
+`source` (`startup`, `resume`, `clear`, or `compact`) and the supplied
+`SessionEnd` `reason` when present. In Codex 0.146.0 that reason is fixed to
+`other`, so an identical lifecycle payload remains the same ID: Codex supplies
+no occurrence ID for an identical repeated `SessionEnd` delivery, and
+distinguishing that repeat from replay would require state or an invented wire
+field. This adapter does neither. The old
+`tool_call_id` and `tool_output` spellings are accepted only as deserialization
+aliases for compatibility; fixtures use the official names.
 
 Only canonical labels from the adapter's bounded executable allowlist can
 enter `EventMetadata.executable_name`. Unknown one-token commands, paths, and
@@ -73,11 +80,13 @@ codex-cli 0.146.0
 The observed installed payload fields were `session_id`,
 `hook_event_name`, `turn_id`, `tool_name`, `tool_use_id`,
 `tool_input.command`, `tool_response.exit_code`,
-`tool_response.duration_ms`, `cwd`, `prompt`, `source`,
+`tool_response.duration_ms`, `cwd`, `prompt`, `source`, `reason`,
 `stop_hook_active`, and `last_assistant_message`; the adapter accepts unknown
-future fields and discards prompt, source, command text, and tool output before
-constructing the domain event. Installed tool names observed in the spike
-were `Bash` and `apply_patch`.
+future fields and discards prompt, source, reason, command text, and tool output
+from the domain event. Source/reason are used only as bounded lifecycle ID
+inputs. Installed tool names observed in the spike were `Bash` and
+`apply_patch`. The pinned 0.146 schema defines the four SessionStart source
+values and fixes SessionEnd reason to `other`.
 
 The tested denial response is exactly:
 
@@ -86,7 +95,10 @@ The tested denial response is exactly:
 ```
 
 These facts agree with the official Codex hooks documentation:
-<https://developers.openai.com/codex/hooks/> (accessed 2026-08-05).
+<https://developers.openai.com/codex/hooks/> and the pinned 0.146.0 hook
+schema at
+<https://github.com/openai/codex/blob/rust-v0.146.0/codex-rs/hooks/src/schema.rs>
+(accessed 2026-08-05).
 
 ## Trust and real-spike evidence
 
@@ -136,7 +148,12 @@ persisting the Codex payload. The test uses the generated `codegotchi` binary
 through `PATH`, an authenticated `127.0.0.1` capture receiver, and a temporary
 mode-0600 runtime file. The receiver returns the strict denial for canonical
 `cargo` work and the test asserts the exact denial JSON from the generated
-binary as well as a denial during the real Codex run.
+binary as well as a denial during the real Codex run. It parses the
+authenticated POST as `EventIngestRequest` and counts/denies only
+`AgentEventKind::ToolStarted` events whose canonical executable label is
+`cargo`; a routine test covers the predicate. The real run prepends a
+disposable fake `cargo` to `PATH`; its sentinel must remain absent after the
+denial, proving the denied command did not execute.
 
 The test never uses `--dangerously-bypass-hook-trust`; it inherits the
 operator's terminal so the normal repository trust and “Hooks need review”
@@ -149,6 +166,37 @@ the exact temporary root.
 The throwaway profile, runtime metadata, temporary receiver state, and
 temporary repository were removed. Cleanup used exact generated paths only;
 no user config, credentials, or unrelated files were removed.
+
+## Final focused correction evidence
+
+The second and final correction was TDD'd against the two remaining review
+blockers. The lifecycle RED run showed the new start-source distinction
+assertion failing because all ID-less `SessionStart` payloads still produced
+`71c74d99-b7d4-54b4-9c1b-cf5f5cd99a0c`. The receiver RED run failed to compile
+with `EventIngestRequest: serde::Deserialize<'de>` not implemented. After the
+implementation, the focused GREEN commands passed:
+
+```text
+cargo test -p codegotchi-cli --test hook_fixtures
+test result: ok. 11 passed; 0 failed; 0 ignored
+
+cargo test -p codegotchi-cli --test installed_codex
+test result: ok. 1 passed; 0 failed; 1 ignored
+
+cargo test -p codegotchi-cli --test profile_lifecycle
+test result: ok. 3 passed; 0 failed; 0 ignored
+```
+
+The ignored real-Codex gate was not run to completion in this environment:
+`OPENAI_API_KEY` and `CODEX_API_KEY` were unavailable, so it stops before
+creating its temporary home and reports `run the manual gate with
+OPENAI_API_KEY or CODEX_API_KEY set`. The gate remains intentionally manual
+because it requires paid/authenticated Codex access and interactive normal
+trust approval. Its exact command is:
+
+```text
+OPENAI_API_KEY="$OPENAI_API_KEY" cargo test -p codegotchi-cli --test installed_codex -- --ignored --nocapture
+```
 
 ## Consequences and follow-up
 

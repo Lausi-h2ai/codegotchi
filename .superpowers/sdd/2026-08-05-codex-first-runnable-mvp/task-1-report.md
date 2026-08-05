@@ -389,7 +389,118 @@ Commit `8a1a0be` contains the correction in:
 - `crates/codegotchi-cli/tests/fixtures/hooks/bash_post_success.json`
 - `crates/codegotchi-cli/tests/fixtures/hooks/bash_pre.json`
 - `crates/codegotchi-cli/tests/fixtures/hooks/bash_pre_repeat.json`
+- `crates/codegotchi-cli/tests/fixtures/hooks/session_end_repeat.json`
+- `crates/codegotchi-cli/tests/fixtures/hooks/session_start_clear.json`
+- `crates/codegotchi-cli/tests/fixtures/hooks/session_start_compact.json`
+- `crates/codegotchi-cli/tests/fixtures/hooks/session_start_resume.json`
 - `crates/codegotchi-cli/tests/fixtures/hooks/stop.json`
 - `crates/codegotchi-cli/tests/fixtures/hooks/user_prompt_submit.json`
 - `crates/codegotchi-cli/tests/fixtures/hooks/user_prompt_submit_future_fields.json`
 - `crates/codegotchi-cli/tests/fixtures/hooks/user_prompt_submit_repeat.json`
+
+## Final focused correction: RED/GREEN evidence
+
+Date: 2026-08-05
+Scope: only the two blockers from task-1-rereview.md; no backend, UI, or launcher changes
+
+### RED
+
+The lifecycle tests were added before the identity change. The relevant
+failure from:
+
+~~~
+cargo test -p codegotchi-cli --test hook_fixtures
+~~~
+
+was:
+
+~~~
+test lifecycle_identity_uses_official_sources_and_preserves_exact_replay ... FAILED
+assertion left != right failed
+left: 71c74d99-b7d4-54b4-9c1b-cf5f5cd99a0c
+right: 71c74d99-b7d4-54b4-9c1b-cf5f5cd99a0c
+~~~
+
+The typed receiver test was added before the ingest envelope became
+deserializable. The relevant compiler failure from:
+
+~~~
+cargo test -p codegotchi-cli --test installed_codex
+error[E0277]: the trait bound EventIngestRequest: serde::Deserialize is not satisfied
+~~~
+
+These RED results demonstrate both remaining defects: ID-less start sources
+collapsed, and the gate could not parse its authenticated request as the
+declared event envelope.
+
+### GREEN
+
+After the narrow implementation and cargo fmt --all, the focused suites
+passed:
+
+~~~
+cargo test -p codegotchi-cli --test hook_fixtures
+test result: ok. 11 passed; 0 failed; 0 ignored
+
+cargo test -p codegotchi-cli --test installed_codex
+test result: ok. 1 passed; 0 failed; 1 ignored
+
+cargo test -p codegotchi-cli --test profile_lifecycle
+test result: ok. 3 passed; 0 failed; 0 ignored
+~~~
+
+The lifecycle adapter now uses SessionStart.source and SessionEnd.reason as
+bounded identity inputs. Exact replay remains stable; startup, resume, clear,
+and compact starts produce distinct IDs. Codex 0.146.0 fixes SessionEnd.reason
+to other and supplies no occurrence ID, so an identical repeated ID-less
+SessionEnd payload remains the same ID. Distinguishing identical delivery
+from replay would require persisted state or an invented wire field, so
+neither was added. This is the remaining schema boundary and is intentionally
+documented in ADR 0002.
+
+The ignored receiver gate now deserializes authenticated JSON as
+EventIngestRequest and counts/denies only canonical
+AgentEventKind::ToolStarted events with EventMetadata.executable_name ==
+cargo. A routine non-ignored test covers the predicate. The manual gate
+prepends a disposable fake cargo to PATH, writes a sentinel only if it is
+executed, and asserts the sentinel is absent after the real strict denial. It
+continues to use the generated codegotchi binary, bearer-authenticated
+loopback transport, a disposable coexisting hook, normal trust prompts without
+--dangerously-bypass-hook-trust, and exact cleanup.
+
+The real ignored gate could not be completed in this environment because no
+OPENAI_API_KEY or CODEX_API_KEY was available. It therefore stops before
+creating its temporary home with:
+
+~~~
+run the manual gate with OPENAI_API_KEY or CODEX_API_KEY set
+~~~
+
+This is a paid/authenticated manual-test limitation, not a routine-test
+failure. The exact command remains:
+
+~~~
+OPENAI_API_KEY="$OPENAI_API_KEY" cargo test -p codegotchi-cli --test installed_codex -- --ignored --nocapture
+~~~
+
+### Final verification gates
+
+~~~text
+cargo fmt --all -- --check
+exit 0
+
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+Finished `dev` profile
+
+cargo test --workspace
+codegotchi-cli: 11 passed; 0 failed; 1 ignored
+codegotchi-cli profile lifecycle: 3 passed; 0 failed
+codegotchi-domain unit tests: 18 passed; 0 failed
+care flow: 13 passed; 0 failed
+event replay: 2 passed; 0 failed
+permission matrix: 5 passed; 0 failed
+Task 1 contract: 3 passed; 0 failed
+Task 2 contract: 8 passed; 0 failed
+Task 2 corrections: 11 passed; 0 failed
+exit 0
+~~~
