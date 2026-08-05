@@ -7,3 +7,7 @@ These findings are explicitly deferred because they are not required for the man
 - Make the Task 3 real-backend fixture shut down gracefully or clean its unique SQLite `-wal` and `-shm` sidecars after abrupt termination.
 - Strengthen the Playwright reconnect scenario by mutating backend state while the stream is disconnected and asserting that the replacement snapshot contains the change.
 - Bind demo/debug enablement to runtime startup configuration or a dedicated session capability; the MVP CLI requires `CODEGOTCHI_ENABLE_DEBUG=1`, but an already-authenticated local caller can currently attest the fixed debug-route guard header directly.
+- Strengthen stale-session PID ownership with process start identity so PID
+  reuse cannot retain an obsolete runtime metadata file.
+- Reclaim additive `codegotchi-*.config.toml` profiles after a hard-killed
+  launcher without risking deletion of user-owned Codex configuration.
