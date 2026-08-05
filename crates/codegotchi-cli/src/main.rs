@@ -1,6 +1,9 @@
 fn main() {
-    if let Err(error) = codegotchi_cli::cli::run(std::env::args().skip(1)) {
-        eprintln!("codegotchi: {error}");
-        std::process::exit(2);
+    match codegotchi_cli::cli::run_os(std::env::args_os().skip(1)) {
+        Ok(status) => std::process::exit(status),
+        Err(error) => {
+            eprintln!("codegotchi: {error}");
+            std::process::exit(2);
+        }
     }
 }

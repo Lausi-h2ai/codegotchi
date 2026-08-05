@@ -1,7 +1,9 @@
+pub mod assets;
 pub mod classify;
 pub mod cli;
 pub mod codex_hook;
 pub mod codex_profile;
+pub mod launcher;
 pub mod persistence;
 pub mod protocol;
 pub mod runtime;
@@ -16,6 +18,7 @@ pub use codex_hook::{
     translate_hook_json,
 };
 pub use codex_profile::TemporaryCodexProfile;
+pub use launcher::{LauncherError, ValidatedLaunch};
 pub use persistence::{PersistenceError, SQLITE_SCHEMA_VERSION, SqliteStore};
 pub use protocol::{
     CleanRequest, DebugRequest, ErrorEnvelope, EventIngestRequest, EventIngestResponse,

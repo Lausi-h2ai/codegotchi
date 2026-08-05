@@ -2,13 +2,13 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::body::to_bytes;
+use axum::body::{Body, to_bytes};
 use axum::extract::{
     FromRequest, Request, State, WebSocketUpgrade,
     ws::{Message, WebSocket},
 };
 use axum::http::HeaderMap;
-use axum::http::{StatusCode, header};
+use axum::http::{StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -23,6 +23,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
+use crate::assets;
 use crate::persistence::PersistenceError;
 use crate::protocol::{
     CleanRequest, DebugRequest, ErrorEnvelope, EventIngestRequest, EventIngestResponse,
@@ -208,7 +209,7 @@ fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/v1/health", get(health_handler))
         .merge(protected)
-        .fallback(not_found_handler)
+        .fallback(static_or_api_not_found_handler)
         .method_not_allowed_fallback(method_not_allowed_handler)
         .with_state(state)
 }
@@ -486,8 +487,22 @@ fn persistence_error_response(error: PersistenceError) -> Response {
     error_response(status, "persistence_error", error.to_string())
 }
 
-async fn not_found_handler() -> Response {
-    error_response(StatusCode::NOT_FOUND, "not_found", "route not found")
+async fn static_or_api_not_found_handler(uri: Uri) -> Response {
+    if uri.path() == "/api/v1" || uri.path().starts_with("/api/v1/") {
+        return error_response(StatusCode::NOT_FOUND, "not_found", "route not found");
+    }
+
+    let asset = if uri.path() == "/" {
+        assets::index()
+    } else {
+        assets::find(uri.path()).unwrap_or_else(assets::index)
+    };
+    let mut response = Response::new(Body::from(asset.bytes.to_vec()));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static(asset.content_type),
+    );
+    response
 }
 
 async fn method_not_allowed_handler() -> Response {

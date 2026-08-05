@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::ffi::{OsStr, OsString};
 use std::io::Write;
 use std::path::Path;
 
@@ -9,6 +10,7 @@ use crate::codex_hook::{
     runtime_metadata_is_active, send_debug_generate_poop_to_runtime, send_debug_neglect_to_runtime,
     send_mode_to_runtime,
 };
+use crate::launcher;
 use crate::protocol::HookOutput;
 use crate::runtime_metadata::read_metadata;
 
@@ -25,19 +27,33 @@ impl std::fmt::Display for CliError {
 
 impl Error for CliError {}
 
-pub fn run(mut arguments: impl Iterator<Item = String>) -> Result<(), CliError> {
+pub fn run(arguments: impl Iterator<Item = String>) -> Result<(), CliError> {
+    run_os(arguments.map(OsString::from)).map(|_| ())
+}
+
+pub fn run_os(mut arguments: impl Iterator<Item = OsString>) -> Result<i32, CliError> {
     match arguments.next().as_deref() {
-        Some("hook") if arguments.next().is_none() => {
+        Some(command) if command == OsStr::new("hook") && arguments.next().is_none() => {
             let output = run_hook_from_environment();
-            print_hook_output(&output).map_err(|error| CliError(error.to_string()))
+            print_hook_output(&output)
+                .map(|()| 0)
+                .map_err(|error| CliError(error.to_string()))
         }
-        Some("hook") => Err(CliError(String::from(
+        Some(command) if command == OsStr::new("hook") => Err(CliError(String::from(
             "the hook command takes no arguments",
         ))),
-        Some("mode") => run_mode(arguments),
-        Some("debug") => run_debug(arguments),
+        Some(command) if command == OsStr::new("mode") => {
+            run_mode(arguments.map(|argument| argument.to_string_lossy().into_owned())).map(|_| 0)
+        }
+        Some(command) if command == OsStr::new("debug") => {
+            run_debug(arguments.map(|argument| argument.to_string_lossy().into_owned())).map(|_| 0)
+        }
+        Some(command) if command == OsStr::new("run") => {
+            launcher::run(arguments).map_err(|error| CliError(error.to_string()))
+        }
         Some(command) => Err(CliError(format!(
-            "unsupported command `{command}`; use `codegotchi hook`, `codegotchi mode decorative|strict`, or a guarded `codegotchi debug` command"
+            "unsupported command `{}`; use `codegotchi hook`, `codegotchi mode decorative|strict`, or a guarded `codegotchi debug` command",
+            command.to_string_lossy()
         ))),
         None => Err(CliError(String::from(
             "a command is required; use `codegotchi hook`, `codegotchi mode decorative|strict`, or `codegotchi debug neglect|generate-poop`",
