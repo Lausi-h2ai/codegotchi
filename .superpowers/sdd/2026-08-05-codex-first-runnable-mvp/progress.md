@@ -58,7 +58,17 @@ Task 4: complete; accepted after one focused correction
 - Correction tests: focused hook/runtime and Strict flows PASS; verified installed apply_patch fixture remains Editing/SafeDevelopment; cargo fmt PASS; strict workspace clippy PASS; cargo test --workspace PASS (88 executed, 1 ignored)
 - Focused re-review: ACCEPT; both original blockers resolved with no residual finding
 - Deferred finding: bind debug enablement to runtime startup configuration or a dedicated session capability; recorded in docs/backlog/codex-first-mvp-followups.md
-Task 5: pending
+Task 5: complete; supervisor accepted after two bounded correction rounds and personal adjudication
+- Implementer: Codex CLI session 019fd217-8258-70e2-8916-d4cf528bb315, model gpt-5.6-luna, reasoning max
+- Base: 885977f; brief commit: f293795; implementation commit: 2fef54a
+- Initial tests: process wrapper 10 PASS; static/install 2 PASS; Rust fmt/strict clippy/workspace tests PASS; frontend lint/test/format/build PASS; embedded bundle byte-identical
+- Review: CORRECTION REQUIRED — 7 MVP-blocking, 2 Backlog; reviewer session 019fd23d-ef0e-7d41-b887-9ebe343e9a6e, model gpt-5.6-luna, reasoning max; review/backlog commit 6d453db
+- First correction: original implementer resumed with Luna/max; setup-time handlers, browser warning, owned stale cleanup, atomic metadata, installed HTTP asset fetch, restart persistence, and shared-terminal duplicate-signal coverage fixed; commit f2210e5
+- Focused re-review: six findings resolved; one direct-wrapper signal defect remained; record commit d243c1a
+- Second correction investigation: original implementer resumed with Luna/max and proved direct-PID versus negative-process-group signals have identical Linux siginfo; the same-group source distinction is impossible
+- Supervisor adjudication and implementation: standard POSIX child process-group/foreground terminal handoff using safe nix APIs, exact signal-mask restoration, direct and terminal-group one-delivery fixtures, and PTY ownership restoration mutation proof; commit b8bb665
+- Final focused evidence: process wrapper 16 PASS; cargo fmt PASS; strict workspace clippy PASS
+- Deferred findings: PID reuse hardening and best-effort cleanup after hard-kill; recorded in docs/backlog/codex-first-mvp-followups.md
 Task 6: pending
 Final review: pending
 Real acceptance: pending

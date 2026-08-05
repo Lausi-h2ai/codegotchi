@@ -219,13 +219,13 @@
 - Produces: exact `codegotchi run -- codex [arguments...]`, `CODEGOTCHI_REAL_CODEX` test override, real executable recursion guard, automatic browser launch or printed URL, embedded SPA assets, inherited terminal streams, exit-status preservation, and scope-exact cleanup.
 - Explicit `-p`, `--profile`, or `--profile=...` in trailing Codex arguments returns a typed actionable conflict before creating runtime files.
 
-- [ ] Write fake-agent process tests first for exact argument order, stdout/stderr visibility, exit code, Ctrl+C/termination forwarding, no PTY color stripping, runtime/profile environment, and normal cleanup.
-- [ ] Write failure-path tests for missing real Codex, recursive resolution, profile conflict, child spawn failure, browser-open failure, stale runtime metadata, abnormal stale-file recovery, and preservation checksums for existing config/credentials.
-- [ ] Implement direct inherited-stdio `Command` launch and only add PTY code if a real smoke test demonstrates a terminal defect.
-- [ ] Serve embedded `web-dist` with correct MIME types, SPA fallback, and no filesystem dependency; test the installed binary from a directory outside the repository.
-- [ ] Build the frontend, refresh the committed embedded bundle, run `cargo install --path crates/codegotchi-cli --root <temporary-root>`, and prove that installed `codegotchi run -- <fake-codex>` needs no second terminal or Vite process.
-- [ ] Update README with exact Corepack development gates, one-command CLI installation, launch, first-run `/hooks` trust, Strict mode, debug demo, state locations, and cleanup behavior.
-- [ ] Run Rust and frontend gates and commit the task. Write the report at the plan workspace's `task-5-report.md`.
+- [x] Write fake-agent process tests first for exact argument order, stdout/stderr visibility, exit code, Ctrl+C/termination forwarding, no PTY color stripping, runtime/profile environment, and normal cleanup.
+- [x] Write failure-path tests for missing real Codex, recursive resolution, profile conflict, child spawn failure, browser-open failure, stale runtime metadata, abnormal stale-file recovery, and preservation checksums for existing config/credentials.
+- [x] Implement direct inherited-stdio `Command` launch and only add PTY code if a real smoke test demonstrates a terminal defect.
+- [x] Serve embedded `web-dist` with correct MIME types, SPA fallback, and no filesystem dependency; test the installed binary from a directory outside the repository.
+- [x] Build the frontend, refresh the committed embedded bundle, run `cargo install --path crates/codegotchi-cli --root <temporary-root>`, and prove that installed `codegotchi run -- <fake-codex>` needs no second terminal or Vite process.
+- [x] Update README with exact Corepack development gates, one-command CLI installation, launch, first-run `/hooks` trust, Strict mode, debug demo, state locations, and cleanup behavior.
+- [x] Run Rust and frontend gates and commit the task. Write the report at the plan workspace's `task-5-report.md`.
 
 ### Task 6: Vertical acceptance harness, regression closure, and verification evidence
 
