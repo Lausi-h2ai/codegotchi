@@ -4,8 +4,8 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 use codegotchi_domain::{
     ActivityKind, AgentEvent, AgentEventKind, CareCommand, CareError, CareResult, Clock,
     DefaultNeedProgressionStrategy, EventMetadata, EventSource, FakeClock, FoodInventory, FoodKind,
-    Pet, PetSimulation, PetSpecies, PoopGenerationStrategy, PoopGenerationThreshold, RandomSource,
-    SeededRandomSource,
+    NAP_DURATION, Pet, PetBehavior, PetSimulation, PetSpecies, PoopGenerationStrategy,
+    PoopGenerationThreshold, RandomSource, SeededRandomSource,
 };
 use uuid::Uuid;
 
@@ -303,6 +303,113 @@ fn care_need_effects_are_exact_at_unclamped_public_baselines() {
         25.0
     );
     assert_eq!(after_cleaning.needs.cleanliness(), 85.0);
+}
+
+#[test]
+fn energy_drink_restores_energy_and_gives_a_sugar_rush_without_digestion() {
+    let (clock, mut simulation) = simulation_with_inventory(FoodKind::EnergyDrink, 1);
+    simulation
+        .apply_event(&event(1, 7, AgentEventKind::SessionStarted, start()))
+        .unwrap();
+    simulation
+        .apply_event(&event(2, 7, AgentEventKind::CommandStarted, start()))
+        .unwrap();
+    clock.advance(Duration::hours(10));
+    let drained = simulation.current_state();
+    assert_eq!(drained.needs.energy(), 40.0);
+    assert_eq!(drained.needs.happiness(), 100.0);
+    simulation
+        .apply_event(&failure_event(3, 7, start() + Duration::hours(10)))
+        .unwrap();
+    simulation
+        .apply_event(&failure_event(4, 7, start() + Duration::hours(10)))
+        .unwrap();
+    let before = simulation.current_state();
+    assert_eq!(before.needs.energy(), 40.0);
+    assert_eq!(before.needs.happiness(), 88.0);
+    assert_eq!(before.digestion_points, 0);
+
+    simulation
+        .apply_care(&CareCommand::Feed {
+            action_id: Uuid::from_u128(5),
+            food_id: "energy_drink".to_owned(),
+        })
+        .unwrap();
+
+    let after = simulation.snapshot();
+    assert_eq!(after.needs.energy(), 80.0);
+    assert_eq!(after.needs.happiness(), 93.0);
+    assert_eq!(after.needs.hunger(), before.needs.hunger());
+    assert_eq!(after.digestion_points, 0);
+    assert_eq!(simulation.pet().inventory().count(FoodKind::EnergyDrink), 0);
+}
+
+#[test]
+fn hammock_nap_restores_energy_over_five_seconds_and_clears_itself() {
+    let (clock, mut simulation) = simulation_with_inventory(FoodKind::Kibble, 0);
+    simulation
+        .apply_event(&event(1, 7, AgentEventKind::SessionStarted, start()))
+        .unwrap();
+    simulation
+        .apply_event(&event(2, 7, AgentEventKind::CommandStarted, start()))
+        .unwrap();
+    clock.advance(Duration::hours(20));
+    let tired = simulation.current_state();
+    assert_eq!(tired.needs.energy(), 0.0);
+
+    assert_eq!(
+        simulation
+            .apply_care(&CareCommand::Nap {
+                action_id: Uuid::from_u128(3),
+            })
+            .unwrap(),
+        CareResult::Applied
+    );
+    let napping = simulation.snapshot();
+    assert_eq!(napping.needs.energy(), 0.0);
+    assert_eq!(napping.behavior, PetBehavior::Sleeping);
+    assert_eq!(
+        napping.napping_until,
+        Some(start() + Duration::hours(20) + NAP_DURATION)
+    );
+
+    clock.advance(Duration::seconds(1));
+    assert_eq!(simulation.current_state().needs.energy(), 20.0);
+    assert_eq!(simulation.current_state().behavior, PetBehavior::Sleeping);
+
+    clock.advance(Duration::seconds(3));
+    assert_eq!(simulation.current_state().needs.energy(), 80.0);
+    assert_eq!(simulation.current_state().behavior, PetBehavior::Sleeping);
+
+    clock.advance(Duration::seconds(1));
+    let finished = simulation.current_state();
+    assert_eq!(finished.needs.energy(), 100.0);
+    assert_eq!(finished.napping_until, None);
+}
+
+#[test]
+fn nap_is_replay_safe_and_can_restart_from_a_new_action() {
+    let (clock, mut simulation) = simulation_with_inventory(FoodKind::Kibble, 0);
+    let nap = CareCommand::Nap {
+        action_id: Uuid::from_u128(5),
+    };
+    assert_eq!(simulation.apply_care(&nap).unwrap(), CareResult::Applied);
+    let first_deadline = simulation.snapshot().napping_until;
+    assert!(first_deadline.is_some());
+
+    assert_eq!(simulation.apply_care(&nap).unwrap(), CareResult::Duplicate);
+    assert_eq!(simulation.snapshot().napping_until, first_deadline);
+
+    clock.advance(Duration::seconds(2));
+    assert_eq!(
+        simulation
+            .apply_care(&CareCommand::Nap {
+                action_id: Uuid::from_u128(6),
+            })
+            .unwrap(),
+        CareResult::Applied
+    );
+    assert!(simulation.snapshot().napping_until.is_some());
 }
 
 #[test]

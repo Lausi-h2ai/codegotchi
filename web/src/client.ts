@@ -144,6 +144,12 @@ export class CodeGotchiClient {
         return this.care("clean", { actionId, poopId });
     }
 
+    public async nap(
+        actionId: string = createActionId(),
+    ): Promise<CareResponse> {
+        return this.care("nap", { actionId });
+    }
+
     private async loadInitialSnapshot(): Promise<void> {
         try {
             const snapshot = await this.request<SimulationSnapshot>(
@@ -238,7 +244,7 @@ export class CodeGotchiClient {
     }
 
     private async care(
-        action: "feed" | "clean",
+        action: "feed" | "clean" | "nap",
         body: Record<string, string>,
     ): Promise<CareResponse> {
         const response = await this.request<CareResponse>(

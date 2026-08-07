@@ -144,6 +144,7 @@ pub enum FoodKind {
     Kibble,
     Treat,
     Fruit,
+    EnergyDrink,
 }
 
 impl FoodKind {
@@ -152,6 +153,7 @@ impl FoodKind {
             "kibble" => Some(Self::Kibble),
             "treat" => Some(Self::Treat),
             "fruit" => Some(Self::Fruit),
+            "energy_drink" => Some(Self::EnergyDrink),
             _ => None,
         }
     }
@@ -161,6 +163,7 @@ impl FoodKind {
             Self::Kibble => "kibble",
             Self::Treat => "treat",
             Self::Fruit => "fruit",
+            Self::EnergyDrink => "energy_drink",
         }
     }
 }
@@ -262,6 +265,7 @@ pub struct Pet {
     recent_outcome: AgentOutcome,
     inventory: FoodInventory,
     poop_sequence: u64,
+    napping_until: Option<DateTime<Utc>>,
 }
 
 impl Pet {
@@ -283,6 +287,7 @@ impl Pet {
             recent_outcome: AgentOutcome::default(),
             inventory: FoodInventory::default(),
             poop_sequence: 0,
+            napping_until: None,
         }
     }
 
@@ -318,6 +323,7 @@ impl Pet {
         recent_outcome: AgentOutcome,
         inventory: FoodInventory,
         poop_sequence: u64,
+        napping_until: Option<DateTime<Utc>>,
     ) -> Self {
         Self {
             id,
@@ -333,6 +339,7 @@ impl Pet {
             recent_outcome,
             inventory,
             poop_sequence,
+            napping_until,
         }
     }
 
@@ -392,6 +399,10 @@ impl Pet {
         self.poop_sequence
     }
 
+    pub fn napping_until(&self) -> Option<DateTime<Utc>> {
+        self.napping_until
+    }
+
     #[allow(dead_code)]
     pub(crate) fn add_digestion_points(&mut self, points: u64) {
         self.digestion_points = self.digestion_points.saturating_add(points);
@@ -415,6 +426,22 @@ impl Pet {
 
     pub(crate) fn advance_poop_sequence(&mut self) {
         self.poop_sequence = self.poop_sequence.saturating_add(1);
+    }
+
+    pub(crate) fn start_nap(&mut self, until: DateTime<Utc>) {
+        self.napping_until = Some(until);
+    }
+
+    pub(crate) fn clear_expired_nap(&mut self, now: DateTime<Utc>) {
+        if self.napping_until.is_some_and(|until| now >= until) {
+            self.napping_until = None;
+        }
+    }
+
+    /// Whether the pet is napping at the given instant. The nap ends exactly
+    /// when the clock reaches its deadline.
+    pub fn is_napping(&self, now: DateTime<Utc>) -> bool {
+        self.napping_until.is_some_and(|until| now < until)
     }
 
     pub(crate) fn set_activity(&mut self, activity: AgentActivityState) {

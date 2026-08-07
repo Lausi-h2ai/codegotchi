@@ -5,10 +5,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use chrono::{TimeZone, Utc};
+use chrono::{Duration, TimeZone, Utc};
 use codegotchi_cli::runtime_metadata::write_metadata;
 use codegotchi_cli::{AuthoritativeRuntime, RunningServer, RuntimeMetadataV1, SqliteStore};
-use codegotchi_domain::{EnforcementMode, Pet, PetSpecies};
+use codegotchi_domain::{
+    ActivityKind, AgentEvent, AgentEventKind, EnforcementMode, EventMetadata, EventSource, Pet,
+    PetSpecies,
+};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -349,7 +352,7 @@ async fn strict_denial_is_verified_fail_open_and_recoverable_through_normal_care
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
-                "permissionDecisionReason": "The pet refuses this safe development action because its hunger is critical. Feed the pet in the CodeGotchi UI, then retry the Codex request afterward."
+                "permissionDecisionReason": "The pet refuses this action because its hunger is critical. Feed the pet in the CodeGotchi UI, then retry the Codex request afterward."
             }
         })
     );
@@ -418,41 +421,72 @@ async fn strict_denial_is_verified_fail_open_and_recoverable_through_normal_care
             &incomplete_apply_patch_fixture(identity, tool_input),
         )
         .await;
-        assert_allow(&output);
+        // The pet is severely neglected here, so even uncertain tool calls
+        // are refused; unverified apply_patch input must never be trusted as
+        // safe development and then escape the severe refusal.
+        let value = parse_stdout(&output);
+        assert_eq!(
+            value["hookSpecificOutput"]["permissionDecision"], "deny",
+            "{identity} must be refused at severe neglect"
+        );
         let _ = next_snapshot(&mut snapshots).await;
     }
 
-    let fail_open_cases = [
+    // The pet was neglected twice, so needs are severe: every purpose except
+    // CodeGotchi control is refused in strict mode.
+    let severe_scope_cases = [
         (
             "unknown",
             shell_fixture("unknown", "totally-unknown-operation", "Bash"),
+            false,
         ),
         (
             "compound",
             shell_fixture("compound", "cargo test && cargo build", "Bash"),
+            false,
         ),
         (
             "codegotchi",
             shell_fixture("codegotchi", "codegotchi mode strict", "Bash"),
+            true,
         ),
-        ("git", shell_fixture("git", "git status --short", "Bash")),
+        (
+            "git",
+            shell_fixture("git", "git status --short", "Bash"),
+            false,
+        ),
         (
             "termination",
             shell_fixture("termination", "exit 0", "Bash"),
+            false,
         ),
-        ("recovery", shell_fixture("recovery", "pkill cargo", "Bash")),
+        (
+            "recovery",
+            shell_fixture("recovery", "pkill cargo", "Bash"),
+            false,
+        ),
         (
             "diagnostic",
             shell_fixture("diagnostic", "cargo --version", "Bash"),
+            false,
         ),
         (
             "unknown-tool",
             shell_fixture("unknown-tool", "cargo test", "FutureTool"),
+            false,
         ),
     ];
-    for (name, payload) in fail_open_cases {
+    for (name, payload, allowed) in severe_scope_cases {
         let output = invoke_hook(&metadata_path, &payload).await;
-        assert_allow(&output);
+        if allowed {
+            assert_allow(&output);
+        } else {
+            let value = parse_stdout(&output);
+            assert_eq!(
+                value["hookSpecificOutput"]["permissionDecision"], "deny",
+                "{name} must be refused at severe neglect"
+            );
+        }
         let _ = next_snapshot(&mut snapshots).await;
         assert!(!name.is_empty(), "case is named for diagnostics");
     }
@@ -517,22 +551,54 @@ async fn strict_denial_is_verified_fail_open_and_recoverable_through_normal_care
     assert_allow(&malformed_response);
     malformed_thread.join().expect("mock exits");
 
-    let recovery = request(
-        &server,
-        "POST",
-        "/api/v1/care/feed",
-        Some("task-4-strict-token"),
-        &serde_json::to_vec(&serde_json::json!({
-            "actionId": Uuid::from_u128(700),
-            "foodId": "kibble"
-        }))
-        .expect("feed serializes"),
-    )
-    .await;
-    assert_eq!(recovery.0, 200);
-    let recovered = next_snapshot(&mut snapshots).await;
-    assert!(recovered.needs.hunger() < 90.0);
-    assert_eq!(recovered.enforcement_mode, EnforcementMode::Strict);
+    // Severe neglect leaves both hunger and energy critical, so recovery now
+    // needs two kibble to clear the mild hunger boundary plus rest time for
+    // energy to recover above its mild boundary.
+    for action_id in 710_u128..712_u128 {
+        let recovery = request(
+            &server,
+            "POST",
+            "/api/v1/care/feed",
+            Some("task-4-strict-token"),
+            &serde_json::to_vec(&serde_json::json!({
+                "actionId": Uuid::from_u128(action_id),
+                "foodId": "kibble"
+            }))
+            .expect("feed serializes"),
+        )
+        .await;
+        assert_eq!(recovery.0, 200);
+    }
+    let _ = next_snapshot(&mut snapshots).await;
+    let fed = next_snapshot(&mut snapshots).await;
+    assert!(
+        fed.needs.hunger() < 70.0,
+        "two kibble clear the mild hunger boundary"
+    );
+    assert_eq!(fed.enforcement_mode, EnforcementMode::Strict);
+
+    // Let the exhausted pet rest: end the active tool and fast-forward four
+    // idle hours so energy recovers from 0 to 32 while hunger only drifts to
+    // ~54, leaving every need below its mild boundary.
+    runtime
+        .apply_event(&AgentEvent::new(
+            Uuid::from_u128(900),
+            Uuid::from_u128(1),
+            "/workspace/codegatchi",
+            EventSource::Codex,
+            AgentEventKind::ToolCompleted,
+            Some(ActivityKind::UnknownWork),
+            Utc::now(),
+            EventMetadata::default(),
+        ))
+        .expect("rest event applies");
+    let _ = next_snapshot(&mut snapshots).await;
+    runtime
+        .maintenance_tick_at(fed.last_updated_at + Duration::hours(4))
+        .expect("rest time advances");
+    let rested = next_snapshot(&mut snapshots).await;
+    assert!(rested.needs.energy() > 30.0);
+    assert!(rested.needs.hunger() < 70.0);
     let recovered_hook = invoke_hook(&metadata_path, &safe_fixture("strict-tool-2")).await;
     assert_allow(&recovered_hook);
     let _ = next_snapshot(&mut snapshots).await;

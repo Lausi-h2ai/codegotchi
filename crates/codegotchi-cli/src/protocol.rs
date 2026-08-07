@@ -317,6 +317,12 @@ pub struct CleanRequest {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct NapRequest {
+    pub action_id: Uuid,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SnapshotMutationResponse {
     #[serde(flatten)]
     pub snapshot: SimulationSnapshot,

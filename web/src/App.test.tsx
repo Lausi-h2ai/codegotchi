@@ -37,7 +37,7 @@ function snapshot(
                 createdAt: "2026-08-05T12:00:00Z",
             },
         ],
-        inventory: { kibble: 50, treat: 25, fruit: 25 },
+        inventory: { kibble: 50, treat: 25, fruit: 25, energy_drink: 10 },
         processedCareIds: [],
         poopSequence: 1,
         sessionActivities: {},
@@ -46,6 +46,7 @@ function snapshot(
         lastOutcomeAt: null,
         consecutiveFailures: 0,
         enforcementMode: "decorative",
+        nappingUntil: null,
         ...overrides,
     };
 }
@@ -60,6 +61,7 @@ function renderApp(
         feedback: null,
         feed: vi.fn().mockResolvedValue(undefined),
         clean: vi.fn().mockResolvedValue(undefined),
+        nap: vi.fn().mockResolvedValue(undefined),
         ...state,
     });
     render(<App launchToken="test-token" />);
@@ -128,6 +130,60 @@ describe("CodeGotchi pet room", () => {
         expect(
             screen.getByRole("button", { name: /trash/i }),
         ).toBeInTheDocument();
+        expect(
+            screen.getByRole("button", { name: /hammock nap/i }),
+        ).toBeInTheDocument();
+        expect(screen.getByTestId("food-energy_drink")).toHaveTextContent("10");
+    });
+
+    it("sends one hammock nap when the hammock is clicked", () => {
+        const nap = vi.fn().mockResolvedValue(undefined);
+        renderApp({
+            snapshot: snapshot(),
+            connectionStatus: "connected",
+            nap,
+        });
+
+        fireEvent.click(screen.getByRole("button", { name: /hammock nap/i }));
+
+        expect(nap).toHaveBeenCalledTimes(1);
+    });
+
+    it("presents an active hammock nap with ZZZs and a sleeping label", () => {
+        const napDeadline = new Date(Date.now() + 10_000).toISOString();
+        renderApp({
+            snapshot: snapshot({
+                behavior: "Sleeping",
+                nappingUntil: napDeadline,
+            }),
+            connectionStatus: "connected",
+        });
+
+        expect(screen.getByTestId("zzz")).toBeVisible();
+        expect(screen.getByTestId("activity-label")).toHaveTextContent(
+            "Sleeping",
+        );
+        expect(
+            screen.getByRole("button", { name: /resting in hammock/i }),
+        ).toBeDisabled();
+    });
+
+    it("does not start a second nap while the first is still active", () => {
+        const napDeadline = new Date(Date.now() + 10_000).toISOString();
+        const nap = vi.fn().mockResolvedValue(undefined);
+        renderApp({
+            snapshot: snapshot({
+                nappingUntil: napDeadline,
+            }),
+            connectionStatus: "connected",
+            nap,
+        });
+
+        fireEvent.click(
+            screen.getByRole("button", { name: /resting in hammock/i }),
+        );
+
+        expect(nap).not.toHaveBeenCalled();
     });
 
     it.each([

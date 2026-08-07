@@ -1,6 +1,10 @@
 use thiserror::Error;
 use uuid::Uuid;
 
+/// A hammock nap is fixed length: fast enough to feel like a quick power nap
+/// in the UI, long enough for the per-second recovery animation to be visible.
+pub const NAP_DURATION: chrono::Duration = chrono::Duration::seconds(5);
+
 /// A replay-safe request for one care interaction.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CareCommand {
@@ -17,6 +21,11 @@ pub enum CareCommand {
         interaction_ms: u64,
         pointer_distance: f32,
     },
+    /// Settles the pet into the hammock for a fixed 5-second nap. Energy
+    /// recovers quickly while `napping_until` is in the future.
+    Nap {
+        action_id: Uuid,
+    },
 }
 
 impl CareCommand {
@@ -24,7 +33,8 @@ impl CareCommand {
         match self {
             Self::Feed { action_id, .. }
             | Self::CleanPoop { action_id, .. }
-            | Self::Pet { action_id, .. } => *action_id,
+            | Self::Pet { action_id, .. }
+            | Self::Nap { action_id } => *action_id,
         }
     }
 }

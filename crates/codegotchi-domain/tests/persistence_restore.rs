@@ -1,8 +1,8 @@
 use chrono::{Duration, TimeZone, Utc};
 use codegotchi_domain::{
     ActivityKind, AgentEvent, AgentEventKind, CareCommand, DefaultNeedProgressionStrategy,
-    EnforcementMode, EventMetadata, EventSource, FakeClock, FoodInventory, FoodKind, Pet,
-    PetSimulation, PetSpecies,
+    EnforcementMode, EventMetadata, EventSource, FakeClock, FoodInventory, FoodKind, NAP_DURATION,
+    Pet, PetSimulation, PetSpecies,
 };
 use uuid::Uuid;
 
@@ -207,4 +207,42 @@ fn restored_simulations_continue_deterministically() {
     a.apply_event(&next).unwrap();
     b.apply_event(&next).unwrap();
     assert_eq!(a.snapshot(), b.snapshot());
+}
+
+#[test]
+fn hammock_nap_deadline_survives_restore_and_keeps_recovering() {
+    let (clock, mut simulation) = simulation();
+    simulation
+        .apply_event(&event(50, AgentEventKind::SessionStarted, None, start()))
+        .unwrap();
+    simulation
+        .apply_event(&event(
+            51,
+            AgentEventKind::TurnStarted,
+            Some(ActivityKind::Building),
+            start(),
+        ))
+        .unwrap();
+    clock.advance(Duration::hours(20));
+    simulation.current_state();
+    simulation
+        .apply_care(&CareCommand::Nap {
+            action_id: Uuid::from_u128(52),
+        })
+        .unwrap();
+    let snapshot = simulation.snapshot();
+    assert_eq!(
+        snapshot.napping_until,
+        Some(start() + Duration::hours(20) + NAP_DURATION)
+    );
+
+    let mut restored = PetSimulation::from_snapshot(
+        snapshot,
+        FakeClock::new(start() + Duration::hours(20) + Duration::seconds(2)),
+        DefaultNeedProgressionStrategy,
+    )
+    .unwrap();
+    let resumed = restored.current_state();
+    assert_eq!(resumed.needs.energy(), 40.0);
+    assert_eq!(resumed.behavior, codegotchi_domain::PetBehavior::Sleeping);
 }

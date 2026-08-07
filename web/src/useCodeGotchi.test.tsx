@@ -30,6 +30,7 @@ function snapshot(
         lastOutcomeAt: null,
         consecutiveFailures: 0,
         enforcementMode: "decorative",
+        nappingUntil: null,
         ...overrides,
     };
 }
@@ -161,6 +162,46 @@ describe("useCodeGotchi authoritative projection", () => {
 
         expect(result.current.snapshot).toEqual(recovered);
         expect(result.current.error).toBeNull();
+        unmount();
+    });
+
+    it("starts a nap and reports cozy feedback after the care response", async () => {
+        const initial = snapshot("awake state");
+        const napping = snapshot("napping state", {
+            lastUpdatedAt: "2026-08-05T12:00:01Z",
+            processedCareIds: ["nap-action"],
+            nappingUntil: "2026-08-05T12:00:06Z",
+        });
+        const fetch = vi
+            .fn()
+            .mockResolvedValueOnce(responseFor(initial))
+            .mockResolvedValueOnce(
+                responseFor({ ...napping, duplicate: false }),
+            );
+        vi.stubGlobal("fetch", fetch);
+        vi.stubGlobal("WebSocket", FakeWebSocket);
+
+        const { result, unmount } = renderHook(() =>
+            useCodeGotchi("care-secret"),
+        );
+        await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        let napPromise: Promise<void>;
+        await act(async () => {
+            napPromise = result.current.nap();
+            await Promise.resolve();
+        });
+        await act(async () => {
+            await napPromise;
+        });
+
+        expect(result.current.snapshot?.nappingUntil).toBe(
+            "2026-08-05T12:00:06Z",
+        );
+        expect(result.current.feedback).toBe("Cozy nap in the hammock…");
         unmount();
     });
 });

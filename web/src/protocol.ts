@@ -1,4 +1,4 @@
-export type FoodId = "kibble" | "treat" | "fruit";
+export type FoodId = "kibble" | "treat" | "fruit" | "energy_drink";
 
 export type PetSpecies = "cat";
 
@@ -79,6 +79,8 @@ export interface SimulationSnapshot {
     lastOutcomeAt: string | null;
     consecutiveFailures: number;
     enforcementMode: EnforcementMode;
+    /** Deadline of the current hammock nap, or null while awake. */
+    nappingUntil: string | null;
 }
 
 export interface CareResponse extends SimulationSnapshot {
@@ -93,7 +95,27 @@ export interface ErrorEnvelope {
 }
 
 export function isFoodId(value: string): value is FoodId {
-    return value === "kibble" || value === "treat" || value === "fruit";
+    return (
+        value === "kibble" ||
+        value === "treat" ||
+        value === "fruit" ||
+        value === "energy_drink"
+    );
+}
+
+/** The fixed nap length the room uses; the domain enforces the same duration. */
+export const NAP_DURATION_MS = 5_000;
+
+/** Whether the pet is currently napping in the hammock at this instant. */
+export function isNapping(
+    snapshot: SimulationSnapshot,
+    now = Date.now(),
+): boolean {
+    if (snapshot.nappingUntil === null) {
+        return false;
+    }
+    const deadline = Date.parse(snapshot.nappingUntil);
+    return Number.isFinite(deadline) && deadline > now;
 }
 
 export function activeActivity(

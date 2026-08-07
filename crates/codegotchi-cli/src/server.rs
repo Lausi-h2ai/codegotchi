@@ -27,7 +27,7 @@ use crate::assets;
 use crate::persistence::PersistenceError;
 use crate::protocol::{
     CleanRequest, DebugRequest, ErrorEnvelope, EventIngestRequest, EventIngestResponse,
-    FeedRequest, HealthResponse, ModeRequest, SnapshotMutationResponse,
+    FeedRequest, HealthResponse, ModeRequest, NapRequest, SnapshotMutationResponse,
 };
 use crate::runtime::{AuthoritativeRuntime, MutationReceipt, RuntimeError};
 
@@ -201,6 +201,7 @@ fn router(state: AppState) -> Router {
         )
         .route("/api/v1/care/feed", post(feed_handler))
         .route("/api/v1/care/clean", post(clean_handler))
+        .route("/api/v1/care/nap", post(nap_handler))
         .route("/api/v1/stream", get(stream_handler))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -348,6 +349,16 @@ async fn clean_handler(
     BoundedJson(request): BoundedJson<CleanRequest>,
 ) -> Response {
     match state.runtime.clean(request.action_id, request.poop_id) {
+        Ok(receipt) => mutation_response(receipt),
+        Err(error) => runtime_error_response(error),
+    }
+}
+
+async fn nap_handler(
+    State(state): State<AppState>,
+    BoundedJson(request): BoundedJson<NapRequest>,
+) -> Response {
+    match state.runtime.nap(request.action_id) {
         Ok(receipt) => mutation_response(receipt),
         Err(error) => runtime_error_response(error),
     }
@@ -531,10 +542,13 @@ fn denial_reason(decision: WorkDecision) -> Option<String> {
     };
     let reason = match reason_code {
         WorkReasonCode::CriticalHunger => {
-            "The pet refuses this safe development action because its hunger is critical. Feed the pet in the CodeGotchi UI, then retry the Codex request afterward."
+            "The pet refuses this action because its hunger is critical. Feed the pet in the CodeGotchi UI, then retry the Codex request afterward."
+        }
+        WorkReasonCode::CriticalEnergy => {
+            "The pet refuses this action because it is too exhausted to keep working. Give the pet time to rest, then retry the Codex request afterward."
         }
         WorkReasonCode::CriticalCleanliness => {
-            "The pet refuses this safe development action because its cleanliness is critical. Clean the pet in the CodeGotchi UI, then retry the Codex request afterward."
+            "The pet refuses this action because its cleanliness is critical. Clean the pet in the CodeGotchi UI, then retry the Codex request afterward."
         }
     };
     Some(reason.to_owned())

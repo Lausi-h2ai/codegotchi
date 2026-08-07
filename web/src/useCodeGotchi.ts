@@ -9,8 +9,11 @@ export interface CodeGotchiState {
     connectionStatus: ClientStatus;
     error: ClientError | null;
     feedback: string | null;
-    feed: (foodId: "kibble" | "treat" | "fruit") => Promise<void>;
+    feed: (
+        foodId: "kibble" | "treat" | "fruit" | "energy_drink",
+    ) => Promise<void>;
     clean: (poopId: string) => Promise<void>;
+    nap: () => Promise<void>;
 }
 
 declare global {
@@ -63,19 +66,22 @@ export function useCodeGotchi(token: string | null): CodeGotchiState {
         };
     }, [token]);
 
-    const feed = useCallback(async (foodId: "kibble" | "treat" | "fruit") => {
-        const client = clientRef.current;
-        if (!client) {
-            return;
-        }
-        try {
-            await client.feed(foodId);
-            setError(null);
-            setFeedback(`Eating ${foodId}`);
-        } catch (nextError) {
-            setError(asClientError(nextError));
-        }
-    }, []);
+    const feed = useCallback(
+        async (foodId: "kibble" | "treat" | "fruit" | "energy_drink") => {
+            const client = clientRef.current;
+            if (!client) {
+                return;
+            }
+            try {
+                await client.feed(foodId);
+                setError(null);
+                setFeedback(`Eating ${foodLabel(foodId)}`);
+            } catch (nextError) {
+                setError(asClientError(nextError));
+            }
+        },
+        [],
+    );
 
     const clean = useCallback(async (poopId: string) => {
         const client = clientRef.current;
@@ -91,7 +97,36 @@ export function useCodeGotchi(token: string | null): CodeGotchiState {
         }
     }, []);
 
-    return { snapshot, connectionStatus, error, feedback, feed, clean };
+    const nap = useCallback(async () => {
+        const client = clientRef.current;
+        if (!client) {
+            return;
+        }
+        try {
+            await client.nap();
+            setError(null);
+            setFeedback("Cozy nap in the hammock…");
+        } catch (nextError) {
+            setError(asClientError(nextError));
+        }
+    }, []);
+
+    return { snapshot, connectionStatus, error, feedback, feed, clean, nap };
+}
+
+function foodLabel(
+    foodId: "kibble" | "treat" | "fruit" | "energy_drink",
+): string {
+    switch (foodId) {
+        case "kibble":
+            return "kibble";
+        case "treat":
+            return "a treat";
+        case "fruit":
+            return "fruit";
+        case "energy_drink":
+            return "an energy drink";
+    }
 }
 
 function asClientError(error: unknown): ClientError {

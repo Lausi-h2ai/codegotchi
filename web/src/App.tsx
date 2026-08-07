@@ -6,6 +6,7 @@ import { extractLaunchToken } from "./client";
 import {
     activeActivity,
     isFoodId,
+    isNapping,
     type ActivityKind,
     type FoodId,
     type SimulationSnapshot,
@@ -16,6 +17,7 @@ const FOODS: { id: FoodId; label: string; icon: string }[] = [
     { id: "kibble", label: "Kibble", icon: "◈" },
     { id: "treat", label: "Treat", icon: "✦" },
     { id: "fruit", label: "Fruit", icon: "●" },
+    { id: "energy_drink", label: "Energy drink", icon: "⚡" },
 ];
 
 interface AppProps {
@@ -26,13 +28,14 @@ function App({ launchToken }: AppProps) {
     const [token] = useState<string | null>(() =>
         launchToken === undefined ? extractLaunchToken() : launchToken,
     );
-    const { snapshot, connectionStatus, error, feedback, feed, clean } =
+    const { snapshot, connectionStatus, error, feedback, feed, clean, nap } =
         useCodeGotchi(token);
     const [shovelArmed, setShovelArmed] = useState(false);
     const [cleaningPoopId, setCleaningPoopId] = useState<string | null>(null);
 
     const activityLabel = snapshot ? presentationActivity(snapshot) : "Waiting";
     const behaviorLabel = snapshot ? presentationBehavior(snapshot) : "Waiting";
+    const napping = snapshot ? isNapping(snapshot) : false;
 
     function submitFeed(foodId: string): void {
         if (!isFoodId(foodId)) {
@@ -173,6 +176,30 @@ function App({ launchToken }: AppProps) {
                                 <div className="desk-leg desk-leg--right" />
                             </div>
 
+                            <button
+                                className={`hammock ${napping ? "hammock--rocking" : ""}`}
+                                type="button"
+                                data-testid="hammock"
+                                aria-label={
+                                    napping
+                                        ? "Resting in hammock"
+                                        : "Hammock nap"
+                                }
+                                aria-pressed={napping}
+                                disabled={napping}
+                                onClick={() => {
+                                    if (!napping) {
+                                        void nap();
+                                    }
+                                }}
+                            >
+                                <span className="hammock__rope hammock__rope--left" />
+                                <span className="hammock__rope hammock__rope--right" />
+                                <span className="hammock__hook hammock__hook--left" />
+                                <span className="hammock__hook hammock__hook--right" />
+                                <span className="hammock__bed" />
+                            </button>
+
                             <div
                                 className={`pet pet--${poseClass(snapshot)}`}
                                 role="img"
@@ -185,6 +212,17 @@ function App({ launchToken }: AppProps) {
                                     <span className="pet-eye pet-eye--right" />
                                     <span className="pet-mouth" />
                                 </span>
+                                {napping ? (
+                                    <span
+                                        className="zzz"
+                                        data-testid="zzz"
+                                        aria-hidden="true"
+                                    >
+                                        <span>z</span>
+                                        <span>Z</span>
+                                        <span>Z</span>
+                                    </span>
+                                ) : null}
                             </div>
 
                             <button
@@ -325,9 +363,9 @@ function App({ launchToken }: AppProps) {
                                 aria-labelledby="food-title"
                             >
                                 <p className="section-kicker">
-                                    Food & inventory
+                                    Food & care items
                                 </p>
-                                <h3 id="food-title">Drag food to feed</h3>
+                                <h3 id="food-title">Drag items to use</h3>
                                 <div className="food-list">
                                     {FOODS.map((food) => (
                                         <button
@@ -357,6 +395,11 @@ function App({ launchToken }: AppProps) {
                                         </button>
                                     ))}
                                 </div>
+                                <p className="care-tip">
+                                    Out of energy? The hammock nap restores the
+                                    full meter in five seconds; energy drinks
+                                    give an instant pick-me-up.
+                                </p>
                             </section>
 
                             <p className="authoritative-note">
@@ -414,6 +457,9 @@ function presentationActivity(snapshot: SimulationSnapshot): string {
     if (snapshot.activity === "Blocked" || snapshot.behavior === "Blocked") {
         return "Refusing";
     }
+    if (snapshot.behavior === "Sleeping") {
+        return "Sleeping";
+    }
     if (
         snapshot.behavior === "RecentSuccess" ||
         snapshot.recentOutcome === "Success"
@@ -428,9 +474,6 @@ function presentationActivity(snapshot: SimulationSnapshot): string {
     }
     if (snapshot.behavior === "CriticalNeed") {
         return "Upset";
-    }
-    if (snapshot.behavior === "Sleeping") {
-        return "Sleeping";
     }
 
     const activity = activeActivity(snapshot.activity);
@@ -498,6 +541,9 @@ function activityIcon(label: string): string {
 }
 
 function poseClass(snapshot: SimulationSnapshot): string {
+    if (isNapping(snapshot)) {
+        return "napping";
+    }
     return presentationActivity(snapshot)
         .toLowerCase()
         .replaceAll(" / ", "-")

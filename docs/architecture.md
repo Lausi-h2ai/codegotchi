@@ -131,13 +131,16 @@ server failures serialize as Codex's valid empty allow result:
 {}
 ```
 
-In explicit Strict mode, only recognized safe development work can be blocked
-when hunger or cleanliness is critical. A successful `PreToolUse` evaluation
+In explicit Strict mode, the blocked tool-call set widens as neglect worsens:
+mild neglect (hunger ≥ 70, energy ≤ 30, or cleanliness ≤ 30) blocks safe
+development work, moderate neglect (85/15/15) also blocks recovery work, and
+severe neglect (95/5/5) blocks every tool call except CodeGotchi control.
+The dominant neglected need (hunger, then energy, then cleanliness) supplies
+the denial reason and care guidance. A successful `PreToolUse` evaluation
 returns Codex's documented `hookSpecificOutput` denial with the care and retry
-guidance. CodeGotchi controls, recovery, Git, infrastructure shutdown,
-security remediation, uncertain work, and transport failures remain
-fail-open. Strict is a care interaction, not a security boundary or an OS
-sandbox.
+guidance. CodeGotchi controls always stay allowed, and transport failures
+remain fail-open. Strict is a care interaction, not a security boundary or an
+OS sandbox.
 
 The CLI mode command is:
 

@@ -69,11 +69,14 @@ Run these commands from the active Codex environment so
 codegotchi mode strict
 ```
 
-Strict can deny only recognized safe development actions when hunger or
-cleanliness is critical. The denial tells the user to care for the pet in the
-UI and retry. Uncertain work, recovery/control work, and hook/transport
-failures remain fail-open. Strict is a pet-care interaction, not a security
-boundary or operating-system sandbox.
+Strict mode escalates as the pet's needs worsen. Mild neglect (hunger ≥ 70,
+energy ≤ 30, or cleanliness ≤ 30) blocks safe development work; moderate
+neglect (85/15/15) also blocks recovery work; and severe neglect (95/5/5)
+blocks every tool call except CodeGotchi control. Hunger, energy, and
+cleanliness each drive the escalation, and the denial tells the user what to
+care for in the UI before retrying. Uncertain work and hook/transport
+failures remain fail-open until severe neglect. Strict is a pet-care
+interaction, not a security boundary or operating-system sandbox.
 
 The fixed demonstration controls require the exact `CODEGOTCHI_ENABLE_DEBUG=1`
 guard and do not accept arbitrary values:

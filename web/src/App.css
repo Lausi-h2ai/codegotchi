@@ -371,6 +371,17 @@ h3 {
     transition: transform 180ms ease;
 }
 
+.pet--napping {
+    top: 26.5%;
+    bottom: auto;
+    left: 15.5%;
+    width: clamp(6.5rem, 14vw, 8rem);
+    height: clamp(6.8rem, 15vw, 8.5rem);
+    transform: rotate(4deg);
+    transform-origin: 50% 15%;
+    animation: pet-rock 1.4s ease-in-out infinite alternate;
+}
+
 .pet--sleeping {
     transform: translateY(0.3rem) scale(0.94, 0.82);
 }
@@ -452,6 +463,134 @@ h3 {
     height: 0.55rem;
     border-bottom: 0.2rem solid #20263b;
     border-radius: 0 0 50% 50%;
+}
+
+.zzz {
+    position: absolute;
+    top: -2.9rem;
+    right: -0.5rem;
+    width: 3.4rem;
+    height: 3.2rem;
+    color: #35437f;
+    font-weight: 900;
+    letter-spacing: 0.02em;
+}
+
+.zzz span {
+    position: absolute;
+    display: block;
+    opacity: 0;
+    animation: zzz-float 1.6s ease-in-out infinite;
+}
+
+.zzz span:nth-child(1) {
+    bottom: 0.2rem;
+    left: 0.1rem;
+    font-size: 0.8rem;
+    animation-delay: 0s;
+}
+
+.zzz span:nth-child(2) {
+    bottom: 0.15rem;
+    left: 1.15rem;
+    font-size: 1.05rem;
+    animation-delay: 0.35s;
+}
+
+.zzz span:nth-child(3) {
+    bottom: 0.1rem;
+    left: 2.2rem;
+    font-size: 1.3rem;
+    animation-delay: 0.7s;
+}
+
+.hammock {
+    position: absolute;
+    top: 27%;
+    left: 8%;
+    width: 38%;
+    height: 8.75rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    transform-origin: 50% 0%;
+}
+
+.hammock--rocking {
+    animation: hammock-rock 1.4s ease-in-out infinite alternate;
+}
+
+.hammock:disabled {
+    cursor: default;
+}
+
+.hammock__bed {
+    position: absolute;
+    right: 4%;
+    bottom: 0;
+    left: 4%;
+    height: 2.4rem;
+    border: 0.22rem solid #8a5f43;
+    border-top: 0;
+    border-radius: 0 0 50% 50% / 0 0 95% 95%;
+    background: repeating-linear-gradient(
+        90deg,
+        #e8a05c 0 0.9rem,
+        #d9854a 0.9rem 1.8rem
+    );
+    box-shadow:
+        inset 0 0.25rem 0 #ffffff38,
+        0 0.35rem 0 #5d433838;
+}
+
+.hammock__bed::after {
+    position: absolute;
+    top: 0.25rem;
+    right: 8%;
+    left: 8%;
+    height: 0.25rem;
+    border-radius: 999px;
+    background: #ffffff4d;
+    content: "";
+}
+
+.hammock__rope {
+    position: absolute;
+    top: 0;
+    width: 0.2rem;
+    height: 6.5rem;
+    border-radius: 999px;
+    background: #b58a63;
+    transform-origin: top center;
+}
+
+.hammock__rope--left {
+    left: 12%;
+    transform: rotate(17deg);
+}
+
+.hammock__rope--right {
+    right: 12%;
+    transform: rotate(-17deg);
+}
+
+.hammock__hook {
+    position: absolute;
+    top: -0.55rem;
+    width: 0.9rem;
+    height: 0.9rem;
+    border: 0.22rem solid #6f4d42;
+    border-radius: 50%;
+    background: #8d624d;
+}
+
+.hammock__hook--left {
+    left: 8%;
+}
+
+.hammock__hook--right {
+    right: 8%;
 }
 
 .feed-target,
@@ -680,6 +819,22 @@ h3 {
     text-align: center;
 }
 
+.food-item[data-food-id="energy_drink"] span:first-child {
+    color: #b26a00;
+    font-size: 1.05rem;
+    line-height: 1;
+}
+
+.care-tip {
+    margin: 0.75rem 0 0;
+    padding: 0.65rem 0.75rem;
+    border-radius: 0.65rem;
+    color: #6d4b08;
+    background: #fff6dc;
+    font-size: 0.72rem;
+    line-height: 1.5;
+}
+
 .authoritative-note {
     margin: 0;
     padding: 0.75rem 0.9rem;
@@ -702,5 +857,37 @@ h3 {
 
     .room-illustration {
         min-height: 480px;
+    }
+}
+
+@keyframes hammock-rock {
+    from {
+        transform: rotate(-3.5deg);
+    }
+    to {
+        transform: rotate(3.5deg);
+    }
+}
+
+@keyframes pet-rock {
+    from {
+        transform: rotate(-3deg) translateY(0.1rem);
+    }
+    to {
+        transform: rotate(5deg) translateY(-0.1rem);
+    }
+}
+
+@keyframes zzz-float {
+    0% {
+        opacity: 0;
+        transform: translateY(0.45rem) scale(0.85);
+    }
+    25% {
+        opacity: 0.9;
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(-1.7rem) scale(1.15);
     }
 }

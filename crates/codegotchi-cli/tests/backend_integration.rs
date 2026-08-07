@@ -217,6 +217,7 @@ async fn authenticated_loopback_http_is_authoritative_and_replay_safe() {
     assert_eq!(state.body["inventory"]["kibble"], 50);
     assert_eq!(state.body["inventory"]["treat"], 25);
     assert_eq!(state.body["inventory"]["fruit"], 25);
+    assert_eq!(state.body["inventory"]["energy_drink"], 10);
 
     let oversized = vec![b'x'; 100 * 1024];
     let oversized_response =
@@ -346,6 +347,40 @@ async fn authenticated_loopback_http_is_authoritative_and_replay_safe() {
     assert_eq!(cleaned_again.status, 200);
     assert_eq!(cleaned_again.body["duplicate"], true);
 
+    let energy_drink = serde_json::json!({
+        "actionId": Uuid::from_u128(24),
+        "foodId": "energy_drink"
+    });
+    let energy_drink_body = serde_json::to_vec(&energy_drink).unwrap();
+    let drank = request(
+        &server,
+        "POST",
+        "/api/v1/care/feed",
+        Some(TOKEN),
+        &energy_drink_body,
+    )
+    .await;
+    assert_eq!(drank.status, 200);
+    assert_eq!(drank.body["duplicate"], false);
+    assert_eq!(drank.body["inventory"]["energy_drink"], 9);
+
+    let nap = serde_json::json!({
+        "actionId": Uuid::from_u128(25),
+    });
+    let nap_body = serde_json::to_vec(&nap).unwrap();
+    let napped = request(&server, "POST", "/api/v1/care/nap", Some(TOKEN), &nap_body).await;
+    assert_eq!(napped.status, 200);
+    assert_eq!(napped.body["duplicate"], false);
+    assert!(
+        napped.body["nappingUntil"].is_string(),
+        "nap must expose an authoritative nappingUntil deadline"
+    );
+    assert_eq!(napped.body["behavior"], "Sleeping");
+
+    let napped_again = request(&server, "POST", "/api/v1/care/nap", Some(TOKEN), &nap_body).await;
+    assert_eq!(napped_again.status, 200);
+    assert_eq!(napped_again.body["duplicate"], true);
+
     assert_eq!(
         request(
             &server,
@@ -465,7 +500,7 @@ async fn sqlite_reload_keeps_inventory_enforcement_and_replay_ids_without_reseed
     )
     .unwrap();
     assert_eq!(restored.snapshot(), before);
-    assert_eq!(restored.snapshot().inventory.total(), 99);
+    assert_eq!(restored.snapshot().inventory.total(), 109);
     assert_eq!(
         restored.snapshot().enforcement_mode,
         codegotchi_domain::EnforcementMode::Strict

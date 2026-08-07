@@ -18,7 +18,7 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-const EXPECTED_STRICT_REASON: &str = "The pet refuses this safe development action because its hunger is critical. Feed the pet in the CodeGotchi UI, then retry the Codex request afterward.";
+const EXPECTED_STRICT_REASON: &str = "The pet refuses this action because its hunger is critical. Feed the pet in the CodeGotchi UI, then retry the Codex request afterward.";
 
 struct TestEnvironment {
     root: PathBuf,
@@ -842,22 +842,37 @@ async fn strict_flow_denies_cares_retries_and_fails_open_when_server_stops() {
     assert!(String::from_utf8_lossy(&denial.stdout).contains("Feed the pet in the CodeGotchi UI"));
     assert!(String::from_utf8_lossy(&denial.stdout).contains("retry the Codex request afterward"));
 
-    let feed_body = serde_json::to_vec(&json!({
-        "actionId": "00000000-0000-0000-0000-000000000021",
-        "foodId": "kibble"
-    }))
-    .expect("strict care serializes");
-    let care = request(
-        &launcher.metadata.loopback_base_url,
-        "POST",
-        "/api/v1/care/feed",
-        &launcher.metadata.bearer_token,
-        &feed_body,
-    )
-    .await;
-    assert_eq!(care.status, 200);
-    assert_eq!(care.body["duplicate"], false);
-    assert!(care.body["needs"]["hunger"].as_f64().unwrap_or(100.0) < 80.0);
+    // Two kibble bring hunger from 100 down to 50, below the mild neglect
+    // boundary, so safe development work is allowed again.
+    for (index, action_id) in [
+        "00000000-0000-0000-0000-000000000021",
+        "00000000-0000-0000-0000-000000000022",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let feed_body = serde_json::to_vec(&json!({
+            "actionId": action_id,
+            "foodId": "kibble"
+        }))
+        .expect("strict care serializes");
+        let care = request(
+            &launcher.metadata.loopback_base_url,
+            "POST",
+            "/api/v1/care/feed",
+            &launcher.metadata.bearer_token,
+            &feed_body,
+        )
+        .await;
+        assert_eq!(care.status, 200);
+        assert_eq!(care.body["duplicate"], false);
+        if index == 1 {
+            assert!(
+                care.body["needs"]["hunger"].as_f64().unwrap_or(100.0) < 70.0,
+                "two kibble must bring hunger below the mild boundary"
+            );
+        }
+    }
 
     let retry_payload = String::from_utf8(denial_payload)
         .expect("hook fixture is UTF-8")

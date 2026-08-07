@@ -8,7 +8,7 @@ pub mod poop;
 pub mod progression;
 pub mod random;
 
-pub use care::{CareCommand, CareError, CareResult};
+pub use care::{CareCommand, CareError, CareResult, NAP_DURATION};
 pub use clock::{Clock, FakeClock, SystemClock};
 pub use event::{
     AGENT_EVENT_SCHEMA_VERSION, ActivityKind, AgentEvent, AgentEventError, AgentEventKind,

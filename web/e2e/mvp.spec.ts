@@ -88,7 +88,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         const before = await food.locator("strong").textContent();
 
         await food.dragTo(feedTarget);
-        await expect(page.getByText("Eating treat")).toBeVisible();
+        await expect(page.getByText("Eating a treat")).toBeVisible();
         await expect(food.locator("strong")).toHaveText(
             String(Number(before) - 1),
         );
@@ -97,6 +97,49 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         await expect(food.locator("strong")).toHaveText(
             String(Number(before) - 1),
         );
+    });
+
+    test("drinks an energy drink and keeps the authoritative count after reload", async ({
+        page,
+    }) => {
+        await page.goto(launchUrl);
+        const drink = page.getByTestId("food-energy_drink");
+        const feedTarget = page.getByRole("button", {
+            name: /feed target/i,
+        });
+        const before = await drink.locator("strong").textContent();
+
+        await drink.dragTo(feedTarget);
+        await expect(page.getByText("Eating an energy drink")).toBeVisible();
+        await expect(drink.locator("strong")).toHaveText(
+            String(Number(before) - 1),
+        );
+
+        await page.reload();
+        await expect(drink.locator("strong")).toHaveText(
+            String(Number(before) - 1),
+        );
+    });
+
+    test("takes a five-second hammock nap, then wakes up", async ({ page }) => {
+        await page.goto(launchUrl);
+        const hammock = page.getByRole("button", { name: "Hammock nap" });
+
+        await hammock.click();
+
+        await expect(
+            page.getByRole("button", { name: "Resting in hammock" }),
+        ).toBeVisible();
+        await expect(page.getByTestId("zzz")).toBeVisible();
+        await expect(page.getByTestId("activity-label")).toContainText(
+            "Sleeping",
+        );
+        await expect(page.getByText("Cozy nap in the hammock…")).toBeVisible();
+
+        await expect(
+            page.getByRole("button", { name: "Hammock nap" }),
+        ).toBeVisible({ timeout: 8_000 });
+        await expect(page.getByTestId("zzz")).toHaveCount(0);
     });
 
     test("does not send an invalid food drop", async ({ page }) => {

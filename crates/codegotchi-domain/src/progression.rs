@@ -6,6 +6,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
+    NAP_DURATION,
     behavior::BehaviorCoordinator,
     care::{CareCommand, CareError, CareResult},
     clock::Clock,
@@ -21,6 +22,9 @@ const ACTIVE_ENERGY_PER_HOUR: f32 = -6.0;
 const IDLE_HUNGER_PER_HOUR: f32 = 1.0;
 const IDLE_ENERGY_PER_HOUR: f32 = 8.0;
 const POOP_CLEANLINESS_PER_HOUR: f32 = -2.0;
+/// A hammock nap is a deliberately fast power nap: 20 energy points per
+/// second, so a 5-second nap restores the full meter from empty.
+const NAP_ENERGY_PER_HOUR: f32 = 72_000.0;
 
 /// Applies elapsed need changes without consulting wall-clock state.
 pub trait NeedProgressionStrategy {
@@ -45,10 +49,24 @@ impl NeedProgressionStrategy for DefaultNeedProgressionStrategy {
             | AgentActivityState::Blocked => (IDLE_HUNGER_PER_HOUR, IDLE_ENERGY_PER_HOUR),
         };
 
+        // Energy recovers at the nap rate for the portion of this elapsed
+        // segment that overlaps the nap window, and at the normal rate for
+        // the remainder. The nap window always starts at the segment boundary
+        // when a nap is active (care advances time first), so only the
+        // deadline is needed here.
+        let segment_start = pet.last_updated_at() - elapsed;
+        let segment_end = pet.last_updated_at();
+        let nap_hours = pet
+            .napping_until()
+            .map(|until| nap_elapsed_hours(segment_start, segment_end, until))
+            .unwrap_or_default();
+
         let pending_poop_count = pet.pending_poops().len() as f32;
         let needs = pet.needs_mut();
         needs.adjust_hunger(hunger_rate * elapsed_hours);
-        needs.adjust_energy(energy_rate * elapsed_hours);
+        needs.adjust_energy(
+            energy_rate * (elapsed_hours - nap_hours) + NAP_ENERGY_PER_HOUR * nap_hours,
+        );
         needs.adjust_cleanliness(POOP_CLEANLINESS_PER_HOUR * elapsed_hours * pending_poop_count);
     }
 }
@@ -96,6 +114,10 @@ pub struct SimulationSnapshot {
     pub last_outcome_at: Option<DateTime<Utc>>,
     pub consecutive_failures: u32,
     pub enforcement_mode: EnforcementMode,
+    /// Deadline of the current hammock nap, if any. Serialized with a default
+    /// so snapshots persisted before naps existed still restore cleanly.
+    #[serde(default)]
+    pub napping_until: Option<DateTime<Utc>>,
 }
 
 pub const SIMULATION_SNAPSHOT_SCHEMA_VERSION: u16 = 1;
@@ -254,6 +276,7 @@ where
             last_outcome_at: self.last_outcome_at,
             consecutive_failures: self.consecutive_failures,
             enforcement_mode: self.settings.enforcement_mode(),
+            napping_until: self.pet.napping_until(),
         }
     }
 
@@ -407,6 +430,7 @@ where
                     return Err(CareError::InsufficientDistance);
                 }
             }
+            CareCommand::Nap { .. } => {}
         }
 
         Ok(())
@@ -435,6 +459,10 @@ where
                         self.pet.needs_mut().adjust_hunger(-15.0);
                         self.pet.add_digestion_points(25);
                     }
+                    FoodKind::EnergyDrink => {
+                        self.pet.needs_mut().adjust_energy(40.0);
+                        self.pet.needs_mut().adjust_happiness(5.0);
+                    }
                 }
             }
             CareCommand::CleanPoop { poop_id, .. } => {
@@ -450,6 +478,10 @@ where
             }
             CareCommand::Pet { .. } => {
                 self.pet.needs_mut().adjust_happiness(10.0);
+            }
+            CareCommand::Nap { .. } => {
+                self.pet
+                    .start_nap(self.pet.last_updated_at() + NAP_DURATION);
             }
         }
     }
@@ -563,6 +595,7 @@ where
             self.progression
                 .progress(&mut self.pet, elapsed, previous_activity);
         }
+        self.pet.clear_expired_nap(target);
         elapsed
     }
 
@@ -613,6 +646,7 @@ where
             snapshot.recent_outcome,
             snapshot.inventory.clone(),
             snapshot.poop_sequence,
+            snapshot.napping_until,
         );
         Ok(Self {
             pet,
@@ -707,6 +741,14 @@ fn validate_snapshot(snapshot: &SimulationSnapshot) -> Result<(), SnapshotRestor
             "activity and outcome timestamps cannot be newer than the aggregate".to_owned(),
         ));
     }
+    if snapshot
+        .napping_until
+        .is_some_and(|until| until <= snapshot.last_updated_at)
+    {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "a persisted nap deadline must still be in the future".to_owned(),
+        ));
+    }
 
     let expected_activity = aggregate_activity(&snapshot.session_activities);
     if snapshot.activity != expected_activity {
@@ -729,6 +771,7 @@ fn validate_snapshot(snapshot: &SimulationSnapshot) -> Result<(), SnapshotRestor
         snapshot.recent_outcome,
         snapshot.inventory.clone(),
         snapshot.poop_sequence,
+        snapshot.napping_until,
     );
     let expected_behavior = BehaviorCoordinator::derive(
         &pet,
@@ -814,6 +857,17 @@ fn elapsed_hours(elapsed: Duration) -> f32 {
     };
 
     duration.as_secs_f32() / SECONDS_PER_HOUR
+}
+
+fn nap_elapsed_hours(
+    segment_start: DateTime<Utc>,
+    segment_end: DateTime<Utc>,
+    napping_until: DateTime<Utc>,
+) -> f32 {
+    if napping_until <= segment_start {
+        return 0.0;
+    }
+    elapsed_hours(segment_end.min(napping_until) - segment_start)
 }
 
 #[cfg(test)]
@@ -1066,6 +1120,13 @@ mod tests {
         assert_eq!(simulation.pet.behavior(), PetBehavior::CriticalNeed);
 
         simulation.pet.needs_mut().set_cleanliness(100.0);
+        simulation.pet.needs_mut().set_energy(10.001);
+        simulation.refresh_behavior(start());
+        assert_eq!(simulation.pet.behavior(), PetBehavior::Wandering);
+        simulation.pet.needs_mut().set_energy(10.0);
+        simulation.refresh_behavior(start());
+        assert_eq!(simulation.pet.behavior(), PetBehavior::CriticalNeed);
+        simulation.pet.needs_mut().set_energy(100.0);
         simulation.pet.set_activity(AgentActivityState::Blocked);
         simulation.refresh_behavior(start());
         assert_eq!(simulation.pet.behavior(), PetBehavior::Blocked);

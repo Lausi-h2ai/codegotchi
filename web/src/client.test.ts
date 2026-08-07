@@ -33,6 +33,7 @@ function snapshot(
         lastOutcomeAt: null,
         consecutiveFailures: 0,
         enforcementMode: "decorative",
+        nappingUntil: null,
         ...overrides,
     };
 }
@@ -164,6 +165,38 @@ describe("CodeGotchi browser client", () => {
 
         expect(snapshots).toEqual([initial, { ...care, duplicate: false }]);
         client.close();
+    });
+
+    it("posts one UUID action id for a hammock nap", async () => {
+        const fetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ ...snapshot("Mochi"), duplicate: false }),
+        });
+        const randomUUID = vi
+            .spyOn(crypto, "randomUUID")
+            .mockReturnValue("00000000-0000-0000-0000-000000000456");
+        const client = new CodeGotchiClient("care-secret", {
+            fetch,
+            WebSocket: FakeWebSocket,
+            baseUrl: "http://127.0.0.1:4242",
+        });
+
+        await client.nap();
+
+        expect(randomUUID).toHaveBeenCalledTimes(1);
+        expect(fetch).toHaveBeenCalledWith(
+            "http://127.0.0.1:4242/api/v1/care/nap",
+            expect.objectContaining({
+                method: "POST",
+                headers: expect.objectContaining({
+                    Authorization: "Bearer care-secret",
+                    "Content-Type": "application/json",
+                }),
+                body: JSON.stringify({
+                    actionId: "00000000-0000-0000-0000-000000000456",
+                }),
+            }),
+        );
     });
 
     it("loads a complete snapshot, reconnects with bounded retry, and replaces state", async () => {

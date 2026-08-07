@@ -199,6 +199,10 @@ impl AuthoritativeRuntime {
         self.apply_care(CareCommand::CleanPoop { action_id, poop_id })
     }
 
+    pub fn nap(&self, action_id: Uuid) -> Result<MutationReceipt, RuntimeError> {
+        self.apply_care(CareCommand::Nap { action_id })
+    }
+
     pub fn apply_care(&self, command: CareCommand) -> Result<MutationReceipt, RuntimeError> {
         let mut simulation = self.lock_simulation()?;
         let before = simulation.snapshot();
@@ -355,7 +359,8 @@ fn care_action_id(command: &CareCommand) -> Uuid {
     match command {
         CareCommand::Feed { action_id, .. }
         | CareCommand::CleanPoop { action_id, .. }
-        | CareCommand::Pet { action_id, .. } => *action_id,
+        | CareCommand::Pet { action_id, .. }
+        | CareCommand::Nap { action_id } => *action_id,
     }
 }
 
@@ -367,6 +372,7 @@ fn seed_new_pet(pet: Pet) -> Pet {
     inventory.add(codegotchi_domain::FoodKind::Kibble, 50);
     inventory.add(codegotchi_domain::FoodKind::Treat, 25);
     inventory.add(codegotchi_domain::FoodKind::Fruit, 25);
+    inventory.add(codegotchi_domain::FoodKind::EnergyDrink, 10);
     Pet::with_inventory(
         pet.id(),
         pet.name().to_owned(),

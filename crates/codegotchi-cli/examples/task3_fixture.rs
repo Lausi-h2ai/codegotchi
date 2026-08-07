@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use chrono::{TimeZone, Utc};
+use chrono::Utc;
 use codegotchi_cli::{AuthoritativeRuntime, RunningServer, SqliteStore};
 use codegotchi_domain::{
     ActivityKind, AgentEvent, AgentEventKind, EventMetadata, EventSource, Pet, PetSpecies,
@@ -14,16 +14,10 @@ const TOKEN: &str = "task3-playwright-token";
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database = fixture_database_path();
     let _ = std::fs::remove_file(&database);
+    let now = Utc::now();
     let runtime = AuthoritativeRuntime::new(
         SqliteStore::open(&database)?,
-        Pet::new(
-            Uuid::from_u128(1),
-            "Mochi",
-            PetSpecies::Cat,
-            Utc.with_ymd_and_hms(2026, 8, 5, 12, 0, 0)
-                .single()
-                .ok_or("invalid fixture time")?,
-        ),
+        Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, now),
     )?;
 
     seed_fixture(&runtime)?;
@@ -56,6 +50,7 @@ fn seed_fixture(
     runtime: &std::sync::Arc<AuthoritativeRuntime>,
 ) -> Result<(), codegotchi_cli::RuntimeError> {
     let session_id = Uuid::from_u128(7);
+    let now = Utc::now();
     runtime.apply_event(&AgentEvent::new(
         Uuid::from_u128(1),
         session_id,
@@ -63,9 +58,7 @@ fn seed_fixture(
         EventSource::Codex,
         AgentEventKind::SessionStarted,
         None,
-        Utc.with_ymd_and_hms(2026, 8, 5, 12, 0, 0)
-            .single()
-            .expect("valid fixture time"),
+        now,
         EventMetadata::default(),
     ))?;
 
@@ -77,9 +70,7 @@ fn seed_fixture(
             EventSource::Codex,
             AgentEventKind::CommandStarted,
             Some(ActivityKind::Testing),
-            Utc.with_ymd_and_hms(2026, 8, 5, 12, 0, 0)
-                .single()
-                .expect("valid fixture time"),
+            now,
             EventMetadata::default(),
         ))?;
     }

@@ -16,7 +16,13 @@ impl BehaviorCoordinator {
         last_activity_at: Option<DateTime<Utc>>,
         last_outcome_at: Option<DateTime<Utc>>,
     ) -> PetBehavior {
+        if pet.is_napping(now) {
+            return PetBehavior::Sleeping;
+        }
         if pet.needs().hunger() >= 90.0 {
+            return PetBehavior::CriticalNeed;
+        }
+        if pet.needs().energy() <= 10.0 {
             return PetBehavior::CriticalNeed;
         }
         if pet.needs().cleanliness() <= 10.0 {
