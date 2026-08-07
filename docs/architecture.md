@@ -154,12 +154,27 @@ The fixed demo controls are deliberately guarded by the exact
 
 ```text
 CODEGOTCHI_ENABLE_DEBUG=1 codegotchi debug neglect
+CODEGOTCHI_ENABLE_DEBUG=1 codegotchi debug restock
 CODEGOTCHI_ENABLE_DEBUG=1 codegotchi debug generate-poop
 ```
 
 They accept no caller-supplied values and operate only through the active
 authenticated runtime. They are for disposable demonstrations, not a general
 mutation or command-execution interface.
+
+The runtime also advertises its debug mode over
+`GET /api/v1/debug/status` (`debugEnabled`), so a room launched with
+`CODEGOTCHI_ENABLE_DEBUG=1 codegotchi run -- codex` can show the guarded
+"Restock pantry" button. `debug restock` and the button both restore the
+starter pantry (50/25/25/10) at the current wall clock; food never regenerates
+on its own, so this keeps demos from soft-locking on an empty pantry.
+
+`debug neglect` sets hunger and energy critical at the current wall clock
+(energy 0 / hunger 100), which is enough to exercise every strict refusal
+tier and the hammock-nap recovery loop without freezing the simulation
+timeline. Older versions advanced the logical clock 100 hours into the
+future; because the aggregate timeline is monotonic, that stalled all later
+progression (including naps) until the wall clock caught up.
 
 ## Browser and production packaging
 

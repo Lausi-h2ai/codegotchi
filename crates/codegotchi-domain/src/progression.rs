@@ -230,6 +230,30 @@ where
         self.settings = PetSettings::new(mode);
     }
 
+    /// Guarded demo transition: make the pet visibly neglected at the current
+    /// wall clock. Hunger and energy both become critical so the strict-mode
+    /// refusal tiers and the energy care loop can be demonstrated, but the
+    /// simulation clock stays at the wall clock. The previous implementation
+    /// advanced the logical timeline 100 hours into the future, which froze
+    /// every later progression (naps, hunger, maintenance) until the wall
+    /// clock caught up.
+    pub fn apply_debug_neglect(&mut self) {
+        self.current_state_at(self.clock.now());
+        let needs = self.pet.needs_mut();
+        needs.set_hunger(100.0);
+        needs.set_energy(0.0);
+        self.refresh_behavior(self.pet.last_updated_at());
+    }
+
+    /// Guarded demo control: restore the starter pantry (50/25/25/10) at the
+    /// current wall clock. Needs, timeline, and behavior are untouched, so a
+    /// drained demo pet can be refed without waiting for the wall clock.
+    pub fn apply_debug_restock(&mut self) {
+        self.current_state_at(self.clock.now());
+        self.pet.restock_inventory_to_starter();
+        self.refresh_behavior(self.pet.last_updated_at());
+    }
+
     /// Advances elapsed effects to the injected clock and stores behavior.
     pub fn advance_time(&mut self) -> Duration {
         let previous_activity = self.pet.activity();
@@ -631,7 +655,9 @@ where
         progression: N,
         poop_strategy: P,
     ) -> Result<Self, SnapshotRestoreError> {
+        let mut snapshot = snapshot;
         validate_snapshot(&snapshot)?;
+        reanchor_snapshot_to_wall_clock(&mut snapshot, clock.now());
         let pet = Pet::from_snapshot(
             snapshot.pet_id,
             snapshot.name.clone(),
@@ -661,6 +687,33 @@ where
             consecutive_failures: snapshot.consecutive_failures,
             settings: PetSettings::new(snapshot.enforcement_mode),
         })
+    }
+}
+
+/// Repairs a persisted snapshot whose logical clock is ahead of the wall
+/// clock. The aggregate timeline is monotonic and refuses to move backwards,
+/// so a future-dated snapshot (a clock correction, or an old demo neglect
+/// that jumped 100 hours ahead) would freeze all progression — including a
+/// hammock nap — until the wall clock caught up. Translating every stored
+/// timestamp back by the same delta resumes the simulation at the wall clock
+/// while preserving all relative timing (nap deadlines, sessions, outcomes,
+/// and poop ages).
+fn reanchor_snapshot_to_wall_clock(snapshot: &mut SimulationSnapshot, now: DateTime<Utc>) {
+    if snapshot.last_updated_at <= now {
+        return;
+    }
+
+    let shift = snapshot.last_updated_at - now;
+    let shift_back = |timestamp: DateTime<Utc>| timestamp - shift;
+    snapshot.last_updated_at = now;
+    snapshot.napping_until = snapshot.napping_until.map(shift_back);
+    snapshot.last_activity_at = snapshot.last_activity_at.map(shift_back);
+    snapshot.last_outcome_at = snapshot.last_outcome_at.map(shift_back);
+    for session in snapshot.session_activities.values_mut() {
+        session.updated_at = shift_back(session.updated_at);
+    }
+    for poop in &mut snapshot.pending_poops {
+        poop.shift_created_at(-shift);
     }
 }
 
@@ -874,6 +927,7 @@ fn nap_elapsed_hours(
 mod tests {
     use super::*;
     use crate::clock::FakeClock;
+    use crate::pet::{FoodInventory, PetSpecies};
     use chrono::TimeZone;
 
     fn start() -> DateTime<Utc> {
@@ -934,6 +988,29 @@ mod tests {
         assert_eq!(simulation.pet.needs().hunger(), 2.0);
         assert_eq!(simulation.pet.needs().energy(), 97.0);
         assert_eq!(simulation.pet.needs().cleanliness(), 98.0);
+    }
+
+    #[test]
+    fn debug_restock_restores_the_starter_inventory_without_touching_needs() {
+        let mut pantry = FoodInventory::default();
+        pantry.add(FoodKind::Kibble, 3);
+        pantry.add(FoodKind::Treat, 1);
+        let pet = Pet::with_inventory(
+            Uuid::from_u128(9),
+            "Mochi",
+            PetSpecies::Cat,
+            start(),
+            pantry,
+        );
+        let mut simulation =
+            PetSimulation::new(pet, FakeClock::new(start()), DefaultNeedProgressionStrategy);
+        simulation.pet.needs_mut().set_hunger(42.0);
+
+        simulation.apply_debug_restock();
+
+        assert_eq!(simulation.pet.inventory(), &FoodInventory::starter());
+        assert_eq!(simulation.pet.needs().hunger(), 42.0);
+        assert_eq!(simulation.pet.behavior(), PetBehavior::Wandering);
     }
 
     #[test]

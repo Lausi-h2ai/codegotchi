@@ -59,9 +59,11 @@ function renderApp(
         connectionStatus: "loading",
         error: null,
         feedback: null,
+        debugEnabled: false,
         feed: vi.fn().mockResolvedValue(undefined),
         clean: vi.fn().mockResolvedValue(undefined),
         nap: vi.fn().mockResolvedValue(undefined),
+        restock: vi.fn().mockResolvedValue(undefined),
         ...state,
     });
     render(<App launchToken="test-token" />);
@@ -184,6 +186,30 @@ describe("CodeGotchi pet room", () => {
         );
 
         expect(nap).not.toHaveBeenCalled();
+    });
+
+    it("only offers the debug restock button when the runtime enables debug", () => {
+        renderApp({
+            snapshot: snapshot(),
+            connectionStatus: "connected",
+            debugEnabled: false,
+        });
+
+        expect(screen.queryByTestId("restock")).not.toBeInTheDocument();
+    });
+
+    it("restocks the pantry through the guarded debug button", () => {
+        const restock = vi.fn().mockResolvedValue(undefined);
+        renderApp({
+            snapshot: snapshot(),
+            connectionStatus: "connected",
+            debugEnabled: true,
+            restock,
+        });
+
+        fireEvent.click(screen.getByTestId("restock"));
+
+        expect(restock).toHaveBeenCalledTimes(1);
     });
 
     it.each([

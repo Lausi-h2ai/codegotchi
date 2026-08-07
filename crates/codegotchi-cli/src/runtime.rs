@@ -235,13 +235,22 @@ impl AuthoritativeRuntime {
         Ok(true)
     }
 
-    /// Fixed demo transition: advance the authoritative simulation enough for
-    /// idle hunger to become critical. No caller-supplied value is accepted.
+    /// Fixed demo transition: make hunger and energy critical at the current
+    /// wall clock without jumping the simulation timeline into the future.
+    /// No caller-supplied value is accepted.
     pub fn debug_neglect(&self) -> Result<MutationReceipt, RuntimeError> {
         let mut simulation = self.lock_simulation()?;
         let before = simulation.snapshot();
-        let timestamp = before.last_updated_at + Duration::hours(100);
-        simulation.current_state_at(timestamp);
+        simulation.apply_debug_neglect();
+        self.persist_and_broadcast(&mut simulation, before, false)
+    }
+
+    /// Fixed demo transition: restore the starter pantry (50/25/25/10) at the
+    /// current wall clock. There is no caller-supplied value.
+    pub fn debug_restock(&self) -> Result<MutationReceipt, RuntimeError> {
+        let mut simulation = self.lock_simulation()?;
+        let before = simulation.snapshot();
+        simulation.apply_debug_restock();
         self.persist_and_broadcast(&mut simulation, before, false)
     }
 
@@ -368,16 +377,11 @@ fn seed_new_pet(pet: Pet) -> Pet {
     if !pet.inventory().is_empty() {
         return pet;
     }
-    let mut inventory = FoodInventory::default();
-    inventory.add(codegotchi_domain::FoodKind::Kibble, 50);
-    inventory.add(codegotchi_domain::FoodKind::Treat, 25);
-    inventory.add(codegotchi_domain::FoodKind::Fruit, 25);
-    inventory.add(codegotchi_domain::FoodKind::EnergyDrink, 10);
     Pet::with_inventory(
         pet.id(),
         pet.name().to_owned(),
         pet.species(),
         pet.last_updated_at(),
-        inventory,
+        FoodInventory::starter(),
     )
 }

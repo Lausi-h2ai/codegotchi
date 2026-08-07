@@ -329,6 +329,12 @@ pub fn send_debug_neglect_to_runtime(
     send_debug_request(metadata, "/api/v1/debug/neglect")
 }
 
+pub fn send_debug_restock_to_runtime(
+    metadata: &RuntimeMetadataV1,
+) -> Result<SnapshotMutationResponse, HookTransportError> {
+    send_debug_request(metadata, "/api/v1/debug/restock")
+}
+
 pub fn send_debug_generate_poop_to_runtime(
     metadata: &RuntimeMetadataV1,
 ) -> Result<SnapshotMutationResponse, HookTransportError> {

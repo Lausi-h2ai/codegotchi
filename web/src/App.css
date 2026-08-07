@@ -382,6 +382,12 @@ h3 {
     animation: pet-rock 1.4s ease-in-out infinite alternate;
 }
 
+.pet--napping .pet-eye {
+    height: 0.22rem;
+    top: 31%;
+    border-radius: 0.15rem;
+}
+
 .pet--sleeping {
     transform: translateY(0.3rem) scale(0.94, 0.82);
 }
@@ -833,6 +839,24 @@ h3 {
     background: #fff6dc;
     font-size: 0.72rem;
     line-height: 1.5;
+}
+
+.restock-button {
+    margin: 0.75rem 0 0;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid #687bc033;
+    border-radius: 0.7rem;
+    color: #33426e;
+    background: #edf1ff;
+    font-size: 0.74rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.restock-button:hover,
+.restock-button:focus-visible {
+    background: #fff;
+    border-color: #687bc0;
 }
 
 .authoritative-note {

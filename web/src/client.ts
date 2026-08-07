@@ -1,5 +1,6 @@
 import type {
     CareResponse,
+    DebugStatusResponse,
     ErrorEnvelope,
     FoodId,
     SimulationSnapshot,
@@ -148,6 +149,33 @@ export class CodeGotchiClient {
         actionId: string = createActionId(),
     ): Promise<CareResponse> {
         return this.care("nap", { actionId });
+    }
+
+    /** Whether the owning runtime was launched with the guarded demo controls. */
+    public async debugStatus(): Promise<DebugStatusResponse> {
+        return this.request<DebugStatusResponse>("/api/v1/debug/status", {
+            method: "GET",
+        });
+    }
+
+    /**
+     * Fixed demo control: restore the starter pantry through the guarded
+     * debug route. Only shown when the runtime reports debug enabled.
+     */
+    public async restock(): Promise<CareResponse> {
+        const response = await this.request<CareResponse>(
+            "/api/v1/debug/restock",
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CodeGotchi-Debug": "1",
+                },
+                body: "{}",
+            },
+        );
+        this.publishSnapshot(response);
+        return response;
     }
 
     private async loadInitialSnapshot(): Promise<void> {

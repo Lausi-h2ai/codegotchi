@@ -87,6 +87,10 @@ export interface CareResponse extends SimulationSnapshot {
     duplicate: boolean;
 }
 
+export interface DebugStatusResponse {
+    debugEnabled: boolean;
+}
+
 export interface ErrorEnvelope {
     error: {
         code: string;

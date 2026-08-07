@@ -179,6 +179,23 @@ impl FoodInventory {
         Self::default()
     }
 
+    /// The starter pantry every new demo pet receives: enough of each food to
+    /// exercise the care loop without running dry during a session.
+    pub fn starter() -> Self {
+        let mut inventory = Self::default();
+        inventory.add(FoodKind::Kibble, 50);
+        inventory.add(FoodKind::Treat, 25);
+        inventory.add(FoodKind::Fruit, 25);
+        inventory.add(FoodKind::EnergyDrink, 10);
+        inventory
+    }
+
+    /// Restores the exact starter quantities, so a debug restock is a fixed,
+    /// deterministic transition rather than an unbounded top-up.
+    pub fn restock_to_starter(&mut self) {
+        *self = Self::starter();
+    }
+
     pub fn count(&self, food: FoodKind) -> u32 {
         self.quantities.get(&food).copied().unwrap_or_default()
     }
@@ -247,6 +264,10 @@ impl Poop {
 
     pub fn created_at(self) -> DateTime<Utc> {
         self.created_at
+    }
+
+    pub(crate) fn shift_created_at(&mut self, shift: Duration) {
+        self.created_at += shift;
     }
 }
 
@@ -414,6 +435,10 @@ impl Pet {
 
     pub(crate) fn consume_food(&mut self, food: FoodKind) -> bool {
         self.inventory.remove(food, 1)
+    }
+
+    pub(crate) fn restock_inventory_to_starter(&mut self) {
+        self.inventory.restock_to_starter();
     }
 
     pub(crate) fn consume_digestion_points(&mut self, points: u64) {

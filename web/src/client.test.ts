@@ -199,6 +199,61 @@ describe("CodeGotchi browser client", () => {
         );
     });
 
+    it("reports whether the runtime enables the guarded demo controls", async () => {
+        const fetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ debugEnabled: true }),
+        });
+        const client = new CodeGotchiClient("debug-secret", {
+            fetch,
+            WebSocket: FakeWebSocket,
+            baseUrl: "http://127.0.0.1:4242",
+        });
+
+        await expect(client.debugStatus()).resolves.toEqual({
+            debugEnabled: true,
+        });
+        expect(fetch).toHaveBeenCalledWith(
+            "http://127.0.0.1:4242/api/v1/debug/status",
+            expect.objectContaining({
+                method: "GET",
+                headers: { Authorization: "Bearer debug-secret" },
+            }),
+        );
+    });
+
+    it("posts the guarded debug header when restocking the pantry", async () => {
+        const restocked = snapshot("restocked state", {
+            inventory: { kibble: 50, treat: 25, fruit: 25, energy_drink: 10 },
+        });
+        const fetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ ...restocked, duplicate: false }),
+        });
+        const client = new CodeGotchiClient("debug-secret", {
+            fetch,
+            WebSocket: FakeWebSocket,
+            baseUrl: "http://127.0.0.1:4242",
+        });
+
+        await expect(client.restock()).resolves.toEqual({
+            ...restocked,
+            duplicate: false,
+        });
+        expect(fetch).toHaveBeenCalledWith(
+            "http://127.0.0.1:4242/api/v1/debug/restock",
+            expect.objectContaining({
+                method: "POST",
+                headers: expect.objectContaining({
+                    Authorization: "Bearer debug-secret",
+                    "Content-Type": "application/json",
+                    "X-CodeGotchi-Debug": "1",
+                }),
+                body: "{}",
+            }),
+        );
+    });
+
     it("loads a complete snapshot, reconnects with bounded retry, and replaces state", async () => {
         vi.useFakeTimers();
         const initial = snapshot("HTTP state");

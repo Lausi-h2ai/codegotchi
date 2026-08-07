@@ -8,7 +8,7 @@ use codegotchi_domain::EnforcementMode;
 use crate::codex_hook::{
     CODEGOTCHI_SESSION_FILE, HookTransportError, run_hook_from_environment,
     runtime_metadata_is_active, send_debug_generate_poop_to_runtime, send_debug_neglect_to_runtime,
-    send_mode_to_runtime,
+    send_debug_restock_to_runtime, send_mode_to_runtime,
 };
 use crate::launcher;
 use crate::protocol::HookOutput;
@@ -100,7 +100,7 @@ fn run_debug(mut arguments: impl Iterator<Item = String>) -> Result<(), CliError
     let command = arguments.next();
     if arguments.next().is_some() {
         return Err(CliError(String::from(
-            "debug accepts exactly `neglect` or `generate-poop`; arbitrary values are not supported",
+            "debug accepts exactly `neglect`, `restock`, or `generate-poop`; arbitrary values are not supported",
         )));
     }
     if std::env::var(CODEGOTCHI_ENABLE_DEBUG).ok().as_deref() != Some("1") {
@@ -124,6 +124,19 @@ fn run_debug(mut arguments: impl Iterator<Item = String>) -> Result<(), CliError
             );
             Ok(())
         }
+        Some("restock") => {
+            let receipt =
+                send_debug_restock_to_runtime(&metadata).map_err(runtime_command_error)?;
+            println!(
+                "debug restock: {}",
+                if receipt.duplicate {
+                    "already applied"
+                } else {
+                    "persisted and broadcast"
+                }
+            );
+            Ok(())
+        }
         Some("generate-poop") => {
             let receipt =
                 send_debug_generate_poop_to_runtime(&metadata).map_err(runtime_command_error)?;
@@ -139,10 +152,10 @@ fn run_debug(mut arguments: impl Iterator<Item = String>) -> Result<(), CliError
             Ok(())
         }
         Some(value) => Err(CliError(format!(
-            "unsupported debug command `{value}`; choose `neglect` or `generate-poop`"
+            "unsupported debug command `{value}`; choose `neglect`, `restock`, or `generate-poop`"
         ))),
         None => Err(CliError(String::from(
-            "debug requires exactly one command: `neglect` or `generate-poop`",
+            "debug requires exactly one command: `neglect`, `restock`, or `generate-poop`",
         ))),
     }
 }

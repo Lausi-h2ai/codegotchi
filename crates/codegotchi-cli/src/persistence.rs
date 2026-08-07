@@ -113,7 +113,7 @@ impl SqliteStore {
             (i64::from(initial.schema_version), encoded)
         };
         transaction.commit()?;
-        decode_snapshot(row.0, &row.1)
+        decode_snapshot(row.0, &migrate_legacy_snapshot_json(row.1))
     }
 
     pub fn load(&self) -> Result<Option<SimulationSnapshot>, PersistenceError> {
@@ -129,8 +129,10 @@ impl SqliteStore {
                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
-        row.map(|(schema_version, snapshot_json)| decode_snapshot(schema_version, &snapshot_json))
-            .transpose()
+        row.map(|(schema_version, snapshot_json)| {
+            decode_snapshot(schema_version, &migrate_legacy_snapshot_json(snapshot_json))
+        })
+        .transpose()
     }
 
     pub fn save(&self, snapshot: &SimulationSnapshot) -> Result<(), PersistenceError> {
@@ -181,6 +183,29 @@ fn decode_snapshot(
         .map_err(|error| PersistenceError::CorruptSnapshot(error.to_string()))?;
     validate_snapshot(&snapshot)?;
     Ok(snapshot)
+}
+
+/// Upgrades a persisted snapshot written before the energy care loop existed.
+/// Those snapshots have no `nappingUntil` field (the field was introduced
+/// together with the energy drinks), so their inventory also never received
+/// the newly seeded 10 energy drinks. Newer snapshots always carry
+/// `nappingUntil` (even while awake), so a snapshot whose drinks were
+/// genuinely consumed to zero is left untouched.
+fn migrate_legacy_snapshot_json(snapshot_json: String) -> String {
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&snapshot_json) else {
+        return snapshot_json;
+    };
+    if value.get("nappingUntil").is_some() {
+        return snapshot_json;
+    }
+    if let Some(inventory) = value
+        .get_mut("inventory")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        inventory.insert("energy_drink".to_owned(), serde_json::json!(10));
+    }
+    value["nappingUntil"] = serde_json::Value::Null;
+    serde_json::to_string(&value).unwrap_or(snapshot_json)
 }
 
 fn validate_snapshot(snapshot: &SimulationSnapshot) -> Result<(), PersistenceError> {

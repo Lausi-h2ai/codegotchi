@@ -388,6 +388,33 @@ fn hammock_nap_restores_energy_over_five_seconds_and_clears_itself() {
 }
 
 #[test]
+fn debug_neglect_drains_needs_at_the_current_clock_without_freezing_the_timeline() {
+    let (clock, mut simulation) = simulation_with_inventory(FoodKind::Kibble, 0);
+    simulation.apply_debug_neglect();
+
+    let neglected = simulation.snapshot();
+    assert_eq!(neglected.needs.hunger(), 100.0);
+    assert_eq!(neglected.needs.energy(), 0.0);
+    assert_eq!(neglected.behavior, PetBehavior::CriticalNeed);
+    assert!(
+        neglected.last_updated_at < start() + Duration::hours(1),
+        "demo neglect must not jump the logical clock far into the future"
+    );
+
+    // The world keeps moving: a hammock nap immediately recovers the drained
+    // meter over its normal five seconds.
+    simulation
+        .apply_care(&CareCommand::Nap {
+            action_id: Uuid::from_u128(60),
+        })
+        .unwrap();
+    clock.advance(Duration::seconds(5));
+    let finished = simulation.current_state();
+    assert_eq!(finished.needs.energy(), 100.0);
+    assert_eq!(finished.napping_until, None);
+}
+
+#[test]
 fn nap_is_replay_safe_and_can_restart_from_a_new_action() {
     let (clock, mut simulation) = simulation_with_inventory(FoodKind::Kibble, 0);
     let nap = CareCommand::Nap {

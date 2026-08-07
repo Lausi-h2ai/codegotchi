@@ -276,6 +276,14 @@ pub struct ModeRequest {
 #[serde(deny_unknown_fields)]
 pub struct DebugRequest {}
 
+/// Tells the browser whether the owning runtime was launched with the guarded
+/// debug demo controls enabled, so the room can hide debug-only affordances.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugStatusResponse {
+    pub debug_enabled: bool,
+}
+
 /// A deliberately tolerant response envelope shared by the hook and backend.
 ///
 /// `decision` is a JSON value because the backend is not part of Task 1 and

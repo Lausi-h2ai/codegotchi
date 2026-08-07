@@ -21,6 +21,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::TemporaryCodexProfile;
+use crate::cli::CODEGOTCHI_ENABLE_DEBUG;
 use crate::persistence::SqliteStore;
 use crate::protocol::RuntimeMetadataV1;
 use crate::runtime::AuthoritativeRuntime;
@@ -234,11 +235,15 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
     })?;
 
     let token = launch_token();
-    let server = RunningServer::start(runtime, token.clone())
-        .await
-        .map_err(|error| {
-            LauncherError::message(format!("could not start CodeGotchi server: {error}"))
-        })?;
+    let debug_enabled = std::env::var(CODEGOTCHI_ENABLE_DEBUG).ok().as_deref() == Some("1");
+    let server = if debug_enabled {
+        RunningServer::start_with_debug(runtime, token.clone()).await
+    } else {
+        RunningServer::start(runtime, token.clone()).await
+    }
+    .map_err(|error| {
+        LauncherError::message(format!("could not start CodeGotchi server: {error}"))
+    })?;
     if let Some(signal) = signals.try_setup_termination().await {
         let _ = server.shutdown().await;
         return Ok(signal.exit_status());

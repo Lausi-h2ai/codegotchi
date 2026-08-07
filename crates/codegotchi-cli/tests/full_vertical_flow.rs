@@ -693,6 +693,25 @@ async fn launcher_vertical_flow_persists_and_replays_across_restart() {
         .expect("guarded debug generation creates a poop")
         .to_owned();
 
+    let restock_without_guard = invoke_cli(&first.metadata_path, &["debug", "restock"], false);
+    assert!(!restock_without_guard.status.success());
+    assert!(String::from_utf8_lossy(&restock_without_guard.stderr).contains("disabled"));
+
+    let debug_restock = invoke_cli(&first.metadata_path, &["debug", "restock"], true);
+    assert!(debug_restock.status.success());
+    let after_restock = request(
+        &first.metadata.loopback_base_url,
+        "GET",
+        "/api/v1/state",
+        &first.metadata.bearer_token,
+        b"",
+    )
+    .await;
+    assert_eq!(after_restock.body["inventory"]["kibble"], 50);
+    assert_eq!(after_restock.body["inventory"]["treat"], 25);
+    assert_eq!(after_restock.body["inventory"]["fruit"], 25);
+    assert_eq!(after_restock.body["inventory"]["energy_drink"], 10);
+
     let clean_body = serde_json::to_vec(&json!({
         "actionId": "00000000-0000-0000-0000-000000000012",
         "poopId": poop_id
@@ -829,6 +848,7 @@ async fn strict_flow_denies_cares_retries_and_fails_open_when_server_stops() {
     .await;
     assert_eq!(neglected.body["enforcementMode"], "strict");
     assert_eq!(neglected.body["needs"]["hunger"], 100.0);
+    assert_eq!(neglected.body["needs"]["energy"], 0.0);
 
     let denial_payload = fixture("bash_pre.json");
     let denial_event = translate_hook_json(&denial_payload, &launcher.metadata)
@@ -843,7 +863,8 @@ async fn strict_flow_denies_cares_retries_and_fails_open_when_server_stops() {
     assert!(String::from_utf8_lossy(&denial.stdout).contains("retry the Codex request afterward"));
 
     // Two kibble bring hunger from 100 down to 50, below the mild neglect
-    // boundary, so safe development work is allowed again.
+    // boundary, but debug neglect also drained energy, so the pet still
+    // refuses until it gets time to rest.
     for (index, action_id) in [
         "00000000-0000-0000-0000-000000000021",
         "00000000-0000-0000-0000-000000000022",
@@ -874,9 +895,56 @@ async fn strict_flow_denies_cares_retries_and_fails_open_when_server_stops() {
         }
     }
 
+    let exhausted_payload = String::from_utf8(denial_payload.clone())
+        .expect("hook fixture is UTF-8")
+        .replace("call-pre-bash", "call-pre-bash-exhausted")
+        .into_bytes();
+    let exhausted = invoke_hook(&launcher.metadata_path, &exhausted_payload);
+    assert!(exhausted.status.success());
+    assert!(
+        String::from_utf8_lossy(&exhausted.stdout).contains("too exhausted to keep working"),
+        "drained energy must keep strict mode refusing: {:?}",
+        String::from_utf8_lossy(&exhausted.stdout)
+    );
+
+    // A hammock nap restores the drained meter in real time, then safe
+    // development work is allowed again.
+    let nap_body = serde_json::to_vec(&json!({
+        "actionId": "00000000-0000-0000-0000-000000000030",
+    }))
+    .expect("nap care serializes");
+    let napped = request(
+        &launcher.metadata.loopback_base_url,
+        "POST",
+        "/api/v1/care/nap",
+        &launcher.metadata.bearer_token,
+        &nap_body,
+    )
+    .await;
+    assert_eq!(napped.status, 200);
+    let nap_deadline = Instant::now();
+    let mut rested = napped;
+    while rested.body["needs"]["energy"].as_f64().unwrap_or(0.0) < 100.0
+        && nap_deadline.elapsed() < Duration::from_secs(8)
+    {
+        thread::sleep(Duration::from_millis(250));
+        rested = request(
+            &launcher.metadata.loopback_base_url,
+            "GET",
+            "/api/v1/state",
+            &launcher.metadata.bearer_token,
+            b"",
+        )
+        .await;
+    }
+    assert!(
+        rested.body["needs"]["energy"].as_f64().unwrap_or(0.0) >= 100.0,
+        "the hammock nap must restore the drained energy meter"
+    );
+
     let retry_payload = String::from_utf8(denial_payload)
         .expect("hook fixture is UTF-8")
-        .replace("call-pre-bash", "call-pre-bash-retry")
+        .replace("call-pre-bash", "call-pre-bash-rested")
         .into_bytes();
     let retry_event = translate_hook_json(&retry_payload, &launcher.metadata)
         .expect("fresh tool-use fixture translates");

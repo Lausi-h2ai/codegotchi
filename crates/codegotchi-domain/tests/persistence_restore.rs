@@ -95,7 +95,7 @@ fn snapshot_json_round_trip_restores_all_continuation_state() {
     let decoded = serde_json::from_slice(&encoded).unwrap();
     let restored = PetSimulation::from_snapshot(
         decoded,
-        FakeClock::new(start() + Duration::minutes(2)),
+        FakeClock::new(before.last_updated_at),
         DefaultNeedProgressionStrategy,
     )
     .unwrap();
@@ -245,4 +245,52 @@ fn hammock_nap_deadline_survives_restore_and_keeps_recovering() {
     let resumed = restored.current_state();
     assert_eq!(resumed.needs.energy(), 40.0);
     assert_eq!(resumed.behavior, codegotchi_domain::PetBehavior::Sleeping);
+}
+
+#[test]
+fn future_dated_snapshots_are_reanchored_to_the_wall_clock_on_restore() {
+    let (_clock, mut simulation) = simulation();
+    simulation
+        .apply_care(&CareCommand::Nap {
+            action_id: Uuid::from_u128(60),
+        })
+        .unwrap();
+    let mut snapshot = simulation.snapshot();
+
+    // Persist a timeline that is eight days ahead of the restore clock, the
+    // shape left behind by a wall-clock correction or the old demo neglect.
+    let ahead = Duration::days(8);
+    snapshot.last_updated_at += ahead;
+    snapshot.napping_until = snapshot.napping_until.map(|until| until + ahead);
+    snapshot.last_activity_at = snapshot.last_activity_at.map(|at| at + ahead);
+    snapshot.last_outcome_at = snapshot.last_outcome_at.map(|at| at + ahead);
+
+    let restore_clock = FakeClock::new(start());
+    let mut restored = PetSimulation::from_snapshot(
+        snapshot,
+        restore_clock.clone(),
+        DefaultNeedProgressionStrategy,
+    )
+    .unwrap();
+
+    // The whole timeline is translated back, so the nap resumes at the wall
+    // clock instead of freezing until the wall clock catches up.
+    let resumed = restored.snapshot();
+    assert_eq!(resumed.last_updated_at, start());
+    assert_eq!(
+        resumed.napping_until,
+        Some(start() + codegotchi_domain::NAP_DURATION)
+    );
+
+    restore_clock.advance(Duration::seconds(2));
+    let progressed = restored.current_state();
+    assert_eq!(progressed.last_updated_at, start() + Duration::seconds(2));
+    assert_eq!(
+        progressed.napping_until,
+        Some(start() + codegotchi_domain::NAP_DURATION)
+    );
+    assert_eq!(
+        progressed.behavior,
+        codegotchi_domain::PetBehavior::Sleeping
+    );
 }

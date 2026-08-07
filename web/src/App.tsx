@@ -28,8 +28,17 @@ function App({ launchToken }: AppProps) {
     const [token] = useState<string | null>(() =>
         launchToken === undefined ? extractLaunchToken() : launchToken,
     );
-    const { snapshot, connectionStatus, error, feedback, feed, clean, nap } =
-        useCodeGotchi(token);
+    const {
+        snapshot,
+        connectionStatus,
+        error,
+        feedback,
+        debugEnabled,
+        feed,
+        clean,
+        nap,
+        restock,
+    } = useCodeGotchi(token);
     const [shovelArmed, setShovelArmed] = useState(false);
     const [cleaningPoopId, setCleaningPoopId] = useState<string | null>(null);
 
@@ -400,6 +409,16 @@ function App({ launchToken }: AppProps) {
                                     full meter in five seconds; energy drinks
                                     give an instant pick-me-up.
                                 </p>
+                                {debugEnabled ? (
+                                    <button
+                                        className="restock-button"
+                                        type="button"
+                                        data-testid="restock"
+                                        onClick={() => void restock()}
+                                    >
+                                        ⟳ Restock pantry
+                                    </button>
+                                ) : null}
                             </section>
 
                             <p className="authoritative-note">

@@ -175,6 +175,7 @@ describe("useCodeGotchi authoritative projection", () => {
         const fetch = vi
             .fn()
             .mockResolvedValueOnce(responseFor(initial))
+            .mockResolvedValueOnce(responseFor({ debugEnabled: false }))
             .mockResolvedValueOnce(
                 responseFor({ ...napping, duplicate: false }),
             );

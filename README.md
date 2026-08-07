@@ -83,11 +83,27 @@ guard and do not accept arbitrary values:
 
 ```sh
 CODEGOTCHI_ENABLE_DEBUG=1 codegotchi debug neglect
+CODEGOTCHI_ENABLE_DEBUG=1 codegotchi debug restock
 CODEGOTCHI_ENABLE_DEBUG=1 codegotchi debug generate-poop
 ```
 
 They operate only against the active authenticated runtime and are intended
-for a disposable demo session.
+for a disposable demo session. Starting the runtime itself with
+`CODEGOTCHI_ENABLE_DEBUG=1 codegotchi run -- codex` additionally enables the
+debug room: the pet room shows a "Restock pantry" button that restores the
+starter food (50 kibble, 25 treats, 25 fruit, 10 energy drinks) without
+restarting the session.
+
+`debug neglect` makes hunger and energy critical at the current wall clock so
+the refusal tiers and the hammock-nap/energy-drink care loop can be
+demonstrated immediately. It deliberately does not jump the simulation
+timeline far into the future; an earlier version advanced 100 hours, which
+froze naps and need progression until the wall clock caught up.
+
+`debug restock` restores the starter pantry at the current wall clock. Food is
+otherwise a finite consumable: once the pantry is empty, feeding returns
+`out_of_stock` and nothing in the simulation ever replenishes it, so the
+guarded restock keeps disposable demos from soft-locking on an empty fridge.
 
 ## Privacy and runtime boundary
 

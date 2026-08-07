@@ -26,8 +26,9 @@ use tokio::task::JoinHandle;
 use crate::assets;
 use crate::persistence::PersistenceError;
 use crate::protocol::{
-    CleanRequest, DebugRequest, ErrorEnvelope, EventIngestRequest, EventIngestResponse,
-    FeedRequest, HealthResponse, ModeRequest, NapRequest, SnapshotMutationResponse,
+    CleanRequest, DebugRequest, DebugStatusResponse, ErrorEnvelope, EventIngestRequest,
+    EventIngestResponse, FeedRequest, HealthResponse, ModeRequest, NapRequest,
+    SnapshotMutationResponse,
 };
 use crate::runtime::{AuthoritativeRuntime, MutationReceipt, RuntimeError};
 
@@ -47,6 +48,7 @@ pub enum ServerError {
 struct AppState {
     runtime: Arc<AuthoritativeRuntime>,
     bearer_token: Arc<str>,
+    debug_enabled: bool,
 }
 
 pub struct RunningServer {
@@ -67,7 +69,28 @@ impl RunningServer {
         runtime: Arc<AuthoritativeRuntime>,
         bearer_token: impl Into<String>,
     ) -> Result<Self, ServerError> {
-        Self::start_with_schedule(runtime, bearer_token.into(), MaintenanceSchedule::Interval).await
+        Self::start_with_options(
+            runtime,
+            bearer_token.into(),
+            false,
+            MaintenanceSchedule::Interval,
+        )
+        .await
+    }
+
+    /// Starts the loopback server with the guarded demo controls enabled, so
+    /// the browser can discover and use them through the debug routes.
+    pub async fn start_with_debug(
+        runtime: Arc<AuthoritativeRuntime>,
+        bearer_token: impl Into<String>,
+    ) -> Result<Self, ServerError> {
+        Self::start_with_options(
+            runtime,
+            bearer_token.into(),
+            true,
+            MaintenanceSchedule::Interval,
+        )
+        .await
     }
 
     #[doc(hidden)]
@@ -76,17 +99,19 @@ impl RunningServer {
         bearer_token: impl Into<String>,
         ticks: mpsc::UnboundedReceiver<()>,
     ) -> Result<Self, ServerError> {
-        Self::start_with_schedule(
+        Self::start_with_options(
             runtime,
             bearer_token.into(),
+            false,
             MaintenanceSchedule::Trigger(ticks),
         )
         .await
     }
 
-    async fn start_with_schedule(
+    async fn start_with_options(
         runtime: Arc<AuthoritativeRuntime>,
         bearer_token_value: String,
+        debug_enabled: bool,
         maintenance_schedule: MaintenanceSchedule,
     ) -> Result<Self, ServerError> {
         let bearer_token: Arc<str> = Arc::from(bearer_token_value);
@@ -97,6 +122,7 @@ impl RunningServer {
         let state = AppState {
             runtime: Arc::clone(&runtime),
             bearer_token: Arc::clone(&bearer_token),
+            debug_enabled,
         };
         let app = router(state);
         let (shutdown, _) = broadcast::channel(2);
@@ -195,6 +221,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/events", post(events_handler))
         .route("/api/v1/mode", post(mode_handler))
         .route("/api/v1/debug/neglect", post(debug_neglect_handler))
+        .route("/api/v1/debug/restock", post(debug_restock_handler))
+        .route("/api/v1/debug/status", get(debug_status_handler))
         .route(
             "/api/v1/debug/generate-poop",
             post(debug_generate_poop_handler),
@@ -314,6 +342,30 @@ async fn debug_neglect_handler(
         Ok(receipt) => mutation_response(receipt),
         Err(error) => runtime_error_response(error),
     }
+}
+
+async fn debug_restock_handler(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    BoundedJson(_request): BoundedJson<DebugRequest>,
+) -> Response {
+    if !debug_header_is_present(&headers) {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "debug_disabled",
+            "debug commands require CODEGOTCHI_ENABLE_DEBUG=1",
+        );
+    }
+    match state.runtime.debug_restock() {
+        Ok(receipt) => mutation_response(receipt),
+        Err(error) => runtime_error_response(error),
+    }
+}
+
+async fn debug_status_handler(State(state): State<AppState>) -> Json<DebugStatusResponse> {
+    Json(DebugStatusResponse {
+        debug_enabled: state.debug_enabled,
+    })
 }
 
 async fn debug_generate_poop_handler(

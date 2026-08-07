@@ -124,6 +124,38 @@ async fn request(
     HttpResponse { status, body }
 }
 
+async fn debug_request(server: &RunningServer, token: &str, path: &str) -> HttpResponse {
+    let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
+    let request = format!(
+        "POST {path} HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         Authorization: Bearer {token}\r\n\
+         x-codegotchi-debug: 1\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: 2\r\n\
+         Connection: close\r\n\r\n{{}}"
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut bytes = Vec::new();
+    stream.read_to_end(&mut bytes).await.unwrap();
+    let separator = bytes
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .unwrap();
+    let headers = String::from_utf8_lossy(&bytes[..separator]);
+    let status = headers
+        .lines()
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .nth(1)
+        .unwrap()
+        .parse()
+        .unwrap();
+    let body = serde_json::from_slice(&bytes[separator + 4..]).unwrap_or(Value::Null);
+    HttpResponse { status, body }
+}
+
 #[tokio::test]
 async fn production_hook_reaches_authoritative_state_and_parses_the_server_response() {
     let db = TestDatabase::new();
@@ -408,6 +440,212 @@ async fn authenticated_loopback_http_is_authoritative_and_replay_safe() {
     );
 
     server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn debug_neglect_drains_energy_and_a_nap_recovers_it_without_freezing_the_clock() {
+    let db = TestDatabase::new();
+    let runtime = runtime(&db);
+    let server = RunningServer::start(runtime.clone(), TOKEN).await.unwrap();
+
+    let neglect = debug_request(&server, TOKEN, "/api/v1/debug/neglect").await;
+    assert_eq!(neglect.status, 200);
+    assert_eq!(neglect.body["needs"]["hunger"], 100.0);
+    assert_eq!(neglect.body["needs"]["energy"], 0.0);
+    assert_eq!(neglect.body["behavior"], "CriticalNeed");
+
+    // The demo control must not jump the logical clock far into the future:
+    // that froze every later maintenance tick until the wall clock caught up.
+    let clock_jump = chrono::Utc::now()
+        .signed_duration_since(runtime.snapshot().last_updated_at)
+        .num_seconds()
+        .abs();
+    assert!(
+        clock_jump < 60,
+        "debug neglect advanced the simulation clock by {clock_jump} seconds"
+    );
+
+    let nap = serde_json::json!({
+        "actionId": Uuid::from_u128(70),
+    });
+    let nap_body = serde_json::to_vec(&nap).unwrap();
+    let napped = request(&server, "POST", "/api/v1/care/nap", Some(TOKEN), &nap_body).await;
+    assert_eq!(napped.status, 200);
+    assert!(
+        napped.body["needs"]["energy"].as_f64().unwrap() < 1.0,
+        "the nap must start from the drained meter"
+    );
+
+    // The authoritative maintenance loop ticks every second; the five-second
+    // nap must refill the drained meter in real time.
+    let started = std::time::Instant::now();
+    let mut recovered = None;
+    while started.elapsed() < std::time::Duration::from_secs(8) {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        let state = request(&server, "GET", "/api/v1/state", Some(TOKEN), b"").await;
+        if state.body["needs"]["energy"].as_f64().unwrap() >= 100.0 {
+            recovered = Some(state);
+            break;
+        }
+    }
+    let recovered = recovered.expect("the nap must refill energy to 100 within 8 seconds");
+    assert_eq!(recovered.body["nappingUntil"], serde_json::Value::Null);
+
+    server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn debug_restock_restores_the_starter_inventory_and_persists() {
+    let db = TestDatabase::new();
+    let runtime = runtime(&db);
+    let server = RunningServer::start(runtime.clone(), TOKEN).await.unwrap();
+
+    // Consume a few items through the normal care path first.
+    for action in [30_u128, 31, 32, 33] {
+        let feed = serde_json::json!({
+            "actionId": Uuid::from_u128(action),
+            "foodId": "kibble",
+        });
+        let fed = request(
+            &server,
+            "POST",
+            "/api/v1/care/feed",
+            Some(TOKEN),
+            &serde_json::to_vec(&feed).unwrap(),
+        )
+        .await;
+        assert_eq!(fed.status, 200);
+        assert_eq!(fed.body["duplicate"], false);
+    }
+    let before = request(&server, "GET", "/api/v1/state", Some(TOKEN), b"").await;
+    assert_eq!(before.status, 200);
+    assert_eq!(before.body["inventory"]["kibble"], 46);
+
+    let restock = debug_request(&server, TOKEN, "/api/v1/debug/restock").await;
+    assert_eq!(restock.status, 200);
+    assert_eq!(restock.body["inventory"]["kibble"], 50);
+    assert_eq!(restock.body["inventory"]["treat"], 25);
+    assert_eq!(restock.body["inventory"]["fruit"], 25);
+    assert_eq!(restock.body["inventory"]["energy_drink"], 10);
+
+    // The mutation persists through the store, not just in memory.
+    let persisted = SqliteStore::open(&db.path)
+        .unwrap()
+        .load()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        persisted
+            .inventory
+            .count(codegotchi_domain::FoodKind::Kibble),
+        50
+    );
+    assert_eq!(
+        persisted
+            .inventory
+            .count(codegotchi_domain::FoodKind::EnergyDrink),
+        10
+    );
+
+    server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn debug_restock_without_the_guard_header_is_forbidden() {
+    let db = TestDatabase::new();
+    let runtime = runtime(&db);
+    let server = RunningServer::start(runtime, TOKEN).await.unwrap();
+
+    let response = request(&server, "POST", "/api/v1/debug/restock", Some(TOKEN), b"{}").await;
+    assert_eq!(response.status, 403);
+    assert_eq!(response.body["error"]["code"], "debug_disabled");
+
+    server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn debug_status_reflects_how_the_runtime_was_launched() {
+    let db = TestDatabase::new();
+    let runtime = runtime(&db);
+
+    let plain = RunningServer::start(runtime.clone(), TOKEN).await.unwrap();
+    let plain_status = request(&plain, "GET", "/api/v1/debug/status", Some(TOKEN), b"").await;
+    assert_eq!(plain_status.status, 200);
+    assert_eq!(plain_status.body["debugEnabled"], false);
+    plain.shutdown().await.unwrap();
+
+    let enabled = RunningServer::start_with_debug(runtime, TOKEN)
+        .await
+        .unwrap();
+    let enabled_status = request(&enabled, "GET", "/api/v1/debug/status", Some(TOKEN), b"").await;
+    assert_eq!(enabled_status.status, 200);
+    assert_eq!(enabled_status.body["debugEnabled"], true);
+
+    enabled.shutdown().await.unwrap();
+}
+
+#[test]
+fn legacy_snapshots_without_the_energy_care_fields_gain_ten_energy_drinks() {
+    let db = TestDatabase::new();
+    let store = SqliteStore::open(&db.path).unwrap();
+    let fresh = codegotchi_cli::AuthoritativeRuntime::new(
+        store.clone(),
+        Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, start()),
+    )
+    .unwrap()
+    .snapshot();
+
+    // Simulate a snapshot persisted by the pre-energy binary: it has no
+    // nappingUntil field and its inventory never received energy drinks.
+    let mut legacy_json = serde_json::to_value(&fresh).unwrap();
+    legacy_json.as_object_mut().unwrap().remove("nappingUntil");
+    legacy_json["inventory"]
+        .as_object_mut()
+        .unwrap()
+        .remove("energy_drink");
+    let legacy_json = serde_json::to_string(&legacy_json).unwrap();
+
+    let connection = Connection::open(&db.path).unwrap();
+    connection
+        .execute(
+            "UPDATE simulation_snapshots SET schema_version = 1, snapshot_json = ?1
+             WHERE repository_id = 'default'",
+            [&legacy_json],
+        )
+        .unwrap();
+
+    let loaded = store.load().unwrap().expect("legacy snapshot restores");
+    assert_eq!(
+        loaded
+            .inventory
+            .count(codegotchi_domain::FoodKind::EnergyDrink),
+        10
+    );
+    assert_eq!(loaded.napping_until, None);
+    assert_eq!(loaded.needs, fresh.needs);
+
+    // A newer-format snapshot that consumed every drink is not refilled: the
+    // inventory is authoritative and the migration only touches legacy rows.
+    let mut spent_json = serde_json::to_value(&fresh).unwrap();
+    spent_json["inventory"]
+        .as_object_mut()
+        .unwrap()
+        .remove("energy_drink");
+    let spent_json = serde_json::to_string(&spent_json).unwrap();
+    connection
+        .execute(
+            "UPDATE simulation_snapshots SET snapshot_json = ?1",
+            [&spent_json],
+        )
+        .unwrap();
+
+    let spent = store.load().unwrap().expect("spent snapshot restores");
+    assert_eq!(
+        spent
+            .inventory
+            .count(codegotchi_domain::FoodKind::EnergyDrink),
+        0
+    );
 }
 
 #[test]

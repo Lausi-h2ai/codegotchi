@@ -9,11 +9,13 @@ export interface CodeGotchiState {
     connectionStatus: ClientStatus;
     error: ClientError | null;
     feedback: string | null;
+    debugEnabled: boolean;
     feed: (
         foodId: "kibble" | "treat" | "fruit" | "energy_drink",
     ) => Promise<void>;
     clean: (poopId: string) => Promise<void>;
     nap: () => Promise<void>;
+    restock: () => Promise<void>;
 }
 
 declare global {
@@ -28,6 +30,7 @@ export function useCodeGotchi(token: string | null): CodeGotchiState {
         useState<ClientStatus>("loading");
     const [error, setError] = useState<ClientError | null>(null);
     const [feedback, setFeedback] = useState<string | null>(null);
+    const [debugEnabled, setDebugEnabled] = useState(false);
     const clientRef = useRef<CodeGotchiClient | null>(null);
 
     useEffect(() => {
@@ -56,6 +59,17 @@ export function useCodeGotchi(token: string | null): CodeGotchiState {
             window.__codeGotchiTestDisconnect = () =>
                 client.disconnectForTest();
         }
+        void client.debugStatus().then(
+            (status) => {
+                if (clientRef.current === client) {
+                    setDebugEnabled(status.debugEnabled);
+                }
+            },
+            () => {
+                // Older runtimes without the status route simply hide the
+                // debug-only affordances.
+            },
+        );
 
         return () => {
             stop();
@@ -111,7 +125,31 @@ export function useCodeGotchi(token: string | null): CodeGotchiState {
         }
     }, []);
 
-    return { snapshot, connectionStatus, error, feedback, feed, clean, nap };
+    const restock = useCallback(async () => {
+        const client = clientRef.current;
+        if (!client) {
+            return;
+        }
+        try {
+            await client.restock();
+            setError(null);
+            setFeedback("Restocked the pantry");
+        } catch (nextError) {
+            setError(asClientError(nextError));
+        }
+    }, []);
+
+    return {
+        snapshot,
+        connectionStatus,
+        error,
+        feedback,
+        debugEnabled,
+        feed,
+        clean,
+        nap,
+        restock,
+    };
 }
 
 function foodLabel(
