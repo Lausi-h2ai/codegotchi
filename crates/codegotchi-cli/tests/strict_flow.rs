@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use chrono::{Duration, TimeZone, Utc};
+use chrono::{Duration, Utc};
 use codegotchi_cli::runtime_metadata::write_metadata;
 use codegotchi_cli::{AuthoritativeRuntime, RunningServer, RuntimeMetadataV1, SqliteStore};
 use codegotchi_domain::{
@@ -40,12 +40,6 @@ impl Drop for TestDatabase {
         let _ = fs::remove_file(self.path.with_extension("sqlite-shm"));
         let _ = fs::remove_file(self.path.with_extension("sqlite-wal"));
     }
-}
-
-fn start() -> chrono::DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 8, 5, 12, 0, 0)
-        .single()
-        .expect("fixture time is valid")
 }
 
 async fn invoke_hook(metadata_path: &Path, payload: &[u8]) -> Output {
@@ -215,7 +209,7 @@ async fn strict_denial_is_verified_fail_open_and_recoverable_through_normal_care
     let database = TestDatabase::new();
     let runtime = AuthoritativeRuntime::new(
         SqliteStore::open(&database.path).expect("SQLite opens"),
-        Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, start()),
+        Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, Utc::now()),
     )
     .expect("runtime starts");
     let (_, tick_receiver) = mpsc::unbounded_channel();
@@ -552,8 +546,8 @@ async fn strict_denial_is_verified_fail_open_and_recoverable_through_normal_care
     malformed_thread.join().expect("mock exits");
 
     // Severe neglect leaves both hunger and energy critical, so recovery now
-    // needs two kibble to clear the mild hunger boundary plus rest time for
-    // energy to recover above its mild boundary.
+    // needs two kibble to clear the mild hunger boundary plus a hammock nap
+    // to restore energy. Wall-clock idle time no longer recovers energy.
     for action_id in 710_u128..712_u128 {
         let recovery = request(
             &server,
@@ -577,9 +571,7 @@ async fn strict_denial_is_verified_fail_open_and_recoverable_through_normal_care
     );
     assert_eq!(fed.enforcement_mode, EnforcementMode::Strict);
 
-    // Let the exhausted pet rest: end the active tool and fast-forward four
-    // idle hours so energy recovers from 0 to 32 while hunger only drifts to
-    // ~54, leaving every need below its mild boundary.
+    // End the active tool before the normal care recovery path.
     runtime
         .apply_event(&AgentEvent::new(
             Uuid::from_u128(900),
@@ -593,11 +585,28 @@ async fn strict_denial_is_verified_fail_open_and_recoverable_through_normal_care
         ))
         .expect("rest event applies");
     let _ = next_snapshot(&mut snapshots).await;
+
+    let napped = request(
+        &server,
+        "POST",
+        "/api/v1/care/nap",
+        Some("task-4-strict-token"),
+        &serde_json::to_vec(&serde_json::json!({
+            "actionId": Uuid::from_u128(712),
+        }))
+        .expect("nap serializes"),
+    )
+    .await;
+    assert_eq!(napped.0, 200);
+    assert!(napped.1["nappingUntil"].is_string());
+    let napping = next_snapshot(&mut snapshots).await;
+    assert_eq!(napping.needs.energy(), 0.0);
     runtime
-        .maintenance_tick_at(fed.last_updated_at + Duration::hours(4))
-        .expect("rest time advances");
+        .maintenance_tick_at(napping.last_updated_at + Duration::seconds(5))
+        .expect("nap completion advances exactly five seconds");
     let rested = next_snapshot(&mut snapshots).await;
-    assert!(rested.needs.energy() > 30.0);
+    assert_eq!(rested.needs.energy(), 100.0);
+    assert!(rested.napping_until.is_none());
     assert!(rested.needs.hunger() < 70.0);
     let recovered_hook = invoke_hook(&metadata_path, &safe_fixture("strict-tool-2")).await;
     assert_allow(&recovered_hook);

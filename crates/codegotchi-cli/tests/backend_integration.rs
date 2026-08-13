@@ -483,13 +483,21 @@ async fn debug_neglect_drains_energy_and_a_nap_recovers_it_without_freezing_the_
     while started.elapsed() < std::time::Duration::from_secs(8) {
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         let state = request(&server, "GET", "/api/v1/state", Some(TOKEN), b"").await;
-        if state.body["needs"]["energy"].as_f64().unwrap() >= 100.0 {
+        // Wall-clock maintenance can land just after the five-second deadline:
+        // the nap has completed when the authoritative deadline clears, while
+        // the normal -50/hour energy decay may already have begun.
+        if state.body["nappingUntil"].is_null() {
             recovered = Some(state);
             break;
         }
     }
-    let recovered = recovered.expect("the nap must refill energy to 100 within 8 seconds");
+    let recovered = recovered.expect("the nap completion deadline must clear within 8 seconds");
     assert_eq!(recovered.body["nappingUntil"], serde_json::Value::Null);
+    assert!(
+        recovered.body["needs"]["energy"].as_f64().unwrap() >= 99.0,
+        "the completed nap must leave the energy meter near full: {:?}",
+        recovered.body["needs"]["energy"]
+    );
 
     server.shutdown().await.unwrap();
 }

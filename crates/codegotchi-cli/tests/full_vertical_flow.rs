@@ -929,8 +929,7 @@ async fn strict_flow_denies_cares_retries_and_fails_open_when_server_stops() {
     assert_eq!(napped.status, 200);
     let nap_deadline = Instant::now();
     let mut rested = napped;
-    while rested.body["needs"]["energy"].as_f64().unwrap_or(0.0) < 100.0
-        && nap_deadline.elapsed() < Duration::from_secs(8)
+    while rested.body["nappingUntil"].is_string() && nap_deadline.elapsed() < Duration::from_secs(8)
     {
         thread::sleep(Duration::from_millis(250));
         rested = request(
@@ -942,9 +941,11 @@ async fn strict_flow_denies_cares_retries_and_fails_open_when_server_stops() {
         )
         .await;
     }
+    assert_eq!(rested.body["nappingUntil"], Value::Null);
     assert!(
-        rested.body["needs"]["energy"].as_f64().unwrap_or(0.0) >= 100.0,
-        "the hammock nap must restore the drained energy meter"
+        rested.body["needs"]["energy"].as_f64().unwrap_or(0.0) >= 99.0,
+        "the completed hammock nap must leave energy near full: {:?}",
+        rested.body["needs"]["energy"]
     );
 
     let retry_payload = String::from_utf8(denial_payload)
