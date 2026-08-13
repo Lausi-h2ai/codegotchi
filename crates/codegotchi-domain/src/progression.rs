@@ -518,6 +518,9 @@ where
                         self.pet.needs_mut().adjust_happiness(5.0);
                     }
                 }
+                if matches!(food, FoodKind::Kibble | FoodKind::Treat | FoodKind::Fruit) {
+                    self.resolve_oldest_demand(PetDemandKind::Snack);
+                }
             }
             CareCommand::CleanPoop { poop_id, .. } => {
                 if let Some(index) = self
@@ -532,11 +535,23 @@ where
             }
             CareCommand::Pet { .. } => {
                 self.pet.needs_mut().adjust_happiness(10.0);
+                self.resolve_oldest_demand(PetDemandKind::Affection);
             }
             CareCommand::Nap { .. } => {
                 self.pet
                     .start_nap(self.pet.last_updated_at() + NAP_DURATION);
             }
+        }
+    }
+
+    fn resolve_oldest_demand(&mut self, kind: PetDemandKind) {
+        if let Some(index) = self
+            .pet
+            .pending_demands()
+            .iter()
+            .position(|demand| demand.kind() == kind)
+        {
+            self.pet.remove_demand(index);
         }
     }
 
@@ -1110,6 +1125,118 @@ mod tests {
             start(),
         );
         PetSimulation::new(pet, clock, DefaultNeedProgressionStrategy)
+    }
+
+    fn simulation_with_demands(
+        demands: impl IntoIterator<Item = (u128, PetDemandKind)>,
+    ) -> PetSimulation<FakeClock, DefaultNeedProgressionStrategy> {
+        let mut pet = Pet::with_inventory(
+            Uuid::from_u128(9),
+            "Mochi",
+            PetSpecies::Cat,
+            start(),
+            FoodInventory::starter(),
+        );
+        for (id, kind) in demands {
+            pet.push_demand(PetDemand::new(Uuid::from_u128(id), kind, start()));
+        }
+        PetSimulation::new(pet, FakeClock::new(start()), DefaultNeedProgressionStrategy)
+    }
+
+    fn demand_ids(
+        simulation: &PetSimulation<FakeClock, DefaultNeedProgressionStrategy>,
+    ) -> Vec<Uuid> {
+        simulation
+            .pet()
+            .pending_demands()
+            .iter()
+            .map(PetDemand::id)
+            .collect()
+    }
+
+    #[test]
+    fn petting_resolves_only_oldest_affection_demand() {
+        let mut simulation = simulation_with_demands([
+            (1, PetDemandKind::Affection),
+            (2, PetDemandKind::Snack),
+            (3, PetDemandKind::Affection),
+        ]);
+
+        simulation
+            .apply_care(&CareCommand::Pet {
+                action_id: Uuid::from_u128(99),
+                interaction_ms: 1_500,
+                pointer_distance: 120.0,
+            })
+            .unwrap();
+
+        assert_eq!(
+            demand_ids(&simulation),
+            vec![Uuid::from_u128(2), Uuid::from_u128(3)]
+        );
+    }
+
+    #[test]
+    fn food_resolves_only_oldest_snack_demand_after_consumption() {
+        for (food_id, action_id) in [("kibble", 100), ("treat", 101), ("fruit", 102)] {
+            let mut simulation = simulation_with_demands([
+                (1, PetDemandKind::Affection),
+                (2, PetDemandKind::Snack),
+                (3, PetDemandKind::Snack),
+            ]);
+
+            simulation
+                .apply_care(&CareCommand::Feed {
+                    action_id: Uuid::from_u128(action_id),
+                    food_id: food_id.to_owned(),
+                })
+                .unwrap();
+
+            assert_eq!(
+                demand_ids(&simulation),
+                vec![Uuid::from_u128(1), Uuid::from_u128(3)],
+                "food={food_id}"
+            );
+        }
+    }
+
+    #[test]
+    fn energy_drink_does_not_resolve_snack_demand() {
+        let mut simulation =
+            simulation_with_demands([(1, PetDemandKind::Affection), (2, PetDemandKind::Snack)]);
+
+        simulation
+            .apply_care(&CareCommand::Feed {
+                action_id: Uuid::from_u128(103),
+                food_id: "energy_drink".to_owned(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            demand_ids(&simulation),
+            vec![Uuid::from_u128(1), Uuid::from_u128(2)]
+        );
+    }
+
+    #[test]
+    fn out_of_stock_food_does_not_resolve_snack_demand() {
+        let mut pet = Pet::new(Uuid::from_u128(9), "Mochi", PetSpecies::Cat, start());
+        pet.push_demand(PetDemand::new(
+            Uuid::from_u128(1),
+            PetDemandKind::Snack,
+            start(),
+        ));
+        let mut simulation =
+            PetSimulation::new(pet, FakeClock::new(start()), DefaultNeedProgressionStrategy);
+
+        assert_eq!(
+            simulation.apply_care(&CareCommand::Feed {
+                action_id: Uuid::from_u128(104),
+                food_id: "kibble".to_owned(),
+            }),
+            Err(CareError::OutOfStock("kibble".to_owned()))
+        );
+        assert_eq!(demand_ids(&simulation), vec![Uuid::from_u128(1)]);
     }
 
     fn pet_with_activity(activity: AgentActivityState) -> Pet {

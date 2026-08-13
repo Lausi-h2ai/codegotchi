@@ -602,6 +602,9 @@ fn denial_reason(decision: WorkDecision) -> Option<String> {
         WorkReasonCode::CriticalCleanliness => {
             "The pet refuses this action because its cleanliness is critical. Clean the pet in the CodeGotchi UI, then retry the Codex request afterward."
         }
+        WorkReasonCode::CriticalHappiness => {
+            "The pet refuses this action because its happiness is critical. Pet the pet in the CodeGotchi UI, then retry the Codex request afterward."
+        }
     };
     Some(reason.to_owned())
 }

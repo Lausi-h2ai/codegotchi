@@ -28,6 +28,9 @@ impl BehaviorCoordinator {
         if pet.needs().cleanliness() <= 10.0 {
             return PetBehavior::CriticalNeed;
         }
+        if pet.needs().happiness() <= 10.0 {
+            return PetBehavior::CriticalNeed;
+        }
         if matches!(pet.activity(), AgentActivityState::Blocked) {
             return PetBehavior::Blocked;
         }
@@ -49,6 +52,27 @@ impl BehaviorCoordinator {
         }
 
         PetBehavior::Wandering
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+    use uuid::Uuid;
+
+    use crate::pet::{PetBehavior, PetSpecies};
+
+    #[test]
+    fn happiness_at_ten_is_a_critical_need_when_other_needs_are_healthy() {
+        let now = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        let mut pet = Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, now);
+        pet.needs_mut().set_happiness(10.0);
+
+        assert_eq!(
+            BehaviorCoordinator::derive(&pet, now, None, None),
+            PetBehavior::CriticalNeed
+        );
     }
 }
 

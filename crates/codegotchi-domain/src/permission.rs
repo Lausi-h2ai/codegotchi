@@ -4,23 +4,27 @@ use serde::{Deserialize, Serialize};
 const MINIMUM_HUNGER_RECOVERY: f32 = 20.0;
 const MINIMUM_ENERGY_RECOVERY: f32 = 20.0;
 const MINIMUM_CLEANLINESS_RECOVERY: f32 = 20.0;
+const MINIMUM_HAPPINESS_RECOVERY: f32 = 20.0;
 
 /// Needs are considered mildly neglected at these boundaries. Strict mode
 /// starts refusing safe development work from this point on.
 const MILD_HUNGER: f32 = 70.0;
 const MILD_ENERGY: f32 = 30.0;
 const MILD_CLEANLINESS: f32 = 30.0;
+const MILD_HAPPINESS: f32 = 30.0;
 
 /// At moderate neglect, strict mode widens refusal to recovery work as well.
 const MODERATE_HUNGER: f32 = 85.0;
 const MODERATE_ENERGY: f32 = 15.0;
 const MODERATE_CLEANLINESS: f32 = 15.0;
+const MODERATE_HAPPINESS: f32 = 15.0;
 
 /// At severe neglect, strict mode refuses every tool call except CodeGotchi
 /// control, so the caretaker must go care for the pet.
 const SEVERE_HUNGER: f32 = 95.0;
 const SEVERE_ENERGY: f32 = 5.0;
 const SEVERE_CLEANLINESS: f32 = 5.0;
+const SEVERE_HAPPINESS: f32 = 5.0;
 
 /// The level at which the policy changes how it reports critical neglect.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -123,6 +127,7 @@ pub enum WorkReasonCode {
     CriticalHunger,
     CriticalEnergy,
     CriticalCleanliness,
+    CriticalHappiness,
 }
 
 impl WorkReasonCode {
@@ -131,6 +136,7 @@ impl WorkReasonCode {
             Self::CriticalHunger => "critical_hunger",
             Self::CriticalEnergy => "critical_energy",
             Self::CriticalCleanliness => "critical_cleanliness",
+            Self::CriticalHappiness => "critical_happiness",
         }
     }
 }
@@ -141,6 +147,7 @@ pub enum RequiredAction {
     Feed { minimum_hunger_recovery: f32 },
     Rest { minimum_energy_recovery: f32 },
     Clean { minimum_cleanliness_recovery: f32 },
+    Pet { minimum_happiness_recovery: f32 },
 }
 
 impl RequiredAction {
@@ -155,6 +162,9 @@ impl RequiredAction {
             Self::Clean {
                 minimum_cleanliness_recovery,
             } => minimum_cleanliness_recovery,
+            Self::Pet {
+                minimum_happiness_recovery,
+            } => minimum_happiness_recovery,
         }
     }
 }
@@ -174,14 +184,23 @@ impl NeglectLevel {
         let hunger = needs.hunger();
         let energy = needs.energy();
         let cleanliness = needs.cleanliness();
-        if hunger >= SEVERE_HUNGER || energy <= SEVERE_ENERGY || cleanliness <= SEVERE_CLEANLINESS {
+        let happiness = needs.happiness();
+        if hunger >= SEVERE_HUNGER
+            || energy <= SEVERE_ENERGY
+            || cleanliness <= SEVERE_CLEANLINESS
+            || happiness <= SEVERE_HAPPINESS
+        {
             Self::Severe
         } else if hunger >= MODERATE_HUNGER
             || energy <= MODERATE_ENERGY
             || cleanliness <= MODERATE_CLEANLINESS
+            || happiness <= MODERATE_HAPPINESS
         {
             Self::Moderate
-        } else if hunger >= MILD_HUNGER || energy <= MILD_ENERGY || cleanliness <= MILD_CLEANLINESS
+        } else if hunger >= MILD_HUNGER
+            || energy <= MILD_ENERGY
+            || cleanliness <= MILD_CLEANLINESS
+            || happiness <= MILD_HAPPINESS
         {
             Self::Mild
         } else {
@@ -302,31 +321,43 @@ fn neglect(pet: &Pet) -> Option<(NeglectLevel, WorkReasonCode, RequiredAction)> 
 }
 
 /// Chooses the reason and required action for the most neglected need. Ties
-/// are broken by hunger, then energy, then cleanliness for determinism.
+/// are broken by hunger, then energy, cleanliness, then happiness for
+/// determinism.
 fn dominant_need(needs: PetNeeds) -> (WorkReasonCode, RequiredAction) {
     let hunger_score = needs.hunger() / 100.0;
     let energy_score = (100.0 - needs.energy()) / 100.0;
     let cleanliness_score = (100.0 - needs.cleanliness()) / 100.0;
+    let happiness_score = (100.0 - needs.happiness()) / 100.0;
 
-    if hunger_score >= energy_score && hunger_score >= cleanliness_score {
+    if hunger_score >= energy_score
+        && hunger_score >= cleanliness_score
+        && hunger_score >= happiness_score
+    {
         (
             WorkReasonCode::CriticalHunger,
             RequiredAction::Feed {
                 minimum_hunger_recovery: MINIMUM_HUNGER_RECOVERY,
             },
         )
-    } else if energy_score >= cleanliness_score {
+    } else if energy_score >= cleanliness_score && energy_score >= happiness_score {
         (
             WorkReasonCode::CriticalEnergy,
             RequiredAction::Rest {
                 minimum_energy_recovery: MINIMUM_ENERGY_RECOVERY,
             },
         )
-    } else {
+    } else if cleanliness_score >= happiness_score {
         (
             WorkReasonCode::CriticalCleanliness,
             RequiredAction::Clean {
                 minimum_cleanliness_recovery: MINIMUM_CLEANLINESS_RECOVERY,
+            },
+        )
+    } else {
+        (
+            WorkReasonCode::CriticalHappiness,
+            RequiredAction::Pet {
+                minimum_happiness_recovery: MINIMUM_HAPPINESS_RECOVERY,
             },
         )
     }
@@ -363,6 +394,12 @@ mod tests {
         pet.needs_mut().set_hunger(hunger);
         pet.needs_mut().set_energy(energy);
         pet.needs_mut().set_cleanliness(cleanliness);
+        pet
+    }
+
+    fn pet_with_happiness(happiness: f32) -> Pet {
+        let mut pet = pet_with_needs(0.0, 100.0, 100.0);
+        pet.needs_mut().set_happiness(happiness);
         pet
     }
 
@@ -508,6 +545,94 @@ mod tests {
         assert_eq!(
             WorkPermissionPolicy::evaluate(&severe, &control, &strict),
             WorkDecision::Allowed
+        );
+    }
+
+    #[test]
+    fn happiness_boundaries_escalate_strict_blocking_scope() {
+        let strict = PetSettings::new(EnforcementMode::Strict);
+        let safe = classification(CommandPurpose::SafeDevelopment);
+        let shell = classification(CommandPurpose::ShellRecovery);
+        let uncertain = classification(CommandPurpose::Uncertain);
+        let control = classification(CommandPurpose::CodeGotchiControl);
+
+        let healthy = pet_with_happiness(30.001);
+        assert_eq!(
+            WorkPermissionPolicy::evaluate(&healthy, &safe, &strict),
+            WorkDecision::Allowed
+        );
+
+        let mild = pet_with_happiness(30.0);
+        assert_eq!(
+            WorkPermissionPolicy::evaluate(&mild, &safe, &strict),
+            WorkDecision::Blocked {
+                reason_code: WorkReasonCode::CriticalHappiness,
+                required_action: RequiredAction::Pet {
+                    minimum_happiness_recovery: 20.0,
+                },
+            }
+        );
+        assert_eq!(
+            WorkPermissionPolicy::evaluate(&mild, &shell, &strict),
+            WorkDecision::Allowed
+        );
+
+        let moderate = pet_with_happiness(15.0);
+        assert!(WorkPermissionPolicy::evaluate(&moderate, &safe, &strict).is_blocked());
+        assert!(WorkPermissionPolicy::evaluate(&moderate, &shell, &strict).is_blocked());
+        assert_eq!(
+            WorkPermissionPolicy::evaluate(&moderate, &uncertain, &strict),
+            WorkDecision::Allowed
+        );
+
+        let severe = pet_with_happiness(5.0);
+        assert!(WorkPermissionPolicy::evaluate(&severe, &safe, &strict).is_blocked());
+        assert!(WorkPermissionPolicy::evaluate(&severe, &shell, &strict).is_blocked());
+        assert!(WorkPermissionPolicy::evaluate(&severe, &uncertain, &strict).is_blocked());
+        assert_eq!(
+            WorkPermissionPolicy::evaluate(&severe, &control, &strict),
+            WorkDecision::Allowed
+        );
+    }
+
+    #[test]
+    fn happiness_dominates_more_neglected_needs_with_structured_pet_action() {
+        let mut pet = pet_with_needs(20.0, 80.0, 80.0);
+        pet.needs_mut().set_happiness(10.0);
+        let gentle = PetSettings::new(EnforcementMode::Gentle);
+
+        assert_eq!(
+            WorkPermissionPolicy::evaluate(
+                &pet,
+                &classification(CommandPurpose::SafeDevelopment),
+                &gentle,
+            ),
+            WorkDecision::Warning {
+                reason_code: WorkReasonCode::CriticalHappiness,
+                required_action: RequiredAction::Pet {
+                    minimum_happiness_recovery: 20.0,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cleanliness_wins_ties_over_happiness_in_dominant_need() {
+        let mut pet = pet_with_needs(0.0, 100.0, 30.0);
+        pet.needs_mut().set_happiness(30.0);
+
+        assert_eq!(
+            WorkPermissionPolicy::evaluate(
+                &pet,
+                &classification(CommandPurpose::SafeDevelopment),
+                &PetSettings::new(EnforcementMode::Gentle),
+            ),
+            WorkDecision::Warning {
+                reason_code: WorkReasonCode::CriticalCleanliness,
+                required_action: RequiredAction::Clean {
+                    minimum_cleanliness_recovery: 20.0,
+                },
+            }
         );
     }
 
