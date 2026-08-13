@@ -129,12 +129,31 @@ impl AuthoritativeRuntime {
             CommandCategory::Unknown,
             CommandPurpose::Uncertain,
         ));
+        let duplicate = before.processed_event_ids.contains(&event.id);
+        if duplicate {
+            let decision = WorkPermissionPolicy::evaluate(
+                simulation.pet(),
+                &classification,
+                &PetSettings::new(before.enforcement_mode),
+            );
+            return Ok(EventIngestReceipt {
+                snapshot: simulation.snapshot(),
+                duplicate: true,
+                decision,
+            });
+        }
+
+        // Permission is a decision about whether work may start now, so first
+        // apply all authoritative wall-clock neglect through the later of the
+        // runtime clock and the event's observed timestamp. Duplicate events
+        // return above without moving time, preserving replay semantics.
+        event.validate_schema_version()?;
+        simulation.current_state_at(Utc::now().max(event.timestamp));
         let decision = WorkPermissionPolicy::evaluate(
             simulation.pet(),
             &classification,
             &PetSettings::new(before.enforcement_mode),
         );
-        let duplicate = before.processed_event_ids.contains(&event.id);
         let mut accepted_event = event.clone();
         if decision.is_blocked() {
             accepted_event.metadata.blocked = true;
@@ -155,13 +174,6 @@ impl AuthoritativeRuntime {
             accepted_event.activity = Some(ActivityKind::Testing);
         }
         simulation.apply_event(&accepted_event)?;
-        if duplicate {
-            return Ok(EventIngestReceipt {
-                snapshot: simulation.snapshot(),
-                duplicate: true,
-                decision,
-            });
-        }
         let receipt = self.persist_and_broadcast(&mut simulation, before, false)?;
         Ok(EventIngestReceipt {
             snapshot: receipt.snapshot,
