@@ -4,6 +4,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::attention::PetDemand;
 use crate::event::ActivityKind;
 
 const NEED_MIN: f32 = 0.0;
@@ -282,6 +283,7 @@ pub struct Pet {
     digestion_points: u64,
     last_updated_at: DateTime<Utc>,
     pub(crate) pending_poops: Vec<Poop>,
+    pub(crate) pending_demands: Vec<PetDemand>,
     activity: AgentActivityState,
     recent_outcome: AgentOutcome,
     inventory: FoodInventory,
@@ -304,6 +306,7 @@ impl Pet {
             digestion_points: 0,
             last_updated_at: initial_timestamp,
             pending_poops: Vec::new(),
+            pending_demands: Vec::new(),
             activity: AgentActivityState::default(),
             recent_outcome: AgentOutcome::default(),
             inventory: FoodInventory::default(),
@@ -346,6 +349,43 @@ impl Pet {
         poop_sequence: u64,
         napping_until: Option<DateTime<Utc>>,
     ) -> Self {
+        Self::from_snapshot_with_demands(
+            id,
+            name,
+            species,
+            needs,
+            behavior,
+            work_points,
+            digestion_points,
+            last_updated_at,
+            pending_poops,
+            Vec::new(),
+            activity,
+            recent_outcome,
+            inventory,
+            poop_sequence,
+            napping_until,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_snapshot_with_demands(
+        id: Uuid,
+        name: String,
+        species: PetSpecies,
+        needs: PetNeeds,
+        behavior: PetBehavior,
+        work_points: u64,
+        digestion_points: u64,
+        last_updated_at: DateTime<Utc>,
+        pending_poops: Vec<Poop>,
+        pending_demands: Vec<PetDemand>,
+        activity: AgentActivityState,
+        recent_outcome: AgentOutcome,
+        inventory: FoodInventory,
+        poop_sequence: u64,
+        napping_until: Option<DateTime<Utc>>,
+    ) -> Self {
         Self {
             id,
             name,
@@ -356,6 +396,7 @@ impl Pet {
             digestion_points,
             last_updated_at,
             pending_poops,
+            pending_demands,
             activity,
             recent_outcome,
             inventory,
@@ -404,6 +445,10 @@ impl Pet {
         &self.pending_poops
     }
 
+    pub fn pending_demands(&self) -> &[PetDemand] {
+        &self.pending_demands
+    }
+
     pub fn work_points(&self) -> u64 {
         self.work_points
     }
@@ -447,6 +492,16 @@ impl Pet {
 
     pub(crate) fn push_poop(&mut self, poop: Poop) {
         self.pending_poops.push(poop);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn push_demand(&mut self, demand: PetDemand) {
+        self.pending_demands.push(demand);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn remove_demand(&mut self, index: usize) -> PetDemand {
+        self.pending_demands.remove(index)
     }
 
     pub(crate) fn advance_poop_sequence(&mut self) {
@@ -506,6 +561,7 @@ mod tests {
         AgentActivityState, AgentOutcome, FoodInventory, Pet, PetBehavior, PetNeeds, PetSpecies,
         Poop,
     };
+    use crate::attention::{PetDemand, PetDemandKind};
 
     #[test]
     fn needs_clamp_at_both_bounds() {
@@ -550,10 +606,22 @@ mod tests {
         assert_eq!(pet.activity(), AgentActivityState::Idle);
         assert_eq!(pet.recent_outcome(), AgentOutcome::None);
         assert!(pet.pending_poops().is_empty());
+        assert!(pet.pending_demands().is_empty());
         assert_eq!(pet.inventory(), &FoodInventory::default());
         assert_eq!(pet.work_points(), 0);
         assert_eq!(pet.digestion_points(), 0);
         assert_eq!(pet.last_updated_at(), start);
+    }
+
+    #[test]
+    fn pending_demands_preserve_insertion_order() {
+        let at = Utc.with_ymd_and_hms(2026, 8, 13, 10, 0, 0).unwrap();
+        let mut pet = Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, at);
+        let first = PetDemand::new(Uuid::from_u128(10), PetDemandKind::Affection, at);
+        let second = PetDemand::new(Uuid::from_u128(11), PetDemandKind::Snack, at);
+        pet.push_demand(first.clone());
+        pet.push_demand(second.clone());
+        assert_eq!(pet.pending_demands(), &[first, second]);
     }
 
     #[test]
