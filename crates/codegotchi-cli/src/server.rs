@@ -684,7 +684,10 @@ where
 mod tests {
     use chrono::{TimeZone, Utc};
     use codegotchi_domain::{
-        AgentEvent, AgentEventKind, EventMetadata, EventSource, Pet, PetSpecies, WorkReasonCode,
+        AgentEvent, AgentEventKind, CommandCategory, CommandClassification, CommandPurpose,
+        DefaultNeedProgressionStrategy, EnforcementMode, EventMetadata, EventSource, FakeClock,
+        Pet, PetBehavior, PetNeeds, PetSettings, PetSimulation, PetSpecies, WorkPermissionPolicy,
+        WorkReasonCode,
     };
     use tokio::sync::broadcast::error::TryRecvError;
     use uuid::Uuid;
@@ -828,14 +831,40 @@ mod tests {
 
     #[test]
     fn critical_happiness_denial_explains_the_attention_recovery_action() {
-        use codegotchi_domain::{RequiredAction, WorkDecision};
+        let start = Utc.with_ymd_and_hms(2026, 8, 5, 12, 0, 0).unwrap();
+        let simulation = PetSimulation::new(
+            Pet::new(Uuid::from_u128(99), "Mochi", PetSpecies::Cat, start),
+            FakeClock::new(start),
+            DefaultNeedProgressionStrategy,
+        );
+        let mut snapshot = simulation.snapshot();
+        snapshot.needs = PetNeeds::new(20.0, 80.0, 5.0, 80.0);
+        snapshot.behavior = PetBehavior::CriticalNeed;
+        assert!(snapshot.needs.happiness() <= 5.0);
+        assert!(snapshot.needs.hunger() < 70.0);
+        assert!(snapshot.needs.energy() > 30.0);
+        assert!(snapshot.needs.cleanliness() > 30.0);
 
-        let decision = WorkDecision::Blocked {
-            reason_code: WorkReasonCode::CriticalHappiness,
-            required_action: RequiredAction::Pet {
-                minimum_happiness_recovery: 20.0,
-            },
-        };
+        let simulation = PetSimulation::from_snapshot(
+            snapshot,
+            FakeClock::new(start),
+            DefaultNeedProgressionStrategy,
+        )
+        .expect("severe-happiness fixture should restore");
+        let classification = CommandClassification::new(
+            CommandCategory::Development,
+            CommandPurpose::SafeDevelopment,
+        );
+        let decision = WorkPermissionPolicy::evaluate(
+            simulation.pet(),
+            &classification,
+            &PetSettings::new(EnforcementMode::Strict),
+        );
+        assert!(decision.is_blocked());
+        assert_eq!(
+            decision.reason_code(),
+            Some(WorkReasonCode::CriticalHappiness)
+        );
         assert_eq!(
             super::denial_reason(decision).as_deref(),
             Some(
