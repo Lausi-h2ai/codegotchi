@@ -232,7 +232,7 @@ fn wait_for_metadata(directory: &Path) -> PathBuf {
 
 fn wait_for_profile(directory: &Path) -> PathBuf {
     let mut result = None;
-    wait_until("temporary Codex profile", || {
+    wait_until("persistent Codex profile", || {
         result = fs::read_dir(directory).ok().and_then(|entries| {
             entries.flatten().map(|entry| entry.path()).find(|path| {
                 path.file_name()
@@ -780,16 +780,20 @@ async fn launcher_vertical_flow_persists_and_replays_across_restart() {
     socket.close(None).await.expect("WebSocket closes");
     let first_profile_path = first.profile_path.clone();
     first.stop();
-    assert!(!first_profile_path.exists());
+    assert!(first_profile_path.exists());
     assert!(
         !owned_session_files(&environment.runtime_directory())
             .iter()
             .any(|path| path.exists())
     );
-    assert!(owned_profile_files(&environment.codex_home).is_empty());
+    assert_eq!(
+        owned_profile_files(&environment.codex_home),
+        vec![first_profile_path.clone()]
+    );
     assert!(environment.state_database().exists());
 
     let second = launch(&environment, "second");
+    assert_eq!(second.profile_path, first_profile_path);
     let restarted_state = request(
         &second.metadata.loopback_base_url,
         "GET",
@@ -827,6 +831,7 @@ async fn launcher_vertical_flow_persists_and_replays_across_restart() {
         final_state.body["processedCareIds"]
     );
     second.stop();
+    assert!(first_profile_path.exists());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

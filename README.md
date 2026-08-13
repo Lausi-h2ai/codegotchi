@@ -30,13 +30,24 @@ Codex may pause for its normal `/hooks` trust review. Choose the review flow,
 inspect the generated CodeGotchi command hooks, and select **Trust all and
 continue**; CodeGotchi does not bypass or silently approve that trust flow.
 The profile is additive. Existing Codex configuration, hooks, authentication,
-and credentials are preserved and are not copied or overwritten. Because each
-run currently owns a uniquely named temporary profile, Codex 0.146.0 may ask
-for this review again on a later launch.
+and credentials are preserved and are not copied or overwritten. The rendered
+hook bytes determine a stable mode-0600 profile name, so approving the
+unchanged hooks once is enough for later launches to reuse that exact profile.
+Codex asks for review again only when the rendered hook configuration changes
+(for example, when the installed CodeGotchi executable path changes).
+
+Codex CLI 0.147 may persist that approval by adding its managed
+`approvals_reviewer = "auto_review"` setting and `[hooks.state]` trusted-hash
+entries to the profile. CodeGotchi accepts that one observed Codex-managed
+extension only when every generated hook block and command remains byte-for-byte
+unchanged, all six state keys identify this exact profile and handler indexes,
+and each hash matches Codex's normalized command-hook identity. Extra config,
+foreign or malformed trust entries, altered commands, and unsafe paths remain
+rejected without rewriting the file.
 
 Trailing Codex arguments are preserved in order. CodeGotchi rejects an
 explicit `-p`, attached short profile form, `--profile`, or `--profile=...`
-because it must inject its own temporary additive profile.
+because it must inject its own persistent additive profile.
 
 ## State, runtime files, and cleanup
 
@@ -50,15 +61,22 @@ new pets receive 50 kibble, 25 treats, and 25 fruit once.
 Short-lived metadata is stored in the mode-0700
 `$XDG_RUNTIME_DIR/codegotchi/` directory, falling back to the CodeGotchi state
 directory. Its mode-0600 `session-<uuid>.json` contains the loopback URL,
-owner PID, repository root, runtime ID, and local bearer token. The unique
-mode-0600 additive profile is created in `$CODEX_HOME`, or `$HOME/.codex`, as
-`codegotchi-<uuid>.config.toml`.
+owner PID, repository root, runtime ID, and local bearer token. The
+content-addressed mode-0600 additive profile is created or reused in
+`$CODEX_HOME`, or `$HOME/.codex`, as `codegotchi-<uuid>.config.toml`. Profiles
+are persistent: unchanged hook bytes reuse the existing file, while changed
+bytes receive a new profile identity. Existing profile collisions, altered
+contents, unsafe permissions, symlinks, and non-files are rejected without
+overwriting the path. An approved Codex 0.147 profile is the only accepted
+content extension; it is preserved in place and is never rewritten by
+CodeGotchi.
 
 Normal exit, child spawn/wait failure, and forwarded termination remove only
-the metadata and profile owned by that run. SQLite state remains. After an
-abnormal launcher death, a later run removes only stale valid CodeGotchi
-session metadata whose owner is no longer active; hard-killed temporary
-profiles are not yet reclaimed automatically.
+the unique runtime metadata owned by that run and shut down its loopback
+server. SQLite state and persistent profiles remain. After an abnormal
+launcher death, a later run removes only stale valid CodeGotchi session
+metadata whose owner is no longer active; persistent profiles are never
+silently reclaimed.
 
 ## Strict mode and guarded demos
 

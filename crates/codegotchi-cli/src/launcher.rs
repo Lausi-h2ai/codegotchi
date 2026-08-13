@@ -20,7 +20,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use crate::TemporaryCodexProfile;
+use crate::PersistentCodexProfile;
 use crate::cli::CODEGOTCHI_ENABLE_DEBUG;
 use crate::persistence::SqliteStore;
 use crate::protocol::RuntimeMetadataV1;
@@ -33,7 +33,6 @@ const DATABASE_FILE_NAME: &str = "state.sqlite";
 const RUNTIME_DIRECTORY_NAME: &str = "codegotchi";
 const SESSION_FILE_PREFIX: &str = "session-";
 const SESSION_FILE_SUFFIX: &str = ".json";
-const PROFILE_PREFIX: &str = "codegotchi-";
 const REPOSITORY_ID_NAMESPACE: &str = "codegotchi-repository-v1";
 
 #[derive(Clone, Copy, Debug)]
@@ -276,11 +275,9 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
         return Ok(signal.exit_status());
     }
 
-    let profile_name = format!("{PROFILE_PREFIX}{}", Uuid::new_v4().simple());
     let hook_command = format!("{} hook", shell_quote(&validated.codegotchi_executable));
-    let mut profile = match TemporaryCodexProfile::create(
+    let profile = match PersistentCodexProfile::ensure(
         &paths.codex_home,
-        profile_name,
         owned_metadata.path(),
         &hook_command,
     ) {
@@ -289,12 +286,11 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
             let _ = owned_metadata.cleanup();
             let _ = server.shutdown().await;
             return Err(LauncherError::message(format!(
-                "could not create the temporary Codex profile: {error}"
+                "could not ensure the persistent Codex profile: {error}"
             )));
         }
     };
     if let Some(signal) = signals.try_setup_termination().await {
-        let _ = profile.cleanup();
         let _ = owned_metadata.cleanup();
         let _ = server.shutdown().await;
         return Ok(signal.exit_status());
@@ -306,13 +302,23 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
     let browser_wait = launch_browser(&ui_url);
     if let Some(signal) = signals.try_setup_termination().await {
         wait_for_browser(browser_wait).await;
-        let _ = profile.cleanup();
         let _ = owned_metadata.cleanup();
         let _ = server.shutdown().await;
         return Ok(signal.exit_status());
     }
 
-    let mut child_command = profile.codex_command(&validated.codex_path);
+    let profile_guard = match profile.acquire_spawn_guard() {
+        Ok(guard) => guard,
+        Err(error) => {
+            wait_for_browser(browser_wait).await;
+            let _ = owned_metadata.cleanup();
+            let _ = server.shutdown().await;
+            return Err(LauncherError::message(format!(
+                "could not acquire the persistent Codex profile before spawn: {error}"
+            )));
+        }
+    };
+    let mut child_command = profile_guard.codex_command(&validated.codex_path);
     child_command
         .args(&validated.trailing_arguments)
         .stdin(Stdio::inherit())
@@ -324,14 +330,23 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
     if terminal_handoff.is_some() {
         child_command.process_group(0);
     }
-    let child = match child_command.spawn() {
+    if let Err(error) = profile_guard.verify_before_spawn() {
+        wait_for_browser(browser_wait).await;
+        let _ = owned_metadata.cleanup();
+        let _ = server.shutdown().await;
+        return Err(LauncherError::message(format!(
+            "could not verify the persistent Codex profile before spawn: {error}"
+        )));
+    }
+    let child_result = profile_guard.spawn(&mut child_command);
+    drop(profile_guard);
+    drop(profile);
+    let child = match child_result {
         Ok(child) => child,
         Err(error) => {
             wait_for_browser(browser_wait).await;
             let _ = owned_metadata.cleanup();
             let _ = server.shutdown().await;
-            let _ = profile.cleanup();
-            drop(profile);
             return Err(LauncherError::message(format!(
                 "could not spawn Codex at {}: {error}",
                 validated.codex_path.display()
@@ -344,19 +359,12 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
     #[cfg(not(unix))]
     let wait_result = wait_for_child(child, signals).await;
     let metadata_cleanup = owned_metadata.cleanup();
-    let profile_cleanup = profile.cleanup();
     let server_cleanup = server.shutdown().await;
     wait_for_browser(browser_wait).await;
-    drop(profile);
 
     if let Err(error) = metadata_cleanup {
         return Err(LauncherError::message(format!(
             "Codex exited, but CodeGotchi could not remove owned metadata: {error}"
-        )));
-    }
-    if let Err(error) = profile_cleanup {
-        return Err(LauncherError::message(format!(
-            "Codex exited, but CodeGotchi could not remove the temporary profile: {error}"
         )));
     }
     if let Err(error) = server_cleanup {

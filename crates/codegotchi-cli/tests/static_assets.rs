@@ -352,7 +352,7 @@ fn installed_binary_serves_assets_without_repository_runtime_dependencies() {
                 .starts_with("session-")
         })
     );
-    assert!(!codex_home.read_dir().unwrap().any(|entry| {
+    assert!(codex_home.read_dir().unwrap().any(|entry| {
         entry
             .unwrap()
             .file_name()

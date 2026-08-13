@@ -17,7 +17,7 @@ pub use codex_hook::{
     send_debug_neglect_to_runtime, send_event_to_runtime, send_mode_to_runtime, translate_hook,
     translate_hook_json,
 };
-pub use codex_profile::TemporaryCodexProfile;
+pub use codex_profile::{PersistentCodexProfile, PersistentCodexProfileGuard};
 pub use launcher::{LauncherError, ValidatedLaunch};
 pub use persistence::{PersistenceError, SQLITE_SCHEMA_VERSION, SqliteStore};
 pub use protocol::{

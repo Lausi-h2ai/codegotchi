@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     seed_fixture(&runtime)?;
-    let server = RunningServer::start(runtime, TOKEN).await?;
+    let server = RunningServer::start_with_debug(runtime, TOKEN).await?;
     println!(
         "TASK3_FIXTURE_READY {}",
         serde_json::json!({

@@ -4,13 +4,34 @@ Date: 2026-08-05
 Branch: codex-first-mvp  
 Scope: installed Codex hook/profile/runtime metadata seam only
 
+## Current lifecycle amendment (2026-08-12)
+
+The original report below recorded the first disposable-spike lifecycle. The
+current implementation uses `PersistentCodexProfile::ensure`: complete hook
+bytes receive a UUID-v5 identity, profiles are published through a private
+mode-0600 temporary file with atomic no-replace publication, and exact safe
+files are reused without rewriting. Profiles remain after launcher exit for
+approve-once trust; only per-run runtime metadata and the loopback server are
+cleaned. The launcher acquires a cooperative profile-directory guard,
+revalidates immediately before command spawn, and holds that guard through
+command construction and child spawn. The guard cannot constrain privileged or
+non-cooperating writers because Codex opens a profile by name rather than an
+inherited file descriptor.
+
+Current focused evidence is `cargo test -p codegotchi-cli --test
+profile_lifecycle` (11 passed), `cargo test -p codegotchi-cli --test
+process_wrapper` (16 passed), and the workspace suite (all tests passed with
+the authenticated installed-Codex gate intentionally ignored). Historical
+temporary-profile and profile-cleanup wording in the sections below describes
+the pre-amendment spike only.
+
 ## Outcome
 
 Task 1 is implemented. The new codegotchi-cli crate provides the working
 codegotchi hook command, bounded tolerant hook input handling, privacy-limited
 domain-event translation, deterministic event IDs, authenticated low-timeout
 loopback delivery, Strict denial serialization, versioned runtime metadata,
-and an additive mode-0600 temporary Codex profile. No backend, server,
+and an additive mode-0600 persistent Codex profile. No backend, server,
 persistence, UI, or launcher code was added.
 
 The installed Codex spike succeeded through the real trust flow. It observed
@@ -173,8 +194,8 @@ Installed facts recorded before implementation and confirmed by the spike:
   hookSpecificOutput.hookEventName, permissionDecision, and
   permissionDecisionReason fields.
 
-The production hook command was run with a temporary profile in the existing
-/home/laurent/.codex directory, a temporary mode-0600 runtime metadata file,
+The initial production hook spike was run with a disposable generated profile
+and a temporary mode-0600 runtime metadata file,
 a loopback capture receiver, and a throwaway git repository. The first
 untrusted run produced no callbacks. The real run then used Codex's trust
 prompts exactly as follows:
@@ -229,12 +250,11 @@ used a synthetic existing SessionStart hook and verified that its file
 checksum stayed unchanged while the CodeGotchi profile contained all six
 event families.
 
-Cleanup verified that the generated profile files under
-/home/laurent/.codex/codegotchi-task-1-spike-*, generated runtime metadata,
-temporary receiver data, and throwaway repository were removed. No user
-configuration, credentials, or unrelated files were removed. The only
-remaining /tmp files from the working session are the red-phase logs named
-above; they are outside the repository and contain compiler diagnostics only.
+Those initial-spike cleanup observations covered only disposable spike paths;
+the current launcher deliberately retains its persistent profile while
+removing owned runtime metadata, temporary receiver data, and throwaway test
+repositories. No user configuration, credentials, or unrelated files are
+removed.
 
 ## Implementation files
 
@@ -250,8 +270,8 @@ Added under crates/codegotchi-cli:
 - src/protocol.rs: tolerant hook input, runtime metadata, event envelope,
   response envelope, and exact hook output serialization.
 - src/runtime_metadata.rs: bounded mode-0600 metadata write/read/remove.
-- src/codex_profile.rs: additive profile rendering, child environment,
-  conflict refusal, and owned-file cleanup.
+- src/codex_profile.rs: additive profile rendering, UUID-v5 identity, safe
+  persistent publication/reuse, child environment, and spawn-boundary guard.
 - src/classify.rs: privacy-preserving command classification and activity
   mapping.
 - src/codex_hook.rs: translation, deterministic IDs, loopback-only HTTP,
@@ -280,11 +300,13 @@ Added documentation:
   from AgentEvent and EventIngestRequest.
 - [x] Hook stdin and HTTP response bodies are bounded; loopback HTTP has a
   250ms connect/read/write timeout.
-- [x] Existing Codex config is not copied or modified; profile creation uses
-  create-new mode 0600 and refuses collisions.
+- [x] Existing Codex config is not copied or modified; profile publication uses
+  a private temporary mode-0600 file, atomic no-replace publication, exact
+  reuse, and refuses unsafe collisions.
 - [x] Hook trust was exercised through Codex's actual review flow; no trust
   bypass was used.
-- [x] Cleanup targets only generated profile/metadata/spike paths.
+- [x] Cleanup targets only owned runtime metadata and disposable spike paths;
+  persistent profiles remain available for later exact reuse.
 - [x] No backend/server/persistence/UI/launcher work was added.
 - [x] Rust format, strict Clippy, workspace tests, focused tests, and diff
   whitespace checks pass.

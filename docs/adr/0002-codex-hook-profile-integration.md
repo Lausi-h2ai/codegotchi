@@ -1,19 +1,56 @@
 # ADR 0002: Codex hook/profile integration
 
-Status: Accepted for Task 1  
+Status: Accepted for Task 1; persistent profile lifecycle and Codex 0.147 trust amendment
 Date: 2026-08-05
 
 ## Decision
 
-Task 1 uses an additive, short-lived Codex profile and a short-lived
+Task 1 uses an additive, persistent Codex profile and a short-lived
 `codegotchi hook` subprocess. The `codegotchi-cli` package explicitly publishes
 the installed binary as `codegotchi`, so the generated command names a binary
 provided by `cargo install`. The profile is created under the existing
-`CODEX_HOME` as `$CODEX_HOME/<profile>.config.toml`, is opened with mode
-`0600` and create-new semantics, and is removed only by the owner that created
-it. The base Codex configuration is neither copied nor modified. The child
-Codex process receives the generated runtime metadata path in
-`CODEGOTCHI_SESSION_FILE` and the profile name through `--profile`.
+`CODEX_HOME` as `$CODEX_HOME/<profile>.config.toml`. The complete rendered
+hook bytes are hashed with UUID-v5 to derive the stable profile name. The
+profile is created with mode `0600`, or reused only when an existing path is a
+regular mode-0600 file with byte-identical contents. Altered contents, unsafe
+permissions, symlinks, directories, non-files, and unreadable paths are
+rejected without overwriting them. New profiles are fully written and synced
+through a private uniquely named temporary file, then atomically published
+with no-replace semantics in the same directory. The base Codex configuration
+is neither copied nor modified. Immediately before launching Codex, the
+launcher revalidates the profile and holds a cooperative directory guard
+through command construction and child spawn. The child Codex process
+receives the generated runtime metadata path in `CODEGOTCHI_SESSION_FILE` and
+the profile name through `--profile`.
+
+The guard serializes CodeGotchi's own profile writers only. It cannot protect
+against privileged or non-cooperating writers, and it cannot bind Codex to an
+open file descriptor because Codex accepts a profile name rather than an fd.
+
+The launcher removes only unique runtime metadata and shuts down its loopback
+server on normal exit, spawn/wait failure, or forwarded termination. The
+persistent profile remains for approve-once hook trust and later exact reuse;
+changed rendered hook bytes receive a new profile identity and leave older
+profiles untouched.
+
+### Codex 0.147 managed trust metadata
+
+Codex CLI 0.147 persists normal hook approval by mutating the selected profile.
+The observed form is a leading
+`approvals_reviewer = "auto_review"` line, the exact pristine CodeGotchi
+rendered bytes, then `[hooks.state]` entries. Each entry is keyed by the exact
+profile path plus one of `pre_tool_use`, `post_tool_use`, `session_start`,
+`session_end`, `user_prompt_submit`, or `stop`, followed by `:0:0`, and contains
+only `trusted_hash`. CodeGotchi accepts that extension only when all six keys
+are present exactly once, no other table or field is present, every expected
+hook definition and command byte is unchanged, and every hash equals Codex's
+normalized identity for that event, command, timeout (`600`, or `1` for
+`SessionEnd`), and `async = false`. The state-entry order is not significant;
+Codex writes it as a map. A valid approved file is preserved byte-for-byte and
+is never rewritten. The launcher uses the same validator during
+spawn-boundary revalidation. Any altered command, extra config, foreign or
+malformed state entry, unsafe permission, symlink, or non-file collision is
+still rejected before Codex starts.
 
 The profile enables the installed hooks feature and registers one command
 handler for each supported event family:
@@ -165,52 +202,58 @@ The test never uses `--dangerously-bypass-hook-trust`; it inherits the
 operator's terminal so the normal repository trust and “Hooks need review”
 prompts are answered manually. It uses a temporary Codex home and an API key
 environment variable, never the user's base config or credentials. On
-success it verifies the disposable base config checksum, removes the owned
-profile and runtime file by exact path, removes the marker/hook, and removes
-the exact temporary root.
+success it verifies the disposable base config checksum, confirms the
+persistent profile remains byte-identical, removes the runtime file by exact
+path, removes the marker/hook, and removes the exact temporary root.
 
-The throwaway profile, runtime metadata, temporary receiver state, and
-temporary repository were removed. Cleanup used exact generated paths only;
-no user config, credentials, or unrelated files were removed.
+The persistent profile remains until its disposable Codex home is removed with
+the test root. Runtime metadata, temporary receiver state, and the temporary
+repository are removed. Cleanup uses exact generated paths only; no user
+config, credentials, or unrelated files are removed.
 
-## Final focused correction evidence
+## Focused correction evidence
 
-The second and final correction was TDD'd against the two remaining review
-blockers. The lifecycle RED run showed the new start-source distinction
-assertion failing because all ID-less `SessionStart` payloads still produced
+The hook/runtime correction was TDD'd against the review blockers. The
+lifecycle RED run showed the new start-source distinction assertion failing
+because all ID-less `SessionStart` payloads still produced
 `71c74d99-b7d4-54b4-9c1b-cf5f5cd99a0c`. The receiver RED run failed to compile
 with `EventIngestRequest: serde::Deserialize<'de>` not implemented. After the
 implementation, the focused GREEN commands passed:
 
 ```text
 cargo test -p codegotchi-cli --test hook_fixtures
-test result: ok. 11 passed; 0 failed; 0 ignored
+test result: ok. 12 passed; 0 failed; 0 ignored
 
 cargo test -p codegotchi-cli --test installed_codex
 test result: ok. 1 passed; 0 failed; 1 ignored
 
 cargo test -p codegotchi-cli --test profile_lifecycle
-test result: ok. 3 passed; 0 failed; 0 ignored
+test result: ok. 11 passed; 0 failed; 0 ignored
 ```
 
-The ignored real-Codex gate was not run to completion in this environment:
-`OPENAI_API_KEY` and `CODEX_API_KEY` were unavailable, so it stops before
-creating its temporary home and reports `run the manual gate with
-OPENAI_API_KEY or CODEX_API_KEY set`. The gate remains intentionally manual
-because it requires paid/authenticated Codex access and interactive normal
-trust approval. Its exact command is:
+The automated installed-Codex test currently reports one routine test passed
+and one intentionally ignored manual gate. On 2026-08-13, the ignored gate was
+run successfully against authenticated `codex-cli 0.147.0` by copying the
+private auth file and already-approved persistent profile into a disposable
+Codex home. The real client created the requested marker, attempted exactly
+`cargo --version`, and received the expected strict `PreToolUse` denial before
+the command executed. The gate also verified that the source auth/profile
+bytes and source-home entries were unchanged. It remains intentionally manual
+because it requires authenticated Codex access and normal hook trust. Its exact
+command is:
 
 ```text
-OPENAI_API_KEY="$OPENAI_API_KEY" cargo test -p codegotchi-cli --test installed_codex -- --ignored --nocapture
+CODEGOTCHI_AUTH_FILE=/home/laurent/.codex/auth.json cargo test -p codegotchi-cli --test installed_codex installed_codex_real_trust_and_coexistence_gate -- --ignored --nocapture
 ```
 
 ## Consequences and follow-up
 
 This gives later tasks a tested event and permission-response seam without
-introducing a backend or persistence implementation into Task 1. The future
-runtime must generate a unique profile name, write and remove the mode-0600
-metadata file, bind the receiver only to loopback, and pass the user's normal
-Codex arguments without allowing a conflicting user profile override.
+introducing a backend or persistence implementation into Task 1. The runtime
+derives a stable profile identity from exact rendered hook bytes, safely
+reuses only verified mode-0600 files, writes and removes the mode-0600 metadata
+file, binds the receiver only to loopback, and passes the user's normal Codex
+arguments without allowing a conflicting user profile override.
 
 The exact manual command is:
 

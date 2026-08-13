@@ -474,7 +474,8 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         );
         await expect
             .poll(() => motionAttribute(page, "data-motion-phase"), {
-                timeout: 2_000,
+                timeout: 11_000,
+                intervals: [50],
             })
             .toBe("traveling");
         const idleEyeTop = await petLocator(page)

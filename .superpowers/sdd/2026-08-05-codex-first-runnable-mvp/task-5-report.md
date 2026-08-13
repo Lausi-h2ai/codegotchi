@@ -1,4 +1,4 @@
-# Task 5 report — exact launcher, installed UI, and lifecycle cleanup
+# Task 5 report — exact launcher, installed UI, and runtime lifecycle cleanup
 
 Date: 2026-08-05
 
@@ -8,9 +8,10 @@ The Task 5 vertical increment is implemented without a commit. The installed
 `codegotchi` binary accepts the exact launcher shape
 `codegotchi run -- codex [ordinary Codex arguments...]`, starts the
 authoritative loopback runtime first, serves the committed Task 3 bundle from
-compile-time embedded bytes, launches Codex with an additive temporary hook
+compile-time embedded bytes, launches Codex with an additive persistent hook
 profile, forwards terminal signals while waiting, returns Codex's numeric exit
-status, and cleans only the metadata/profile owned by that run.
+status, and cleans only the runtime metadata owned by that run. The
+content-addressed profile remains for approve-once trust and exact reuse.
 
 This report also records the focused correction pass for all seven MVP-blocking
 findings in the independent review committed at `6d453db`.
@@ -79,9 +80,10 @@ It runs the installed executable from a directory outside the repository with
 `CODEGOTCHI_BROWSER=none`, holds the fake Codex alive, parses the printed
 loopback URL, fetches `/` and a referenced hashed asset from the installed
 binary, and checks status, exact bytes, and MIME type before releasing the
-child. It then proves the owned session metadata and additive profile are
-gone, and verifies the fake Codex parent is the installed launcher itself
-rather than a second UI process. The test also confirms the install root
+child. It then proves the owned session metadata is gone while the additive
+profile remains byte-identical, and verifies the fake Codex parent is the
+installed launcher itself rather than a second UI process. The test also
+confirms the install root
 contains neither `web-dist` nor pnpm/runtime frontend dependencies. The
 production-server test verifies `/`,
 every referenced hashed asset and MIME type, SPA fallback, typed unknown API
@@ -111,10 +113,11 @@ every referenced hashed asset and MIME type, SPA fallback, typed unknown API
   nonfatal.
 - Existing `CODEX_HOME/config.toml` and auth/credential files retain their
   checksums. Only the unique additive `codegotchi-<uuid>.config.toml` is
-  created and later removed.
+  created or reused, and it remains persistent after the run.
 - Normal exit, spawn/wait failure, and forwarded termination clean the owned
-  metadata/profile while preserving SQLite state. The next run removes only
-  stale valid CodeGotchi session metadata; unrelated and active files remain.
+  runtime metadata while preserving the persistent profile and SQLite state.
+  The next run removes only stale valid CodeGotchi session metadata; unrelated
+  and active files remain.
 - The launcher uses the canonical installed executable in the hook command,
   inherits terminal streams directly without a PTY, and keeps the current
   working directory and ordinary Codex arguments intact.
@@ -170,7 +173,7 @@ and the previous thread signal mask is restored exactly. Direct signals to the
 background wrapper are forwarded once; terminal-generated/group signals reach
 the foreground Codex group directly once. Non-TTY launches retain the prior
 forwarding path. A failed handoff terminates and reaps the unusable child before
-normal profile/runtime/server cleanup.
+normal runtime-metadata/server cleanup while retaining the persistent profile.
 
 TDD and mutation evidence:
 

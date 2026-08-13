@@ -11,7 +11,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use codegotchi_cli::runtime_metadata::{remove_metadata, write_metadata};
-use codegotchi_cli::{EventIngestRequest, RuntimeMetadataV1, TemporaryCodexProfile};
+use codegotchi_cli::{EventIngestRequest, PersistentCodexProfile, RuntimeMetadataV1};
 use codegotchi_domain::{AgentEvent, AgentEventKind, EventMetadata, EventSource};
 use uuid::Uuid;
 
@@ -70,8 +70,8 @@ fn should_deny_request(body: &[u8]) -> bool {
 /// This is an intentionally manual gate. It needs a real authenticated Codex
 /// session and leaves trust approval to the operator instead of bypassing it.
 #[test]
-#[ignore = "manual installed Codex 0.146.0 trust/coexistence gate; run with --ignored --nocapture"]
-fn installed_codex_0146_real_trust_and_coexistence_gate() {
+#[ignore = "manual installed Codex trust/coexistence gate; run with --ignored --nocapture"]
+fn installed_codex_real_trust_and_coexistence_gate() {
     let codex_program =
         env::var_os("CODEGOTCHI_CODEX_BIN").unwrap_or_else(|| std::ffi::OsString::from("codex"));
     let version = Command::new(&codex_program)
@@ -81,18 +81,28 @@ fn installed_codex_0146_real_trust_and_coexistence_gate() {
     assert!(version.status.success());
     let version_text = String::from_utf8_lossy(&version.stdout);
     assert!(
-        version_text.contains("codex-cli 0.146.0"),
-        "manual gate requires Codex 0.146.0, got {version_text}"
+        version_text.contains("codex-cli 0.146.0") || version_text.contains("codex-cli 0.147.0"),
+        "manual gate requires a verified Codex CLI version (0.146.0 or 0.147.0), got {version_text}"
     );
 
-    let api_key = env::var_os("OPENAI_API_KEY")
-        .or_else(|| env::var_os("CODEX_API_KEY"))
-        .expect("run the manual gate with OPENAI_API_KEY or CODEX_API_KEY set");
+    let api_key = env::var_os("OPENAI_API_KEY").or_else(|| env::var_os("CODEX_API_KEY"));
+    let auth_file = api_key
+        .is_none()
+        .then(|| env::var_os("CODEGOTCHI_AUTH_FILE"))
+        .flatten();
+    let authenticated_mode = auth_file.is_some();
+    assert!(
+        api_key.is_some() || auth_file.is_some(),
+        "run the manual gate with OPENAI_API_KEY, CODEX_API_KEY, or CODEGOTCHI_AUTH_FILE set"
+    );
 
     let temporary = TestDirectory::new("codegotchi-installed-codex");
     let home = temporary.path().join("codex-home");
     let repository = temporary.path().join("repository");
     fs::create_dir_all(&home).unwrap();
+    let mut home_permissions = fs::metadata(&home).unwrap().permissions();
+    home_permissions.set_mode(0o700);
+    fs::set_permissions(&home, home_permissions).unwrap();
     fs::create_dir_all(&repository).unwrap();
     assert!(
         Command::new("git")
@@ -119,6 +129,53 @@ fn installed_codex_0146_real_trust_and_coexistence_gate() {
         !credentials.exists(),
         "the manual gate must not create credentials"
     );
+    let authenticated_source = auth_file.as_ref().map(|source| {
+        let source = PathBuf::from(source);
+        let metadata = fs::symlink_metadata(&source)
+            .expect("CODEGOTCHI_AUTH_FILE must be readable without following a link");
+        assert!(
+            metadata.file_type().is_file(),
+            "CODEGOTCHI_AUTH_FILE must be a regular, non-symlink file"
+        );
+        assert_eq!(
+            metadata.permissions().mode() & 0o077,
+            0,
+            "CODEGOTCHI_AUTH_FILE must not be accessible by group or others"
+        );
+        let bytes = fs::read(&source).expect("CODEGOTCHI_AUTH_FILE must be readable");
+        fs::copy(&source, &credentials).expect("could not copy authenticated Codex credentials");
+        let mut permissions = fs::metadata(&credentials).unwrap().permissions();
+        permissions.set_mode(0o600);
+        fs::set_permissions(&credentials, permissions).unwrap();
+        (source, bytes)
+    });
+
+    let source_home_entries = authenticated_source
+        .as_ref()
+        .map(|(source, _)| directory_entries(source.parent().expect("auth file has a parent")));
+    let (hook_command, source_profile) = if let Some((source, _)) = &authenticated_source {
+        let source_home = source.parent().expect("auth file has a parent");
+        let (source_profile_path, source_profile_bytes, hook_command) =
+            find_approved_codegotchi_profile(source_home);
+        let translated_profile = replace_bytes(
+            &source_profile_bytes,
+            source_profile_path.to_string_lossy().as_bytes(),
+            home.join(source_profile_path.file_name().unwrap())
+                .to_string_lossy()
+                .as_bytes(),
+        );
+        let target_profile = home.join(source_profile_path.file_name().unwrap());
+        fs::write(&target_profile, translated_profile).unwrap();
+        let mut permissions = fs::metadata(&target_profile).unwrap().permissions();
+        permissions.set_mode(0o600);
+        fs::set_permissions(&target_profile, permissions).unwrap();
+        (
+            hook_command,
+            Some((source_profile_path, source_profile_bytes)),
+        )
+    } else {
+        ("codegotchi hook".to_owned(), None)
+    };
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -142,13 +199,7 @@ fn installed_codex_0146_real_trust_and_coexistence_gate() {
         binary.file_name().and_then(|name| name.to_str()),
         Some("codegotchi")
     );
-    let mut profile = TemporaryCodexProfile::create(
-        &home,
-        "codegotchi-manual-installed-codex",
-        &metadata_path,
-        "codegotchi hook",
-    )
-    .unwrap();
+    let profile = PersistentCodexProfile::ensure(&home, &metadata_path, &hook_command).unwrap();
     let profile_path = profile.config_path().to_path_buf();
 
     let direct_denial = invoke_hook(
@@ -181,15 +232,19 @@ fn installed_codex_0146_real_trust_and_coexistence_gate() {
             "exec",
             "--ephemeral",
             "--json",
+            "--sandbox",
+            "workspace-write",
             "--cd",
         ])
         .arg(&repository)
         .arg("Create MANUAL_CODEGOTCHI_MARKER.txt with apply_patch, then run exactly cargo --version. Stop when the cargo command is denied by the hook.")
         .env("PATH", path)
-        .env("OPENAI_API_KEY", &api_key)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
+    if let Some(api_key) = &api_key {
+        codex.env("OPENAI_API_KEY", api_key);
+    }
     assert!(
         codex
             .get_args()
@@ -216,28 +271,188 @@ fn installed_codex_0146_real_trust_and_coexistence_gate() {
     );
     drop(captured);
 
-    let existing_hook_output = fs::read_to_string(&marker).unwrap();
-    assert!(!existing_hook_output.is_empty());
-    assert!(
-        existing_hook_output
-            .lines()
-            .all(|line| line == "pre-existing-hook-ran")
-    );
-    assert_eq!(fs::read(&base_config).unwrap(), base_before);
-    assert!(!credentials.exists());
+    if api_key.is_some() {
+        let existing_hook_output = fs::read_to_string(&marker).unwrap();
+        assert!(!existing_hook_output.is_empty());
+        assert!(
+            existing_hook_output
+                .lines()
+                .all(|line| line == "pre-existing-hook-ran")
+        );
+    }
+    assert_codex_preserved_base_config(&base_before, &base_config, &repository);
+    if let Some((source, before)) = authenticated_source {
+        assert_eq!(
+            fs::read(source).expect("authenticated Codex credentials must remain readable"),
+            before,
+            "the manual gate must not modify the authenticated Codex credentials"
+        );
+    }
+    if let Some((source, before)) = source_profile {
+        assert_eq!(
+            fs::read(&source).expect("the approved source profile must remain readable"),
+            before,
+            "the manual gate must not modify the approved source profile"
+        );
+    }
+    if let (Some(source), Some(before)) = (
+        auth_file
+            .as_ref()
+            .and_then(|path| PathBuf::from(path).parent().map(Path::to_path_buf)),
+        source_home_entries,
+    ) {
+        assert_eq!(
+            directory_entries(&source),
+            before,
+            "the authenticated source home must not gain or lose unrelated files"
+        );
+    }
+    assert_eq!(credentials.exists(), authenticated_mode);
 
-    profile.cleanup().unwrap();
+    assert!(profile_path.exists());
     remove_metadata(&metadata_path).unwrap();
-    assert!(!profile_path.exists());
     assert!(!metadata_path.exists());
 
     fs::remove_file(&existing_hook).unwrap();
-    fs::remove_file(&marker).unwrap();
+    if marker.exists() {
+        fs::remove_file(&marker).unwrap();
+    }
     fs::remove_file(&fake_cargo).unwrap();
     fs::remove_dir(&fake_bin).unwrap();
     fs::remove_file(&base_config).unwrap();
     fs::remove_dir_all(temporary.path()).unwrap();
     assert!(!temporary.path().exists());
+}
+
+fn find_approved_codegotchi_profile(home: &Path) -> (PathBuf, Vec<u8>, String) {
+    let mut candidates = fs::read_dir(home)
+        .expect("authenticated Codex home must be readable")
+        .map(|entry| {
+            entry
+                .expect("authenticated Codex home entry must be readable")
+                .path()
+        })
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name.starts_with("codegotchi-") && name.ends_with(".config.toml")
+                })
+        })
+        .collect::<Vec<_>>();
+    candidates.sort();
+
+    for path in candidates {
+        let metadata = fs::symlink_metadata(&path).expect("profile metadata must be readable");
+        if !metadata.file_type().is_file() || metadata.permissions().mode() & 0o7777 != 0o600 {
+            continue;
+        }
+        let bytes = fs::read(&path).expect("approved profile must be readable");
+        if !bytes.starts_with(b"approvals_reviewer = \"auto_review\"\n") {
+            continue;
+        }
+        let pristine_start = b"approvals_reviewer = \"auto_review\"\n".len();
+        let Some(state_offset) = bytes[pristine_start..]
+            .windows(b"[hooks.state]\n\n".len())
+            .position(|window| window == b"[hooks.state]\n\n")
+        else {
+            continue;
+        };
+        let pristine = &bytes[pristine_start..pristine_start + state_offset];
+        let expected_name = format!(
+            "codegotchi-{}.config.toml",
+            uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, pristine).simple()
+        );
+        if path.file_name().and_then(|name| name.to_str()) != Some(expected_name.as_str()) {
+            continue;
+        }
+        let commands = String::from_utf8_lossy(&bytes)
+            .lines()
+            .filter_map(|line| line.strip_prefix("command = \"")?.strip_suffix('"'))
+            .filter_map(decode_toml_basic_string)
+            .collect::<Vec<_>>();
+        if commands.len() == 6 && commands.windows(2).all(|pair| pair[0] == pair[1]) {
+            return (path, bytes, commands[0].clone());
+        }
+    }
+    panic!(
+        "CODEGOTCHI_AUTH_FILE's Codex home must contain an approved persistent CodeGotchi profile"
+    );
+}
+
+fn decode_toml_basic_string(value: &str) -> Option<String> {
+    let mut decoded = String::with_capacity(value.len());
+    let mut escaped = false;
+    for character in value.chars() {
+        if escaped {
+            match character {
+                '\\' => decoded.push('\\'),
+                '"' => decoded.push('"'),
+                'n' => decoded.push('\n'),
+                'r' => decoded.push('\r'),
+                't' => decoded.push('\t'),
+                _ => return None,
+            }
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else {
+            decoded.push(character);
+        }
+    }
+    (!escaped).then_some(decoded)
+}
+
+fn replace_bytes(input: &[u8], needle: &[u8], replacement: &[u8]) -> Vec<u8> {
+    assert!(!needle.is_empty());
+    let mut output = Vec::with_capacity(input.len());
+    let mut cursor = 0;
+    while let Some(relative) = input[cursor..]
+        .windows(needle.len())
+        .position(|window| window == needle)
+    {
+        let start = cursor + relative;
+        output.extend_from_slice(&input[cursor..start]);
+        output.extend_from_slice(replacement);
+        cursor = start + needle.len();
+    }
+    output.extend_from_slice(&input[cursor..]);
+    output
+}
+
+fn directory_entries(path: &Path) -> Vec<PathBuf> {
+    let mut entries = fs::read_dir(path)
+        .expect("directory must be readable")
+        .map(|entry| entry.expect("directory entry must be readable").path())
+        .collect::<Vec<_>>();
+    entries.sort();
+    entries
+}
+
+fn assert_codex_preserved_base_config(before: &[u8], path: &Path, repository: &Path) {
+    let after = fs::read(path).expect("the disposable base config must remain readable");
+    if after == before {
+        return;
+    }
+    let trusted_project = format!(
+        "\n[projects.\"{}\"]\ntrust_level = \"trusted\"\n",
+        toml_quote(repository)
+    );
+    let expected_len = before.len() + trusted_project.len();
+    assert_eq!(
+        after.len(),
+        expected_len,
+        "Codex changed unrelated base config bytes (before={}, after={}, suffix={:?})",
+        before.len(),
+        after.len(),
+        &after[before.len().min(after.len())..]
+    );
+    assert_eq!(&after[..before.len()], before);
+    assert_eq!(
+        &after[before.len()..],
+        trusted_project.as_bytes(),
+        "only Codex's observed repository trust metadata may be appended"
+    );
 }
 
 fn write_existing_hook(path: &Path, marker: &Path) {

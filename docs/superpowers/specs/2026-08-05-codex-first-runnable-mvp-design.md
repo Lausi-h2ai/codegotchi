@@ -18,7 +18,7 @@ gates passed against that baseline.
 
 Add one `codegotchi-cli` crate. Its `run` command owns the authoritative domain
 simulation, SQLite connection, loopback Axum server, WebSocket broadcaster,
-runtime metadata, temporary Codex profile, browser launch, and child Codex
+runtime metadata, persistent content-addressed Codex profile, browser launch, and child Codex
 process. Its `hook` command is a short-lived client that translates one Codex
 hook payload and posts a privacy-limited canonical event. The Vite production
 build is copied into the CLI crate and embedded in the installed binary.
@@ -45,10 +45,11 @@ insufficient. It is rejected for this milestone.
 `codegotchi run -- codex [arguments...]` resolves the repository and state
 paths, opens or initializes SQLite, restores a versioned domain snapshot,
 starts an Axum server on an ephemeral `127.0.0.1` port, writes a mode-0600
-runtime metadata file with a random bearer token, creates a unique layered
-Codex profile under the existing `CODEX_HOME`, opens the embedded UI with the
-token in a URL fragment, and runs the real Codex executable with inherited
-terminal streams.
+runtime metadata file with a random bearer token, renders the complete hook
+configuration and ensures its stable UUID-v5 content-addressed layered Codex
+profile under the existing `CODEX_HOME`, opens the embedded UI with the token
+in a URL fragment, and runs the real Codex executable with inherited terminal
+streams.
 
 The child inherits `CODEGOTCHI_SESSION_FILE`. Every configured hook invokes the
 same installed binary as `codegotchi hook`. The hook reads at most one bounded
@@ -97,12 +98,15 @@ the runtime token. Bodies are bounded before JSON parsing. Errors use a stable
 JSON envelope with a machine code and human message. No endpoint executes a
 command supplied over HTTP.
 
-Runtime metadata and temporary profile files use mode 0600. Metadata contains
+Runtime metadata and persistent profile files use mode 0600. Metadata contains
 no prompt or source content. Existing Codex config and credentials are read by
 Codex through normal layering and are never copied or modified. A conflicting
-user `--profile`/`-p` argument fails before runtime startup. Cleanup removes
-only paths created for the current run; stale metadata is ignored when its PID
-is dead.
+user `--profile`/`-p` argument fails before runtime startup. An unchanged
+profile is reused only when its regular-file mode and bytes match exactly;
+altered, unsafe, symlink, directory, non-file, or unreadable collisions are
+rejected without overwrite. Cleanup removes only unique runtime metadata and
+the loopback server for the current run; persistent profiles remain for
+approve-once hook trust, and stale metadata is ignored when its PID is dead.
 
 Raw prompts, complete commands, source text, tool output, and transcript data
 are never persisted. Bash classification retains only executable name,

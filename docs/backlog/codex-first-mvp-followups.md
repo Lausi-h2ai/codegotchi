@@ -9,5 +9,6 @@ These findings are explicitly deferred because they are not required for the man
 - Bind demo/debug enablement to runtime startup configuration or a dedicated session capability; the MVP CLI requires `CODEGOTCHI_ENABLE_DEBUG=1`, but an already-authenticated local caller can currently attest the fixed debug-route guard header directly.
 - Strengthen stale-session PID ownership with process start identity so PID
   reuse cannot retain an obsolete runtime metadata file.
-- Reclaim additive `codegotchi-*.config.toml` profiles after a hard-killed
-  launcher without risking deletion of user-owned Codex configuration.
+- Keep persistent `codegotchi-*.config.toml` profiles content-addressed and
+  user-reviewable; they are intentionally not reclaimed after a hard-killed
+  launcher.

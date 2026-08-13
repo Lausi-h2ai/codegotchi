@@ -41,7 +41,8 @@ the printed URL/runtime metadata match, a complete initial WebSocket snapshot,
 a later authoritative event snapshot, feed/invalid feed, guarded debug poop,
 normal clean, complete-snapshot duplicate event/care no-op behavior, and
 HTTP/SQLite privacy checks after those sensitive fixtures pass through the
-launched hook process. It also checks runtime/profile cleanup and a concrete
+launched hook process. It also checks runtime-metadata cleanup, persistent
+profile retention, and a concrete
 restart projection of identity, needs, inventory, poop, enforcement mode,
 work/digestion points, and replay sets.
 
@@ -74,8 +75,8 @@ after retaining all existing Rust/web gates.
 - `cargo fmt --all -- --check`: PASS.
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings`:
   PASS.
-- `cargo test --workspace`: PASS — 110 passed, 0 failed, 1 intentionally
-  ignored manual installed-Codex test; doc-tests had 0 tests.
+- `cargo test --workspace -- --test-threads=1`: PASS — 138 passed, 0 failed,
+  1 intentionally ignored manual installed-Codex test; doc-tests had 0 tests.
 - `corepack pnpm lint`: PASS.
 - `corepack pnpm test`: PASS — 3 files, 29 tests.
 - `corepack pnpm format:check`: PASS.

@@ -82,7 +82,7 @@ Playwright port, and does not start Vite or add a production mutation route.
 | `cargo test -p codegotchi-cli --test full_vertical_flow -- --nocapture` | PASS — 2 passed, 0 failed |
 | `cargo fmt --all -- --check` | PASS |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | PASS |
-| `cargo test --workspace` | PASS — 111 passed, 0 failed, 1 intentionally ignored manual installed-Codex test; doc-tests 0 |
+| `cargo test --workspace -- --test-threads=1` | PASS — 138 passed, 0 failed, 1 intentionally ignored manual installed-Codex test; doc-tests 0 |
 | `corepack pnpm lint` | PASS |
 | `corepack pnpm test` | PASS — 3 files, 30 tests |
 | `corepack pnpm format:check` | PASS |
@@ -117,7 +117,8 @@ the printed fragment URL against mode-0600 runtime metadata, then:
 - checks concrete persisted pet identity, needs, inventory, poop sequence and
   pending-poop state, enforcement mode, work/digestion points, and event/care
   replay sets after relaunch in the same repository/state home;
-- checks owned session/profile files are removed while SQLite remains; and
+- checks owned session metadata is removed while the content-addressed profile
+  remains reusable and SQLite remains; and
 - checks HTTP and SQLite serialized state immediately after those launched
   sensitive fixtures contain none of their prompt, source content, complete
   command, or complete output values.
@@ -131,7 +132,7 @@ pointing at the stopped server returns `{}` fail-open.
 Existing workspace tests additionally cover all Task 1–5 hook, domain,
 persistence, HTTP, WebSocket, UI, launcher, cleanup, and embedded-asset
 contracts. The one ignored test is the intentionally manual authenticated
-Codex 0.146.0 trust/coexistence gate.
+Codex 0.146.0/0.147.0 trust/coexistence gate.
 
 ## Privacy, trust, and cleanup observations automated here
 
@@ -144,9 +145,24 @@ Codex 0.146.0 trust/coexistence gate.
 - The loopback server binds to `127.0.0.1`; protected state-changing routes
   require the bearer token. Debug mutations additionally require the fixed
   CLI guard and debug header.
-- The temporary profile is additive and owned-file cleanup is checked without
-  touching a base config or credential file. Codex's normal trust review is
-  not automated or bypassed.
+- The persistent profile is additive and exact reuse, collision refusal, and
+  profile persistence are checked without touching a base config or credential
+  file. Codex's normal trust review is not automated or bypassed; approving the
+  unchanged rendered hooks once lets later launches reuse that profile.
+- Codex CLI 0.147 mutates an approved profile with `approvals_reviewer` and
+  `[hooks.state]` trusted hashes. The profile lifecycle regression accepts only
+  the exact observed managed extension: pristine hook bytes remain contiguous,
+  all six profile-scoped `:0:0` state keys and Codex-normalized hashes match,
+  and no extra config or foreign state is allowed. The authenticated installed
+  gate copies the explicit `CODEGOTCHI_AUTH_FILE` and an already-approved
+  profile into a disposable Codex home, translates only the disposable profile
+  path in state keys, and verifies the source credential/profile bytes and
+  directory entries remain unchanged.
+- Profile publication is covered by a private mode-0600 temporary-file test
+  with abandoned-partial isolation and atomic no-replace publication; the
+  launcher revalidates under a cooperative directory guard through child
+  spawn. This guard does not claim protection from privileged or
+  non-cooperating writers because Codex opens profiles by name.
 - The UI token is fragment-only at launch, removed from the visible URL, and
   retained only for same-tab reload in history state.
 
@@ -224,8 +240,9 @@ unknown result text remains neutral. The focused red/green regression test is
   The second exact launch restored the same ID, needs, inventory, zero-poop
   state, poop sequence, Strict mode, and care replay history; its UI was
   Connected after reload and its `/exit` also returned status 0.
-- Runtime metadata and generated `codegotchi-*.config.toml` files were absent
-  after each normal exit; SQLite remained. `~/.codex/config.toml` retained
+- Runtime metadata was absent after each normal exit while the generated
+  `codegotchi-*.config.toml` profile remained persistent and reusable; SQLite
+  remained. `~/.codex/config.toml` retained
   SHA-256 `d1495adcbc6fab6465db015d92f4c5c7f126cc1a0e558537699973ec1f401833`
   and `~/.codex/auth.json` retained
   `947f7529303450e9c394d3605b763a4935a216e317b6b40b460fcff81e434062`.
@@ -244,10 +261,12 @@ hook. The real sessions confirmed normal terminal interaction and exit status.
 - The native browser helper returned status 2 in this WSL2 environment. The
   launcher surfaced the complete usable local URL, and the embedded UI was
   opened from that URL without a development server.
-- Codex 0.146.0 may repeat hook review because every run uses a uniquely named
-  temporary profile. The trust flow remains explicit and is never bypassed.
-- A hard-killed launcher can leave its temporary profile until manual cleanup;
-  stale runtime metadata is reclaimed on a later run.
+- Codex's normal trust flow remains explicit and is never bypassed. Unchanged
+  rendered hooks reuse the same profile after the first approval; changed hook
+  bytes produce a new identity and may require review again.
+- A hard-killed launcher can leave persistent profiles by design; stale runtime
+  metadata is reclaimed on a later run, while profiles are never silently
+  reclaimed.
 - Hosted/unsupported tools and command outcomes absent from the installed hook
   payload remain generic/neutral. This MVP does not treat hooks as a security
   boundary.

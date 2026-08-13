@@ -14,7 +14,7 @@ codegotchi run -- codex [arguments...]
         |      +-- authenticated HTTP state/event/care/mode/debug routes
         |      +-- authenticated WebSocket complete snapshots
         |
-        +-- additive temporary Codex profile
+        +-- content-addressed persistent additive Codex profile
                |
                +-- Codex hook subprocesses
                        `-- sanitized event -> authenticated Rust runtime
@@ -57,9 +57,10 @@ and exit status.
 
 Startup creates the state/runtime directories, opens or initializes SQLite,
 restores the snapshot, binds the server to loopback only, writes runtime
-metadata, creates a unique profile, prints the UI URL, optionally starts a
-native browser helper, and then starts Codex. The browser helper is best
-effort; a printed URL remains usable if it cannot be opened.
+metadata, renders the complete hook configuration, ensures its stable
+content-addressed profile, prints the UI URL, optionally starts a native
+browser helper, and then starts Codex. The browser helper is best effort; a
+printed URL remains usable if it cannot be opened.
 
 The runtime URL has the form:
 
@@ -77,12 +78,14 @@ token.
 
 The Codex child inherits `CODEGOTCHI_SESSION_FILE`. Each configured hook runs
 the same binary as `codegotchi hook`, so hooks can find the owning runtime
-without a daemon or a fixed port. On normal exit, child spawn/wait failure,
-and forwarded termination, CodeGotchi removes only the metadata and profile
-created by that run. SQLite remains for restart persistence. A later launch
-removes only stale, valid CodeGotchi session metadata whose owner is no longer
-active; hard-killed profile reclamation and PID-start-identity hardening are
-known follow-ups.
+without a daemon or a fixed port. The complete rendered hook bytes determine
+the profile name with UUID-v5; an unchanged mode-0600 regular file with those
+bytes is reused, while altered, unsafe, symlink, directory, and other
+colliding paths are rejected without overwriting them. On normal exit, child
+spawn/wait failure, and forwarded termination, CodeGotchi removes only the
+unique runtime metadata and shuts down the loopback server. SQLite and
+persistent profiles remain for restart persistence. A later launch removes
+only stale, valid CodeGotchi session metadata whose owner is no longer active.
 
 ## State and persistence
 
@@ -108,11 +111,23 @@ the cared-for state and replay IDs rather than reseeding it.
 
 Short-lived metadata is placed in `$XDG_RUNTIME_DIR/codegotchi/`, falling back
 to the CodeGotchi state directory. The directory is mode 0700 and each
-`session-<uuid>.json` is mode 0600. A generated profile is placed in
+`session-<uuid>.json` is mode 0600. A persistent content-addressed profile is placed in
 `$CODEX_HOME`, falling back to `$HOME/.codex`, as a mode-0600
 `codegotchi-<uuid>.config.toml`. Existing config, hooks, authentication, and
 credentials are not copied, overwritten, or edited; Codex's normal profile
-layering reads them together with the temporary additive profile.
+layering reads them together with the persistent additive profile. Trusting
+the unchanged generated hooks once lets later launches reuse the same profile;
+a changed rendered hook configuration gets a new profile and may prompt for
+review again. Codex CLI 0.147 records an approved user hook by mutating that
+profile with the exact line `approvals_reviewer = "auto_review"` and a
+`[hooks.state]` table containing one `trusted_hash` per generated event. The
+launcher accepts this managed form only when the pristine rendered bytes are
+an exact contiguous prefix, the six state keys use this profile's exact path
+and `:0:0` handler indexes, and the hashes match Codex's normalized
+event/command/timeout/async identity. State order may vary because Codex writes
+the table as a map; no other fields, entries, or command changes are accepted.
+The approved bytes are retained without rewriting, and the same validation is
+performed while holding the spawn-boundary guard.
 
 ## Codex hooks, privacy, and Strict mode
 

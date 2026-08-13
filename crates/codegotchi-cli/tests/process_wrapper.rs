@@ -153,7 +153,7 @@ fn run_validation_case(arguments: &[&str], codex: Option<&Path>) -> (TempDir, Ou
 }
 
 #[test]
-fn exact_wrapper_is_transparent_and_cleans_profile_and_metadata() {
+fn exact_wrapper_is_transparent_and_persists_profile_but_cleans_metadata() {
     let temp = TempDir::new("transparent");
     let cwd = temp.join("worktree");
     fs::create_dir_all(&cwd).expect("working directory creates");
@@ -255,8 +255,7 @@ fn exact_wrapper_is_transparent_and_cleans_profile_and_metadata() {
             .starts_with("session-")
     }));
     assert!(
-        !temp
-            .join("codex-home")
+        temp.join("codex-home")
             .join(format!("{}.config.toml", fields[1]).as_str())
             .exists()
     );
@@ -414,7 +413,7 @@ fn browser_helper_nonzero_exit_warns_without_delaying_codex() {
 }
 
 #[test]
-fn spawn_failure_cleans_owned_files_but_keeps_database() {
+fn spawn_failure_cleans_metadata_but_persists_profile_and_keeps_database() {
     let temp = TempDir::new("spawn-failure");
     let cwd = temp.join("cwd");
     fs::create_dir_all(&cwd).unwrap();
@@ -432,7 +431,7 @@ fn spawn_failure_cleans_owned_files_but_keeps_database() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("could not spawn"));
     assert!(state_database(&temp).exists());
     assert!(!temp.join("runtime").join("session").exists());
-    assert!(!temp.join("codex-home").read_dir().unwrap().any(|entry| {
+    assert!(temp.join("codex-home").read_dir().unwrap().any(|entry| {
         entry
             .unwrap()
             .file_name()
@@ -620,7 +619,7 @@ fn signal_forwarding_preserves_conventional_status_and_cleans_up() {
                     .to_string_lossy()
                     .starts_with("session-"))
         );
-        assert!(!temp.join("codex-home").read_dir().unwrap().any(|entry| {
+        assert!(temp.join("codex-home").read_dir().unwrap().any(|entry| {
             entry
                 .unwrap()
                 .file_name()

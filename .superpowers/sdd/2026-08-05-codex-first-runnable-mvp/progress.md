@@ -28,6 +28,19 @@ Task 1: complete; supervisor approved after bounded correction loop
 - Second correction tests: focused hook/profile PASS; routine installed-Codex predicate PASS with manual paid/authenticated gate ignored; cargo fmt PASS; strict workspace clippy PASS; cargo test --workspace PASS
 - Supervisor adjudication: APPROVED; denial/non-execution and lifecycle-source blockers resolved. Identical ID-less SessionEnd occurrence distinction deferred to backlog because Codex 0.146 exposes no discriminator.
 - Deferred findings: docs/backlog/codex-first-mvp-followups.md
+
+Task 1 persistent profile lifecycle amendment (2026-08-12): complete
+- Replaced in-place deterministic writes with private mode-0600 temporary
+  publication using atomic no-replace hard-linking, directory sync, exact-byte
+  verification, and drop-time temporary cleanup that never removes the final
+  profile.
+- Added delayed abandoned-temp publication coverage and a cooperative
+  spawn-boundary guard. The launcher revalidates immediately before spawn and
+  holds the directory guard through command construction and child spawn.
+- Current evidence: profile lifecycle 11 PASS; process wrapper 16 PASS; CLI
+  profile unit test 1 PASS; workspace 138 PASS, 1 intentionally ignored
+  authenticated manual Codex gate. The guard does not constrain privileged or
+  non-cooperating writers because Codex opens profiles by name rather than fd.
 Task 2: complete; supervisor approved after two bounded correction rounds
 - Implementer: Codex CLI session 019fd151-dd8d-75d1-b660-5cae2b334267, model gpt-5.6-luna, reasoning max
 - Base: 8667af0
@@ -97,7 +110,7 @@ Real acceptance: complete
 - Care: real UI treat and fruit drags reduced hunger 100→90→75 and persisted after reload; shovel→poop→trash removed 1→0 and cleanliness rose to 100 after reload
 - Strict: guarded neglect plus Strict denied the real safe Cargo test at critical hunger; UI care restored work; identical fresh retry ran 64 listings and celebrated
 - Restart: second exact launch restored pet 291d078c-76d7-55a4-a892-162a807f4dd4, Pixel, needs, 47/24/24 inventory, no poop, poop sequence 1, Strict, and care history
-- Cleanup/privacy: runtime/profile files removed; SQLite retained; base config/auth checksums unchanged; four unique prompt/command needles absent from SQLite
+- Cleanup/privacy: owned runtime metadata removed while the content-addressed profile remained persistent; SQLite retained; base config/auth checksums unchanged; four unique prompt/command needles absent from SQLite
 - Installed-schema diagnostic: sanitized temporary coexisting PostToolUse hook proved Codex 0.146.0 emits model-facing string responses and identical empty strings for silent true/false; temporary hook/config/capture removed
 - Supervisor TDD correction: focused hook fixture red with expected None vs Some(0), then green 12/12; narrow observable Cargo test/build markers infer outcomes, unknown strings stay neutral, raw response remains unpersisted
 - Deferred findings: unchanged in docs/backlog/codex-first-mvp-followups.md

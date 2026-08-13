@@ -55,7 +55,7 @@
 
 ### C. Missing MVP work
 
-- Installed-schema Codex hook fixtures, privacy-preserving translation, command classification, strict denial response, temporary layered profile, and real integration spike evidence.
+- Installed-schema Codex hook fixtures, privacy-preserving translation, command classification, strict denial response, persistent content-addressed layered profile, and real integration spike evidence.
 - Loopback HTTP/WebSocket server, bearer authentication, bounded JSON ingestion, typed errors, SQLite persistence, authoritative snapshots, restart recovery, and demo controls.
 - Functional food drag/drop, shovel/poop/trash workflow, activity presentation, reconnect handling, error UI, and Playwright coverage.
 - Runtime metadata discovery, stale-session handling, browser launch, embedded production assets, transparent Codex process wrapper, signal/exit propagation, and cleanup.
@@ -67,7 +67,7 @@
 - `crates/codegotchi-cli/src/codex_hook.rs` owns Codex-only input schemas and translation into `codegotchi_domain::AgentEvent`.
 - `crates/codegotchi-cli/src/classify.rs` owns privacy-limited command/tool classification and strict blockability.
 - `crates/codegotchi-cli/src/runtime_metadata.rs` owns active-session discovery and mode-0600 metadata.
-- `crates/codegotchi-cli/src/codex_profile.rs` owns unique additive profile creation and exact cleanup.
+- `crates/codegotchi-cli/src/codex_profile.rs` owns persistent additive profile rendering, UUID-v5 identity, safe creation/reuse, and collision validation; runtime metadata remains the per-launch cleanup target.
 - `crates/codegotchi-cli/src/persistence.rs` owns SQLite schema/versioning and snapshot transactions.
 - `crates/codegotchi-cli/src/runtime.rs` owns the mutex-protected simulation, settings, mutation/persistence ordering, and broadcast snapshots.
 - `crates/codegotchi-cli/src/server.rs` owns loopback bind, authenticated routes, bounded bodies, static assets, and graceful shutdown.
@@ -96,7 +96,7 @@
 
 **Interfaces:**
 - Consumes: `AgentEvent`, `ActivityKind`, `AgentEventKind`, `EventMetadata`, and permission types from `codegotchi-domain`.
-- Produces: `RuntimeMetadataV1`, `HookInput`, `HookOutput`, `EventIngestRequest`, `EventIngestResponse`, `translate_hook`, `classify_command`, `TemporaryCodexProfile`, and a working `codegotchi hook` command.
+- Produces: `RuntimeMetadataV1`, `HookInput`, `HookOutput`, `EventIngestRequest`, `EventIngestResponse`, `translate_hook`, `classify_command`, `PersistentCodexProfile`, and a working `codegotchi hook` command.
 - `RuntimeMetadataV1` fields are `schema_version`, runtime UUID, repository root, loopback base URL, bearer token, and owning PID; JSON uses camelCase.
 - `HookOutput::allow()` serializes as `{}`; denial serializes only the documented `hookSpecificOutput` shape.
 
@@ -104,9 +104,9 @@
 - [x] Write fixture tests proving deterministic event IDs, exact activity/kind mapping, command categories, prompt/source/output discard, unknown-tool generic work, malformed-input fail-open output, and Strict denial serialization.
 - [x] Run `cargo test -p codegotchi-cli --test hook_fixtures` and record the expected missing-module/API failures.
 - [x] Implement the bounded stdin reader, tolerant Codex-only deserialization, privacy-limited translator, low-timeout loopback POST, and stdout discipline. No backend server is implemented in this task.
-- [x] Write profile lifecycle tests proving unique-name conflict refusal, base config preservation by checksum, mode-0600 creation, additive inline hooks for all six event families, inherited `CODEGOTCHI_SESSION_FILE`, and exact-file cleanup.
+- [x] Write profile lifecycle tests proving stable UUID-v5 names, exact reuse without rewrite, atomic private temporary publication with abandoned-partial isolation, delayed concurrent convergence, altered/unsafe/non-file/unreadable collision refusal, base config preservation by checksum, mode-0600 creation, additive inline hooks for all six event families, inherited `CODEGOTCHI_SESSION_FILE`, persistence after owner exit, and the cooperative spawn-boundary guard.
 - [x] Run the profile tests red, implement the smallest profile/runtime metadata seams, and run them green.
-- [x] Use a temporary profile, a loopback capture receiver, and the installed Codex CLI to prove SessionStart, prompt, Bash, apply_patch, Stop, and SessionEnd input plus one safe PreTool denial. Do not continue to Task 2 until this succeeds; do not bypass hook trust.
+- [x] Use a persistent content-addressed profile, a loopback capture receiver, and the installed Codex CLI to prove SessionStart, prompt, Bash, apply_patch, Stop, and SessionEnd input plus one safe PreTool denial. Reuse unchanged rendered hooks after the initial approval; do not bypass hook trust.
 - [x] Record exact installed fields, trust interaction, existing-hook coexistence observation, cleanup, and the chosen production mechanism in ADR 0002.
 - [x] Run Rust format/clippy/workspace tests and commit the task. Write the report at the plan workspace's `task-1-report.md`.
 
@@ -219,7 +219,7 @@
 - Produces: exact `codegotchi run -- codex [arguments...]`, `CODEGOTCHI_REAL_CODEX` test override, real executable recursion guard, automatic browser launch or printed URL, embedded SPA assets, inherited terminal streams, exit-status preservation, and scope-exact cleanup.
 - Explicit `-p`, `--profile`, or `--profile=...` in trailing Codex arguments returns a typed actionable conflict before creating runtime files.
 
-- [x] Write fake-agent process tests first for exact argument order, stdout/stderr visibility, exit code, Ctrl+C/termination forwarding, no PTY color stripping, runtime/profile environment, and normal cleanup.
+- [x] Write fake-agent process tests first for exact argument order, stdout/stderr visibility, exit code, Ctrl+C/termination forwarding, no PTY color stripping, runtime/profile environment, runtime metadata cleanup, and profile persistence.
 - [x] Write failure-path tests for missing real Codex, recursive resolution, profile conflict, child spawn failure, browser-open failure, stale runtime metadata, abnormal stale-file recovery, and preservation checksums for existing config/credentials.
 - [x] Implement direct inherited-stdio `Command` launch and only add PTY code if a real smoke test demonstrates a terminal defect.
 - [x] Serve embedded `web-dist` with correct MIME types, SPA fallback, and no filesystem dependency; test the installed binary from a directory outside the repository.
@@ -262,7 +262,7 @@
 - [x] Enable guarded demo mode, generate poop, complete shovel-poop-trash disposal, and record removal/cleanliness plus refresh persistence.
 - [x] Exit Codex/CodeGotchi, launch the exact command again, and record the same pet identity, needs, inventory, and poop state.
 - [x] Enable Strict, trigger neglect, have Codex attempt a safe test-listing command, record denial text, care through the UI, retry, and record allowance.
-- [x] Verify Codex exit status, Ctrl+C behavior, runtime/profile removal, unchanged base config/credential checksums, loopback bind, and absence of sensitive persisted fields.
+- [x] Verify Codex exit status, Ctrl+C behavior, runtime-metadata removal with persistent-profile retention, unchanged base config/credential checksums, loopback bind, and absence of sensitive persisted fields.
 
 ## Complete verification suite
 
