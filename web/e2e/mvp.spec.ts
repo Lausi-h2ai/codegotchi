@@ -18,8 +18,12 @@ type FixtureState = {
         happiness: number;
         cleanliness: number;
     };
-    pendingDemands: Array<{ id: string; kind: string }>;
-    pendingPoops: Array<{ id: string }>;
+    pendingDemands: Array<{
+        id: string;
+        kind: string;
+        createdAt: string;
+    }>;
+    pendingPoops: Array<{ id: string; createdAt: string }>;
     attentionSequence: number;
     lastUpdatedAt: string;
     nextIncidentAt: string;
@@ -832,9 +836,9 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         await expect(poops).toHaveCount(1);
 
         await page
-            .getByTestId("food-treat")
+            .getByTestId("food-kibble")
             .dragTo(page.getByRole("button", { name: /feed target/i }));
-        await expect(page.getByText("Eating a treat")).toBeVisible();
+        await expect(page.getByText("Eating kibble")).toBeVisible();
         await expect(page.getByText("Wants a snack")).toHaveCount(0);
         await expect(page.getByTestId("demand-snack-count")).toHaveCount(0);
 
@@ -912,15 +916,58 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         expect(after.needs.cleanliness).toBeLessThan(before.needs.cleanliness);
         expect(Date.parse(after.nextIncidentAt)).toBeGreaterThan(Date.now());
 
-        const demandIds = after.pendingDemands.map((demand) => demand.id);
-        const poopIds = after.pendingPoops.map((poop) => poop.id);
+        const refreshStartedAt = Date.now();
         await page.reload();
         await expect(page.getByText("Connected")).toBeVisible();
         const refreshed = await fetchAuthoritativeState(page);
-        expect(refreshed.pendingDemands.map((demand) => demand.id)).toEqual(
-            demandIds,
-        );
-        expect(refreshed.pendingPoops.map((poop) => poop.id)).toEqual(poopIds);
+        expect(refreshed.pendingDemands).toEqual(after.pendingDemands);
+        expect(refreshed.pendingPoops).toEqual(after.pendingPoops);
         expect(refreshed.attentionSequence).toBe(after.attentionSequence);
+        expect(refreshed.nextIncidentAt).toBe(after.nextIncidentAt);
+
+        const reloadElapsedSeconds = (Date.now() - refreshStartedAt) / 1_000;
+        const snapshotElapsedSeconds = Math.max(
+            0,
+            (Date.parse(refreshed.lastUpdatedAt) -
+                Date.parse(after.lastUpdatedAt)) /
+                1_000,
+        );
+        const elapsedSeconds = Math.max(
+            reloadElapsedSeconds,
+            snapshotElapsedSeconds,
+        );
+        const epsilon = 0.02;
+        const snackCount = after.pendingDemands.filter(
+            (demand) => demand.kind === "snack",
+        ).length;
+        const affectionCount = after.pendingDemands.filter(
+            (demand) => demand.kind === "affection",
+        ).length;
+        const poopCount = after.pendingPoops.length;
+        const hungerRatePerSecond = (25 + 240 * snackCount) / 3_600;
+        const happinessRatePerSecond = (240 * affectionCount) / 3_600;
+        const cleanlinessRatePerSecond = (240 * poopCount) / 3_600;
+        const boundedDrift = (ratePerSecond: number): number =>
+            epsilon + ratePerSecond * elapsedSeconds;
+        const hungerDrift = refreshed.needs.hunger - after.needs.hunger;
+        const energyDrift = after.needs.energy - refreshed.needs.energy;
+        const happinessDrift =
+            after.needs.happiness - refreshed.needs.happiness;
+        const cleanlinessDrift =
+            after.needs.cleanliness - refreshed.needs.cleanliness;
+        expect(hungerDrift).toBeGreaterThanOrEqual(-epsilon);
+        expect(hungerDrift).toBeLessThanOrEqual(
+            boundedDrift(hungerRatePerSecond),
+        );
+        expect(energyDrift).toBeGreaterThanOrEqual(-epsilon);
+        expect(energyDrift).toBeLessThanOrEqual(boundedDrift(50 / 3_600));
+        expect(happinessDrift).toBeGreaterThanOrEqual(-epsilon);
+        expect(happinessDrift).toBeLessThanOrEqual(
+            boundedDrift(happinessRatePerSecond),
+        );
+        expect(cleanlinessDrift).toBeGreaterThanOrEqual(-epsilon);
+        expect(cleanlinessDrift).toBeLessThanOrEqual(
+            boundedDrift(cleanlinessRatePerSecond),
+        );
     });
 });

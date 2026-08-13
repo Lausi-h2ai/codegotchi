@@ -1,9 +1,11 @@
-/* global URL, console, process */
+/* global URL, console, process, Buffer */
 
 import { createServer, request as proxyRequest } from "node:http";
 import { connect } from "node:net";
+import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
+import { rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -25,6 +27,9 @@ const fixtureModes = new Set([
 
 let backend;
 let backendPort;
+let backendReady = false;
+let backendDatabasePath;
+const trackedDatabasePaths = new Set();
 let restartPromise = Promise.resolve();
 
 await startBackend("default");
@@ -36,6 +41,12 @@ const proxy = createServer((request, response) => {
         requestUrl.pathname === "/__fixture/reset"
     ) {
         void handleReset(requestUrl, request, response);
+        return;
+    }
+
+    if (!backendReady || !backendPort) {
+        request.resume();
+        sendFixtureUnavailable(response);
         return;
     }
 
@@ -63,6 +74,10 @@ const proxy = createServer((request, response) => {
 });
 
 proxy.on("upgrade", (request, socket, head) => {
+    if (!backendReady || !backendPort) {
+        rejectUnavailableUpgrade(socket);
+        return;
+    }
     const upstream = connect(backendPort, "127.0.0.1");
     upstream.once("connect", () => {
         const headers = request.rawHeaders;
@@ -101,6 +116,7 @@ async function shutdown() {
         return;
     }
     shuttingDown = true;
+    backendReady = false;
     await new Promise((resolve) => proxy.close(resolve));
     await stopBackend();
 }
@@ -139,6 +155,7 @@ async function handleReset(requestUrl, request, response) {
 }
 
 function restartBackend(mode) {
+    backendReady = false;
     const next = restartPromise.then(async () => {
         await stopBackend();
         await startBackend(mode);
@@ -170,15 +187,51 @@ async function startBackend(mode) {
         },
     );
     backend = child;
-    const backendInfo = await waitForBackend(child);
-    backendPort = new URL(backendInfo.baseUrl).port;
+    backendReady = false;
+    backendPort = undefined;
+    backendDatabasePath = fixtureDatabasePath(child.pid);
+    trackedDatabasePaths.add(backendDatabasePath);
+    child.once("exit", () => {
+        if (backend === child) {
+            backendReady = false;
+            backendPort = undefined;
+        }
+    });
+    try {
+        const backendInfo = await waitForBackend(child);
+        const reportedDatabasePath = backendInfo.databasePath;
+        if (reportedDatabasePath !== backendDatabasePath) {
+            throw new Error(
+                `fixture database path mismatch: expected ${backendDatabasePath}, got ${reportedDatabasePath}`,
+            );
+        }
+        if (backend !== child || child.exitCode !== null) {
+            throw new Error(
+                "fixture backend exited before readiness was committed",
+            );
+        }
+        backendPort = new URL(backendInfo.baseUrl).port;
+        backendReady = true;
+    } catch (error) {
+        await stopBackend();
+        throw error;
+    }
 }
 
 async function stopBackend() {
     const child = backend;
+    const databasePath = backendDatabasePath;
+    backendReady = false;
     backend = undefined;
     backendPort = undefined;
-    if (!child || child.exitCode !== null) {
+    backendDatabasePath = undefined;
+    if (!child) {
+        await removeFixtureDatabase(databasePath);
+        return;
+    }
+
+    if (child.exitCode !== null) {
+        await removeFixtureDatabase(databasePath);
         return;
     }
 
@@ -202,6 +255,57 @@ async function stopBackend() {
         child.once("exit", finish);
         child.kill("SIGTERM");
     });
+    await removeFixtureDatabase(databasePath);
+}
+
+function fixtureDatabasePath(pid) {
+    return path.join(tmpdir(), `codegotchi-task3-playwright-${pid}.sqlite`);
+}
+
+async function removeFixtureDatabase(databasePath) {
+    if (!databasePath || !trackedDatabasePaths.has(databasePath)) {
+        return;
+    }
+    trackedDatabasePaths.delete(databasePath);
+    for (const suffix of ["", "-wal", "-shm"]) {
+        await rm(`${databasePath}${suffix}`, { force: true });
+    }
+}
+
+function sendFixtureUnavailable(response) {
+    const body = JSON.stringify({
+        error: {
+            code: "fixture_restarting",
+            message: "the Rust fixture is restarting; retry this request",
+        },
+    });
+    response.writeHead(503, {
+        "content-type": "application/json",
+        "retry-after": "1",
+        "content-length": Buffer.byteLength(body),
+    });
+    response.end(body);
+}
+
+function rejectUnavailableUpgrade(socket) {
+    const body = JSON.stringify({
+        error: {
+            code: "fixture_restarting",
+            message: "the Rust fixture is restarting; retry this connection",
+        },
+    });
+    socket.write(
+        [
+            "HTTP/1.1 503 Service Unavailable",
+            "Content-Type: application/json",
+            "Retry-After: 1",
+            "Connection: close",
+            `Content-Length: ${Buffer.byteLength(body)}`,
+            "",
+            body,
+        ].join("\r\n"),
+    );
+    socket.destroy();
 }
 
 async function waitForBackend(child) {

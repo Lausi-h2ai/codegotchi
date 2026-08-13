@@ -33,6 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "TASK3_FIXTURE_READY {}",
         serde_json::json!({
             "baseUrl": server.base_url(),
+            "databasePath": database,
             "token": TOKEN,
             "mode": mode.as_str(),
         })
