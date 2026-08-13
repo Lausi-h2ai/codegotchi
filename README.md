@@ -55,8 +55,13 @@ SQLite is stored at
 `$XDG_STATE_HOME/codegotchi/state.sqlite`, falling back to
 `$HOME/.local/state/codegotchi/state.sqlite`. A stable canonical repository
 identity gives each Git worktree its own pet. Restarts restore identity, needs,
-inventory, activity, poop state, enforcement mode, and event/care replay IDs;
-new pets receive 50 kibble, 25 treats, and 25 fruit once.
+inventory, activity, pending care demands, poop state, the exact next
+attention-incident deadline, enforcement mode, and event/care replay IDs.
+Elapsed wall-clock time is applied when the runtime resumes, so closing the
+browser or stopping CodeGotchi does not freeze the pet. A single long catch-up
+creates at most five missed incident objects, while needs still progress
+across the complete absence. New pets receive 50 kibble, 25 treats, and 25
+fruit once.
 
 Short-lived metadata is stored in the mode-0700
 `$XDG_RUNTIME_DIR/codegotchi/` directory, falling back to the CodeGotchi state
@@ -88,13 +93,31 @@ codegotchi mode strict
 ```
 
 Strict mode escalates as the pet's needs worsen. Mild neglect (hunger ≥ 70,
-energy ≤ 30, or cleanliness ≤ 30) blocks safe development work; moderate
-neglect (85/15/15) also blocks recovery work; and severe neglect (95/5/5)
-blocks every tool call except CodeGotchi control. Hunger, energy, and
-cleanliness each drive the escalation, and the denial tells the user what to
-care for in the UI before retrying. Uncertain work and hook/transport
-failures remain fail-open until severe neglect. Strict is a pet-care
-interaction, not a security boundary or operating-system sandbox.
+energy ≤ 30, cleanliness ≤ 30, or happiness ≤ 30) blocks safe development
+work; moderate neglect (85/15/15/15) also blocks recovery work; and severe
+neglect (95/5/5/5) blocks every tool call except CodeGotchi control. Hunger,
+energy, cleanliness, and happiness each drive the escalation, and the denial
+tells the user what to care for in the UI before retrying. Uncertain work and
+hook/transport failures remain fail-open until severe neglect. Strict is a
+pet-care interaction, not a security boundary or operating-system sandbox.
+
+Needs progress continuously in real wall-clock time: hunger rises by 25 points
+per hour and energy falls by 50 points per hour outside the hammock's recovery
+window, regardless of whether Codex is active, idle, waiting, or blocked.
+Every deterministic randomized 3–5 minutes, the authoritative Rust simulation
+creates one affection request, snack request, or floor poop. Each unresolved
+item adds 240 need points per hour of pressure to happiness, hunger, or
+cleanliness respectively, and multiple items stack. A long absence can
+therefore restore directly into severe strict-mode refusal without generating
+an unbounded room full of objects.
+
+The room displays affection and snack requests from the authoritative
+snapshot. Drag kibble, a treat, or fruit to the pet to satisfy one oldest snack
+request; energy drinks do not satisfy snack requests. To satisfy one oldest
+affection request, pet CodeGotchi for at least 1,500 ms while moving the
+pointer at least 120 px along its path. The browser only measures and submits
+the gesture: the backend validates it and the demand remains visible until an
+authoritative response or WebSocket snapshot removes it.
 
 The fixed demonstration controls require the exact `CODEGOTCHI_ENABLE_DEBUG=1`
 guard and do not accept arbitrary values:
