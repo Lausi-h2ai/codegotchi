@@ -1,6 +1,110 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const launchUrl = "/#token=task3-playwright-token";
+const motionRegions = new Set([
+    "window",
+    "shelf",
+    "floor-left",
+    "floor-center",
+    "floor-right",
+    "furniture",
+]);
+
+let nextHookEventId = 0xaa01;
+
+type HookEventOptions = {
+    kind:
+        | "session_started"
+        | "session_ended"
+        | "turn_started"
+        | "turn_completed"
+        | "waiting_for_user"
+        | "output_activity"
+        | "tool_started"
+        | "tool_completed"
+        | "command_started"
+        | "command_completed"
+        | "interrupted"
+        | "integration_error";
+    activity?:
+        | "idle"
+        | "thinking"
+        | "reading"
+        | "searching"
+        | "editing"
+        | "testing"
+        | "building"
+        | "installing"
+        | "git_operation"
+        | "docker_operation"
+        | "web_research"
+        | "waiting"
+        | "celebrating"
+        | "error"
+        | "blocked"
+        | "unknown_work"
+        | null;
+    exitStatus?: number | null;
+};
+
+function nextEventId(): string {
+    const suffix = (nextHookEventId++).toString(16).padStart(12, "0");
+    return `00000000-0000-0000-0000-${suffix}`;
+}
+
+async function sendHookEvent(
+    page: Page,
+    options: HookEventOptions,
+): Promise<void> {
+    const response = await page.evaluate(
+        async ({ eventId, kind, activity, exitStatus }) => {
+            const result = await fetch("/api/v1/events", {
+                method: "POST",
+                headers: {
+                    Authorization: "Bearer task3-playwright-token",
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    event: {
+                        id: eventId,
+                        schema_version: 1,
+                        session_id: "00000000-0000-0000-0000-000000000007",
+                        repository_id: "playwright-fixture",
+                        source: "codex",
+                        kind,
+                        activity: activity ?? null,
+                        timestamp: new Date().toISOString(),
+                        metadata: {
+                            executable_name: null,
+                            command_category: null,
+                            exit_status: exitStatus ?? null,
+                            duration_ms: null,
+                            blocked: false,
+                        },
+                    },
+                }),
+            });
+            return { status: result.status, body: await result.json() };
+        },
+        {
+            eventId: nextEventId(),
+            ...options,
+        },
+    );
+    expect(response.status).toBe(200);
+    expect(response.body.accepted).toBe(true);
+}
+
+function petLocator(page: Page) {
+    return page.locator('[data-testid="pet"]');
+}
+
+async function motionAttribute(
+    page: Page,
+    attribute: string,
+): Promise<string | null> {
+    return petLocator(page).getAttribute(attribute);
+}
 
 test.describe.serial("CodeGotchi production browser vertical slice", () => {
     test("loads embedded production bytes and follows authoritative activity", async ({
@@ -231,5 +335,391 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         await expect(page.getByTestId("activity-label")).toContainText(
             "Thinking",
         );
+    });
+
+    test("keeps idle travel in safe regions and eventually performs a roll", async ({
+        page,
+    }) => {
+        test.setTimeout(40_000);
+        await page.goto(launchUrl);
+        await expect(petLocator(page)).toBeVisible();
+
+        await sendHookEvent(page, {
+            kind: "waiting_for_user",
+            activity: "waiting",
+        });
+        await expect(page.getByTestId("activity-label")).toContainText(
+            /Idle|Waiting/,
+        );
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-mode",
+            "free_time",
+        );
+
+        const observedRegions = new Set<string>();
+        let observedRoll = false;
+        let firstUngroundedPosition:
+            | {
+                  region: string;
+                  floorTop: number;
+                  roomBottom: number;
+                  petFeet: number;
+              }
+            | undefined;
+        const pollOptions = {
+            timeout: 35_000,
+            intervals: [100, 250, 500],
+        } as const;
+        const isIdle = (label: string | null): boolean =>
+            label?.match(/Idle|Waiting/) !== null;
+        const renderedRoomGeometry = async () =>
+            page.evaluate(() => {
+                const room =
+                    document.querySelector<HTMLElement>(".room-illustration");
+                const pet = document.querySelector<HTMLElement>(
+                    '[data-testid="pet"]',
+                );
+                if (!room || !pet) {
+                    return null;
+                }
+                const roomRect = room.getBoundingClientRect();
+                const petRect = pet.getBoundingClientRect();
+                return {
+                    floorTop: roomRect.top + roomRect.height * 0.7,
+                    roomBottom: roomRect.bottom,
+                    petFeet: petRect.bottom,
+                };
+            });
+
+        await Promise.all([
+            expect
+                .poll(
+                    async () => {
+                        const [region, mode, phase, label] = await Promise.all([
+                            motionAttribute(page, "data-motion-region"),
+                            motionAttribute(page, "data-motion-mode"),
+                            motionAttribute(page, "data-motion-phase"),
+                            page.getByTestId("activity-label").textContent(),
+                        ]);
+                        if (mode === "free_time" && region) {
+                            observedRegions.add(region);
+                            if (phase !== "traveling") {
+                                const geometry = await renderedRoomGeometry();
+                                if (
+                                    !firstUngroundedPosition &&
+                                    geometry !== null &&
+                                    (geometry.petFeet < geometry.floorTop - 8 ||
+                                        geometry.petFeet >
+                                            geometry.roomBottom + 1)
+                                ) {
+                                    firstUngroundedPosition = {
+                                        region,
+                                        ...geometry,
+                                    };
+                                }
+                            }
+                        }
+                        return observedRegions.size >= 2 && isIdle(label);
+                    },
+                    {
+                        ...pollOptions,
+                        message:
+                            "free-time choreography should visit multiple safe regions",
+                    },
+                )
+                .toBe(true),
+            expect
+                .poll(
+                    async () => {
+                        const [action, mode, label] = await Promise.all([
+                            motionAttribute(page, "data-motion-action"),
+                            motionAttribute(page, "data-motion-mode"),
+                            page.getByTestId("activity-label").textContent(),
+                        ]);
+                        observedRoll ||=
+                            mode === "free_time" && action === "roll";
+                        return observedRoll && isIdle(label);
+                    },
+                    {
+                        ...pollOptions,
+                        message:
+                            "free-time choreography should perform a roll within its 15–30s interval",
+                    },
+                )
+                .toBe(true),
+        ]);
+
+        expect(
+            [...observedRegions].every((region) => motionRegions.has(region)),
+        ).toBe(true);
+        expect(observedRegions.size).toBeGreaterThanOrEqual(2);
+        expect(firstUngroundedPosition).toBeUndefined();
+        await expect(page.getByTestId("activity-label")).toContainText(
+            /Idle|Waiting/,
+        );
+    });
+
+    test("maps searching and editing events to interruptible thinking and desk poses", async ({
+        page,
+    }) => {
+        await page.goto(launchUrl);
+        await expect(petLocator(page)).toBeVisible();
+        await sendHookEvent(page, {
+            kind: "waiting_for_user",
+            activity: "waiting",
+        });
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-mode",
+            "free_time",
+        );
+        await expect
+            .poll(() => motionAttribute(page, "data-motion-phase"), {
+                timeout: 2_000,
+            })
+            .toBe("traveling");
+        const idleEyeTop = await petLocator(page)
+            .locator(".pet-eye")
+            .first()
+            .evaluate((eye) => Number.parseFloat(getComputedStyle(eye).top));
+
+        await sendHookEvent(page, {
+            kind: "turn_started",
+            activity: "searching",
+        });
+        const thinkingStarted = Date.now();
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-mode",
+            "thinking",
+        );
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-waypoint",
+            "thinking",
+        );
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-action",
+            "think",
+            { timeout: 999 },
+        );
+        expect(Date.now() - thinkingStarted).toBeLessThan(1_000);
+        await expect(page.locator(".thought-bubbles")).toBeVisible();
+        await expect(page.getByTestId("activity-label")).toContainText(
+            "Searching",
+        );
+        const thinkingEyeTop = await petLocator(page)
+            .locator(".pet-eye")
+            .first()
+            .evaluate((eye) => Number.parseFloat(getComputedStyle(eye).top));
+        expect(thinkingEyeTop).toBeLessThan(idleEyeTop);
+
+        const idleMonitorPresentation = await page
+            .locator(".monitor")
+            .evaluate((monitor) => {
+                const style = getComputedStyle(monitor);
+                const screen = monitor.querySelector("span");
+                const screenStyle = screen ? getComputedStyle(screen) : null;
+                return [
+                    style.backgroundColor,
+                    style.boxShadow,
+                    style.filter,
+                    style.animationName,
+                    screenStyle?.backgroundColor ?? "",
+                    screenStyle?.boxShadow ?? "",
+                    screenStyle?.animationName ?? "",
+                ];
+            });
+
+        await sendHookEvent(page, {
+            kind: "command_started",
+            activity: "editing",
+        });
+        const deskStarted = Date.now();
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-mode",
+            "desk",
+        );
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-waypoint",
+            "desk",
+        );
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-facing",
+            "right",
+        );
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-action",
+            "type",
+            { timeout: 999 },
+        );
+        expect(Date.now() - deskStarted).toBeLessThan(1_000);
+        await expect(page.locator(".typing-marks")).toBeVisible();
+        await expect(page.getByTestId("activity-label")).toContainText(
+            "Typing / editing",
+        );
+        const typingMarkGeometry = await page
+            .getByTestId("typing-marks")
+            .locator("span")
+            .evaluateAll((marks) =>
+                marks.map((mark) => {
+                    const style = getComputedStyle(mark);
+                    return {
+                        width: Number.parseFloat(style.width),
+                        height: Number.parseFloat(style.height),
+                    };
+                }),
+            );
+        expect(typingMarkGeometry).toHaveLength(3);
+        expect(
+            typingMarkGeometry.every(
+                ({ width, height }) => width > 0 && height > 0,
+            ),
+        ).toBe(true);
+        await expect
+            .poll(
+                () =>
+                    page.locator(".monitor").evaluate((monitor) => {
+                        const style = getComputedStyle(monitor);
+                        const screen = monitor.querySelector("span");
+                        const screenStyle = screen
+                            ? getComputedStyle(screen)
+                            : null;
+                        return [
+                            style.backgroundColor,
+                            style.boxShadow,
+                            style.filter,
+                            style.animationName,
+                            screenStyle?.backgroundColor ?? "",
+                            screenStyle?.boxShadow ?? "",
+                            screenStyle?.animationName ?? "",
+                        ];
+                    }),
+                { timeout: 1_000 },
+            )
+            .not.toEqual(idleMonitorPresentation);
+
+        await sendHookEvent(page, {
+            kind: "turn_started",
+            activity: "thinking",
+        });
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-mode",
+            "thinking",
+            { timeout: 1_000 },
+        );
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-waypoint",
+            "thinking",
+            { timeout: 1_000 },
+        );
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-action",
+            "think",
+            { timeout: 999 },
+        );
+    });
+
+    test("keeps semantic poses static when reduced motion is requested", async ({
+        page,
+    }) => {
+        await page.emulateMedia({ reducedMotion: "reduce" });
+        await page.goto(launchUrl);
+        await expect(petLocator(page)).toBeVisible();
+
+        await sendHookEvent(page, {
+            kind: "command_started",
+            activity: "testing",
+        });
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-mode",
+            "desk",
+        );
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-waypoint",
+            "desk",
+        );
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-phase",
+            "static",
+        );
+        await expect
+            .poll(() => motionAttribute(page, "data-motion-action"))
+            .not.toBe("roll");
+        await expect(page.locator(".thought-bubbles")).toHaveCount(0);
+
+        await sendHookEvent(page, {
+            kind: "turn_started",
+            activity: "searching",
+        });
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-mode",
+            "thinking",
+        );
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-waypoint",
+            "thinking",
+        );
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-phase",
+            "static",
+        );
+        await expect
+            .poll(() => motionAttribute(page, "data-motion-action"))
+            .not.toBe("roll");
+        await expect
+            .poll(() => motionAttribute(page, "data-motion-action"))
+            .not.toBe("think");
+        await expect(page.locator(".thought-bubbles")).toHaveCount(0);
+    });
+
+    test("keeps care controls authoritative while free-time motion is traveling", async ({
+        page,
+    }) => {
+        await page.goto(launchUrl);
+        await expect(petLocator(page)).toBeVisible();
+        await sendHookEvent(page, {
+            kind: "waiting_for_user",
+            activity: "waiting",
+        });
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-mode",
+            "free_time",
+        );
+        await expect(petLocator(page)).toHaveAttribute(
+            "data-motion-phase",
+            "traveling",
+        );
+
+        const fruit = page.getByTestId("food-fruit");
+        const beforeFruit = Number(await fruit.locator("strong").textContent());
+        await fruit.click();
+        await expect(page.getByText("Eating fruit")).toBeVisible();
+        await expect(fruit.locator("strong")).toHaveText(
+            String(beforeFruit - 1),
+        );
+
+        const restock = page.getByTestId("restock");
+        await expect(restock).toBeVisible();
+        await restock.click();
+        await expect(page.getByText("Restocked the pantry")).toBeVisible();
+        await expect(fruit.locator("strong")).toHaveText("25");
+
+        const poops = page.locator("[data-poop-id]");
+        const beforePoops = await poops.count();
+        expect(beforePoops).toBeGreaterThan(0);
+        await page.getByRole("button", { name: "Shovel" }).click();
+        await poops.first().click();
+        await page.getByRole("button", { name: "Trash" }).click();
+        await expect(page.getByText("Cleaned up")).toBeVisible();
+        await expect(poops).toHaveCount(beforePoops - 1);
+
+        await page.getByRole("button", { name: "Hammock nap" }).click();
+        await expect(
+            page.getByRole("button", { name: "Resting in hammock" }),
+        ).toBeVisible();
+        await expect(page.getByTestId("activity-label")).toContainText(
+            "Sleeping",
+        );
+        await expect(
+            page.getByRole("button", { name: "Hammock nap" }),
+        ).toBeVisible({ timeout: 8_000 });
     });
 });

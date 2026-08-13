@@ -1,4 +1,11 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+    act,
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+} from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
@@ -347,6 +354,334 @@ describe("CodeGotchi pet room", () => {
 
         expect(clean).toHaveBeenCalledWith(
             "00000000-0000-0000-0000-000000000099",
+        );
+    });
+});
+
+describe("CodeGotchi motion presentation adapter", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-08-05T12:00:00Z"));
+    });
+
+    afterEach(() => {
+        cleanup();
+        vi.useRealTimers();
+    });
+
+    it.each([
+        [
+            "editing",
+            {
+                behavior: "Working" as const,
+                activity: { Active: "editing" } as const,
+                expectedMode: "desk",
+                expectedWaypoint: "desk",
+            },
+        ],
+        [
+            "thinking",
+            {
+                behavior: "Working" as const,
+                activity: { Active: "thinking" } as const,
+                expectedMode: "thinking",
+                expectedWaypoint: "thinking",
+            },
+        ],
+        [
+            "idle",
+            {
+                behavior: "Wandering" as const,
+                activity: "Idle" as const,
+                expectedMode: "free_time",
+                expectedWaypoint: "room waypoint",
+            },
+        ],
+        [
+            "napping",
+            {
+                behavior: "Sleeping" as const,
+                nappingUntil: "2026-08-05T12:00:10Z",
+                expectedMode: "napping",
+                expectedWaypoint: "hammock",
+            },
+        ],
+        [
+            "critical",
+            {
+                behavior: "CriticalNeed" as const,
+                expectedMode: "critical",
+                expectedWaypoint: "critical",
+            },
+        ],
+        [
+            "success",
+            {
+                behavior: "RecentSuccess" as const,
+                recentOutcome: "Success" as const,
+                lastOutcomeAt: "2026-08-05T12:00:00Z",
+                expectedMode: "success",
+                expectedWaypoint: "success",
+            },
+        ],
+        [
+            "failure",
+            {
+                behavior: "RecentFailure" as const,
+                recentOutcome: "Failure" as const,
+                lastOutcomeAt: "2026-08-05T12:00:00Z",
+                expectedMode: "failure",
+                expectedWaypoint: "failure",
+            },
+        ],
+    ] as const)(
+        "exposes the %s semantic mode and destination on the pet node",
+        (_name, state) => {
+            renderApp({
+                snapshot: snapshot(state),
+                connectionStatus: "connected",
+            });
+
+            const pet = screen.getByTestId("pet");
+            expect(pet).toHaveAttribute("data-motion-mode", state.expectedMode);
+            if (state.expectedWaypoint === "room waypoint") {
+                expect(pet).not.toHaveAttribute(
+                    "data-motion-waypoint",
+                    "free_time",
+                );
+            } else {
+                expect(pet).toHaveAttribute(
+                    "data-motion-waypoint",
+                    state.expectedWaypoint,
+                );
+            }
+        },
+    );
+
+    it("settles editing and thinking actions within 999ms", () => {
+        renderApp({
+            snapshot: snapshot({
+                behavior: "Working",
+                activity: { Active: "editing" },
+            }),
+            connectionStatus: "connected",
+        });
+
+        const pet = screen.getByTestId("pet");
+        expect(pet).toHaveAttribute("data-motion-action", "roll");
+        act(() => vi.advanceTimersByTime(999));
+        expect(pet).toHaveAttribute("data-motion-action", "type");
+
+        cleanup();
+        renderApp({
+            snapshot: snapshot({
+                behavior: "Working",
+                activity: { Active: "thinking" },
+            }),
+            connectionStatus: "connected",
+        });
+
+        const thinkingPet = screen.getByTestId("pet");
+        act(() => vi.advanceTimersByTime(999));
+        expect(thinkingPet).toHaveAttribute("data-motion-action", "think");
+    });
+
+    it("interrupts desk motion when an authoritative thinking snapshot arrives", () => {
+        const editingState = {
+            snapshot: snapshot({
+                behavior: "Working" as const,
+                activity: { Active: "editing" } as const,
+            }),
+            connectionStatus: "connected" as const,
+        };
+        mockedUseCodeGotchi.mockReturnValue({
+            snapshot: editingState.snapshot,
+            connectionStatus: editingState.connectionStatus,
+            error: null,
+            feedback: null,
+            debugEnabled: false,
+            feed: vi.fn().mockResolvedValue(undefined),
+            clean: vi.fn().mockResolvedValue(undefined),
+            nap: vi.fn().mockResolvedValue(undefined),
+            restock: vi.fn().mockResolvedValue(undefined),
+        });
+        const view = render(<App launchToken="test-token" />);
+        const pet = screen.getByTestId("pet");
+
+        mockedUseCodeGotchi.mockReturnValue({
+            snapshot: snapshot({
+                behavior: "Working",
+                activity: { Active: "thinking" },
+            }),
+            connectionStatus: "connected",
+            error: null,
+            feedback: null,
+            debugEnabled: false,
+            feed: vi.fn().mockResolvedValue(undefined),
+            clean: vi.fn().mockResolvedValue(undefined),
+            nap: vi.fn().mockResolvedValue(undefined),
+            restock: vi.fn().mockResolvedValue(undefined),
+        });
+        view.rerender(<App launchToken="test-token" />);
+
+        expect(pet).toHaveAttribute("data-motion-mode", "thinking");
+        expect(pet).toHaveAttribute("data-motion-action", "roll");
+        act(() => vi.advanceTimersByTime(999));
+        expect(pet).toHaveAttribute("data-motion-action", "think");
+    });
+
+    it("reconnects motion after StrictMode replays before the first snapshot", () => {
+        mockedUseCodeGotchi.mockReturnValue({
+            snapshot: null,
+            connectionStatus: "loading",
+            error: null,
+            feedback: null,
+            debugEnabled: false,
+            feed: vi.fn().mockResolvedValue(undefined),
+            clean: vi.fn().mockResolvedValue(undefined),
+            nap: vi.fn().mockResolvedValue(undefined),
+            restock: vi.fn().mockResolvedValue(undefined),
+        });
+        const view = render(
+            <StrictMode>
+                <App launchToken="test-token" />
+            </StrictMode>,
+        );
+
+        mockedUseCodeGotchi.mockReturnValue({
+            snapshot: snapshot({
+                behavior: "Working",
+                activity: { Active: "editing" },
+            }),
+            connectionStatus: "connected",
+            error: null,
+            feedback: null,
+            debugEnabled: false,
+            feed: vi.fn().mockResolvedValue(undefined),
+            clean: vi.fn().mockResolvedValue(undefined),
+            nap: vi.fn().mockResolvedValue(undefined),
+            restock: vi.fn().mockResolvedValue(undefined),
+        });
+        view.rerender(
+            <StrictMode>
+                <App launchToken="test-token" />
+            </StrictMode>,
+        );
+
+        const pet = screen.getByTestId("pet");
+        expect(pet).toHaveAttribute("data-motion-mode", "desk");
+        expect(pet).toHaveAttribute("data-motion-action", "roll");
+        act(() => vi.advanceTimersByTime(999));
+        expect(pet).toHaveAttribute("data-motion-action", "type");
+    });
+
+    it("keeps equivalent editing snapshots on the same generation and timers", () => {
+        const first = snapshot({
+            behavior: "Working",
+            activity: { Active: "editing" },
+        });
+        mockedUseCodeGotchi.mockReturnValue({
+            snapshot: first,
+            connectionStatus: "connected",
+            error: null,
+            feedback: null,
+            debugEnabled: false,
+            feed: vi.fn().mockResolvedValue(undefined),
+            clean: vi.fn().mockResolvedValue(undefined),
+            nap: vi.fn().mockResolvedValue(undefined),
+            restock: vi.fn().mockResolvedValue(undefined),
+        });
+        const view = render(<App launchToken="test-token" />);
+        const pet = screen.getByTestId("pet");
+        const facing = pet.getAttribute("data-motion-facing");
+        const timerCount = vi.getTimerCount();
+
+        mockedUseCodeGotchi.mockReturnValue({
+            snapshot: snapshot({
+                behavior: "Working",
+                activity: { Active: "editing" },
+                lastUpdatedAt: "2026-08-05T12:00:01Z",
+                needs: {
+                    hunger: 25,
+                    energy: 80,
+                    happiness: 90,
+                    cleanliness: 70,
+                },
+            }),
+            connectionStatus: "connected",
+            error: null,
+            feedback: null,
+            debugEnabled: false,
+            feed: vi.fn().mockResolvedValue(undefined),
+            clean: vi.fn().mockResolvedValue(undefined),
+            nap: vi.fn().mockResolvedValue(undefined),
+            restock: vi.fn().mockResolvedValue(undefined),
+        });
+        view.rerender(<App launchToken="test-token" />);
+
+        expect(pet).toHaveAttribute("data-motion-facing", facing ?? "");
+        expect(vi.getTimerCount()).toBe(timerCount);
+    });
+
+    it("disposes the mounted controller and clears timers on unmount", () => {
+        renderApp({
+            snapshot: snapshot({
+                behavior: "Working",
+                activity: { Active: "editing" },
+            }),
+            connectionStatus: "connected",
+        });
+
+        expect(vi.getTimerCount()).toBeGreaterThan(0);
+        cleanup();
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("gates decorative effects on the active motion action", () => {
+        renderApp({
+            snapshot: snapshot({
+                behavior: "Working",
+                activity: { Active: "editing" },
+            }),
+            connectionStatus: "connected",
+        });
+        const editingPet = screen.getByTestId("pet");
+        expect(screen.queryByTestId("typing-marks")).not.toBeInTheDocument();
+        act(() => vi.advanceTimersByTime(999));
+        expect(editingPet).toHaveAttribute("data-motion-action", "type");
+        expect(screen.getByTestId("typing-marks")).toHaveAttribute(
+            "aria-hidden",
+            "true",
+        );
+
+        cleanup();
+        renderApp({
+            snapshot: snapshot({
+                behavior: "Working",
+                activity: { Active: "thinking" },
+            }),
+            connectionStatus: "connected",
+        });
+        expect(screen.queryByTestId("thought-bubbles")).not.toBeInTheDocument();
+        act(() => vi.advanceTimersByTime(999));
+        expect(screen.getByTestId("thought-bubbles")).toHaveAttribute(
+            "aria-hidden",
+            "true",
+        );
+
+        cleanup();
+        renderApp({
+            snapshot: snapshot({
+                behavior: "RecentSuccess",
+                recentOutcome: "Success",
+                lastOutcomeAt: "2026-08-05T12:00:00Z",
+            }),
+            connectionStatus: "connected",
+        });
+        vi.advanceTimersByTime(999);
+        expect(screen.getByTestId("motion-sparkles")).toHaveAttribute(
+            "aria-hidden",
+            "true",
         );
     });
 });

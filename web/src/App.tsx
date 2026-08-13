@@ -1,8 +1,9 @@
-import { useState, type DragEvent } from "react";
+import { useState, type CSSProperties, type DragEvent } from "react";
 
 import "./App.css";
 
 import { extractLaunchToken } from "./client";
+import type { MotionState } from "./motion";
 import {
     activeActivity,
     isFoodId,
@@ -12,6 +13,7 @@ import {
     type SimulationSnapshot,
 } from "./protocol";
 import { useCodeGotchi } from "./useCodeGotchi";
+import { usePetMotion } from "./usePetMotion";
 
 const FOODS: { id: FoodId; label: string; icon: string }[] = [
     { id: "kibble", label: "Kibble", icon: "◈" },
@@ -41,10 +43,24 @@ function App({ launchToken }: AppProps) {
     } = useCodeGotchi(token);
     const [shovelArmed, setShovelArmed] = useState(false);
     const [cleaningPoopId, setCleaningPoopId] = useState<string | null>(null);
+    const motionState = usePetMotion(snapshot);
 
     const activityLabel = snapshot ? presentationActivity(snapshot) : "Waiting";
     const behaviorLabel = snapshot ? presentationBehavior(snapshot) : "Waiting";
     const napping = snapshot ? isNapping(snapshot) : false;
+    const motionWaypoint =
+        motionState.roomWaypoint?.id ?? motionState.destination;
+    const motionRegion = motionState.roomRegion ?? "";
+    const motionStyle = roomMotionStyle(motionState);
+    const showTypingMarks =
+        motionState.semanticMode === "desk" &&
+        (motionState.action === "type" || motionState.action === "pulse") &&
+        motionState.phase !== "static";
+    const showThoughtBubbles =
+        motionState.semanticMode === "thinking" &&
+        (motionState.action === "think" || motionState.action === "pulse") &&
+        motionState.phase !== "static";
+    const showSparkles = motionState.semanticMode === "success";
 
     function submitFeed(foodId: string): void {
         if (!isFoodId(foodId)) {
@@ -213,6 +229,16 @@ function App({ launchToken }: AppProps) {
                                 className={`pet pet--${poseClass(snapshot)}`}
                                 role="img"
                                 aria-label={`${snapshot.name}, ${activityLabel}`}
+                                data-testid="pet"
+                                data-motion-mode={motionState.semanticMode}
+                                data-motion-action={
+                                    motionState.action ?? "none"
+                                }
+                                data-motion-waypoint={motionWaypoint}
+                                data-motion-facing={motionState.facing}
+                                data-motion-phase={motionState.phase}
+                                data-motion-region={motionRegion}
+                                style={motionStyle}
                             >
                                 <span className="pet-ear pet-ear--left" />
                                 <span className="pet-ear pet-ear--right" />
@@ -221,6 +247,39 @@ function App({ launchToken }: AppProps) {
                                     <span className="pet-eye pet-eye--right" />
                                     <span className="pet-mouth" />
                                 </span>
+                                {showTypingMarks ? (
+                                    <span
+                                        className="typing-marks"
+                                        data-testid="typing-marks"
+                                        aria-hidden="true"
+                                    >
+                                        <span />
+                                        <span />
+                                        <span />
+                                    </span>
+                                ) : null}
+                                {showThoughtBubbles ? (
+                                    <span
+                                        className="thought-bubbles"
+                                        data-testid="thought-bubbles"
+                                        aria-hidden="true"
+                                    >
+                                        <span />
+                                        <span />
+                                        <span>?</span>
+                                    </span>
+                                ) : null}
+                                {showSparkles ? (
+                                    <span
+                                        className="motion-sparkles"
+                                        data-testid="motion-sparkles"
+                                        aria-hidden="true"
+                                    >
+                                        <span>✦</span>
+                                        <span>✧</span>
+                                        <span>✦</span>
+                                    </span>
+                                ) : null}
                                 {napping ? (
                                     <span
                                         className="zzz"
@@ -557,6 +616,17 @@ function activityIcon(label: string): string {
     if (label === "Upset" || label === "Refusing") return "!";
     if (label === "Idle" || label === "Wandering / walking") return "•";
     return "⌁";
+}
+
+function roomMotionStyle(state: MotionState): CSSProperties {
+    if (state.roomWaypoint === null) {
+        return {};
+    }
+
+    return {
+        "--pet-x": `${state.roomWaypoint.position.x * 100}%`,
+        "--pet-y": `${state.roomWaypoint.position.y * 100}%`,
+    } as CSSProperties;
 }
 
 function poseClass(snapshot: SimulationSnapshot): string {
