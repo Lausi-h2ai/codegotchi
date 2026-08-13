@@ -151,6 +151,18 @@ export class CodeGotchiClient {
         return this.care("nap", { actionId });
     }
 
+    public async pet(
+        interactionMs: number,
+        pointerDistance: number,
+        actionId: string = createActionId(),
+    ): Promise<CareResponse> {
+        return this.care("pet", {
+            actionId,
+            interactionMs,
+            pointerDistance,
+        });
+    }
+
     /** Whether the owning runtime was launched with the guarded demo controls. */
     public async debugStatus(): Promise<DebugStatusResponse> {
         return this.request<DebugStatusResponse>("/api/v1/debug/status", {
@@ -272,8 +284,8 @@ export class CodeGotchiClient {
     }
 
     private async care(
-        action: "feed" | "clean" | "nap",
-        body: Record<string, string>,
+        action: "feed" | "clean" | "nap" | "pet",
+        body: Record<string, string | number>,
     ): Promise<CareResponse> {
         const response = await this.request<CareResponse>(
             `/api/v1/care/${action}`,

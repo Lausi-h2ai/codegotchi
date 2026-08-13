@@ -44,6 +44,9 @@ function snapshot(
                 createdAt: "2026-08-05T12:00:00Z",
             },
         ],
+        pendingDemands: [],
+        attentionSequence: 0,
+        nextIncidentAt: "2026-08-13T12:05:00Z",
         inventory: { kibble: 50, treat: 25, fruit: 25, energy_drink: 10 },
         processedCareIds: [],
         poopSequence: 1,
@@ -70,6 +73,7 @@ function renderApp(
         feed: vi.fn().mockResolvedValue(undefined),
         clean: vi.fn().mockResolvedValue(undefined),
         nap: vi.fn().mockResolvedValue(undefined),
+        pet: vi.fn().mockResolvedValue(undefined),
         restock: vi.fn().mockResolvedValue(undefined),
         ...state,
     });
@@ -534,6 +538,7 @@ describe("CodeGotchi motion presentation adapter", () => {
             feed: vi.fn().mockResolvedValue(undefined),
             clean: vi.fn().mockResolvedValue(undefined),
             nap: vi.fn().mockResolvedValue(undefined),
+            pet: vi.fn().mockResolvedValue(undefined),
             restock: vi.fn().mockResolvedValue(undefined),
         });
         const view = render(<App launchToken="test-token" />);
@@ -551,6 +556,7 @@ describe("CodeGotchi motion presentation adapter", () => {
             feed: vi.fn().mockResolvedValue(undefined),
             clean: vi.fn().mockResolvedValue(undefined),
             nap: vi.fn().mockResolvedValue(undefined),
+            pet: vi.fn().mockResolvedValue(undefined),
             restock: vi.fn().mockResolvedValue(undefined),
         });
         view.rerender(<App launchToken="test-token" />);
@@ -571,6 +577,7 @@ describe("CodeGotchi motion presentation adapter", () => {
             feed: vi.fn().mockResolvedValue(undefined),
             clean: vi.fn().mockResolvedValue(undefined),
             nap: vi.fn().mockResolvedValue(undefined),
+            pet: vi.fn().mockResolvedValue(undefined),
             restock: vi.fn().mockResolvedValue(undefined),
         });
         const view = render(
@@ -591,6 +598,7 @@ describe("CodeGotchi motion presentation adapter", () => {
             feed: vi.fn().mockResolvedValue(undefined),
             clean: vi.fn().mockResolvedValue(undefined),
             nap: vi.fn().mockResolvedValue(undefined),
+            pet: vi.fn().mockResolvedValue(undefined),
             restock: vi.fn().mockResolvedValue(undefined),
         });
         view.rerender(
@@ -620,6 +628,7 @@ describe("CodeGotchi motion presentation adapter", () => {
             feed: vi.fn().mockResolvedValue(undefined),
             clean: vi.fn().mockResolvedValue(undefined),
             nap: vi.fn().mockResolvedValue(undefined),
+            pet: vi.fn().mockResolvedValue(undefined),
             restock: vi.fn().mockResolvedValue(undefined),
         });
         const view = render(<App launchToken="test-token" />);
@@ -646,6 +655,7 @@ describe("CodeGotchi motion presentation adapter", () => {
             feed: vi.fn().mockResolvedValue(undefined),
             clean: vi.fn().mockResolvedValue(undefined),
             nap: vi.fn().mockResolvedValue(undefined),
+            pet: vi.fn().mockResolvedValue(undefined),
             restock: vi.fn().mockResolvedValue(undefined),
         });
         view.rerender(<App launchToken="test-token" />);

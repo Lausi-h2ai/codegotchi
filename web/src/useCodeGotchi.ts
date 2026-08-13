@@ -15,6 +15,7 @@ export interface CodeGotchiState {
     ) => Promise<void>;
     clean: (poopId: string) => Promise<void>;
     nap: () => Promise<void>;
+    pet: (interactionMs: number, pointerDistance: number) => Promise<void>;
     restock: () => Promise<void>;
 }
 
@@ -125,6 +126,23 @@ export function useCodeGotchi(token: string | null): CodeGotchiState {
         }
     }, []);
 
+    const pet = useCallback(
+        async (interactionMs: number, pointerDistance: number) => {
+            const client = clientRef.current;
+            if (!client) {
+                return;
+            }
+            try {
+                await client.pet(interactionMs, pointerDistance);
+                setError(null);
+                setFeedback("Got some attention ♡");
+            } catch (nextError) {
+                setError(asClientError(nextError));
+            }
+        },
+        [],
+    );
+
     const restock = useCallback(async () => {
         const client = clientRef.current;
         if (!client) {
@@ -148,6 +166,7 @@ export function useCodeGotchi(token: string | null): CodeGotchiState {
         feed,
         clean,
         nap,
+        pet,
         restock,
     };
 }

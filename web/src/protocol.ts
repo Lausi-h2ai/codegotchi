@@ -48,6 +48,14 @@ export interface Poop {
     createdAt: string;
 }
 
+export type PetDemandKind = "affection" | "snack";
+
+export interface PetDemand {
+    id: string;
+    kind: PetDemandKind;
+    createdAt: string;
+}
+
 export type FoodInventory = Partial<Record<FoodId, number>> &
     Record<string, number>;
 
@@ -70,9 +78,11 @@ export interface SimulationSnapshot {
     digestionPoints: number;
     lastUpdatedAt: string;
     pendingPoops: Poop[];
+    pendingDemands: PetDemand[];
     inventory: FoodInventory;
     processedCareIds: string[];
     poopSequence: number;
+    attentionSequence: number;
     sessionActivities: Record<string, SessionActivity>;
     processedEventIds: string[];
     lastActivityAt: string | null;
@@ -81,6 +91,7 @@ export interface SimulationSnapshot {
     enforcementMode: EnforcementMode;
     /** Deadline of the current hammock nap, or null while awake. */
     nappingUntil: string | null;
+    nextIncidentAt: string;
 }
 
 export interface CareResponse extends SimulationSnapshot {

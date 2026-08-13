@@ -24,6 +24,9 @@ function snapshot(
         digestionPoints: 0,
         lastUpdatedAt: "2026-08-05T12:00:00Z",
         pendingPoops: [],
+        pendingDemands: [],
+        attentionSequence: 0,
+        nextIncidentAt: "2026-08-13T12:05:00Z",
         inventory: { kibble: 50, treat: 25, fruit: 25 },
         processedCareIds: [],
         poopSequence: 0,
@@ -197,6 +200,55 @@ describe("CodeGotchi browser client", () => {
                 }),
             }),
         );
+    });
+
+    it("posts numeric pet care and publishes its authoritative snapshot", async () => {
+        const initial = snapshot("initial state");
+        const cared = snapshot("petted state", {
+            lastUpdatedAt: "2026-08-05T12:00:01Z",
+            attentionSequence: 1,
+        });
+        const fetch = vi
+            .fn()
+            .mockResolvedValueOnce(responseFor(initial))
+            .mockResolvedValueOnce(responseFor({ ...cared, duplicate: false }));
+        const snapshots: SimulationSnapshot[] = [];
+        const client = new CodeGotchiClient("care-secret", {
+            fetch,
+            WebSocket: FakeWebSocket,
+            baseUrl: "http://127.0.0.1:4242",
+        });
+
+        client.start({
+            onSnapshot: (value) => snapshots.push(value),
+        });
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+        const careResponse = await client.pet(
+            1_750,
+            180,
+            "00000000-0000-0000-0000-000000000099",
+        );
+
+        expect(fetch).toHaveBeenNthCalledWith(
+            2,
+            "http://127.0.0.1:4242/api/v1/care/pet",
+            expect.objectContaining({
+                method: "POST",
+                headers: expect.objectContaining({
+                    Authorization: "Bearer care-secret",
+                    "Content-Type": "application/json",
+                }),
+                body: JSON.stringify({
+                    actionId: "00000000-0000-0000-0000-000000000099",
+                    interactionMs: 1750,
+                    pointerDistance: 180,
+                }),
+            }),
+        );
+        expect(careResponse).toEqual({ ...cared, duplicate: false });
+        expect(snapshots).toEqual([initial, { ...cared, duplicate: false }]);
+        client.close();
     });
 
     it("reports whether the runtime enables the guarded demo controls", async () => {
