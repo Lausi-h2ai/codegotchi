@@ -9,6 +9,8 @@ use crate::event::ActivityKind;
 
 const NEED_MIN: f32 = 0.0;
 const NEED_MAX: f32 = 100.0;
+const NEED_SCALE: f64 = 1_000_000_000_000.0;
+const NEED_SCALE_MAX: i64 = 100_000_000_000_000;
 
 fn clamp_need(value: f32) -> f32 {
     if value.is_nan() || value == f32::NEG_INFINITY {
@@ -23,22 +25,27 @@ fn clamp_need(value: f32) -> f32 {
 /// The four bounded needs owned by a pet.
 ///
 /// Hunger is inverted relative to the other needs: zero means full and 100 means starving.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct PetNeeds {
     hunger: f32,
     energy: f32,
     happiness: f32,
     cleanliness: f32,
+    #[serde(skip)]
+    exact: Option<[i64; 4]>,
 }
 
 impl PetNeeds {
     pub fn new(hunger: f32, energy: f32, happiness: f32, cleanliness: f32) -> Self {
-        Self {
+        let mut needs = Self {
             hunger: clamp_need(hunger),
             energy: clamp_need(energy),
             happiness: clamp_need(happiness),
             cleanliness: clamp_need(cleanliness),
-        }
+            exact: None,
+        };
+        needs.sync_exact_from_visible();
+        needs
     }
 
     pub fn hunger(self) -> f32 {
@@ -58,35 +65,119 @@ impl PetNeeds {
     }
 
     pub fn set_hunger(&mut self, value: f32) {
-        self.hunger = clamp_need(value);
+        self.set_exact(0, value);
     }
 
     pub fn set_energy(&mut self, value: f32) {
-        self.energy = clamp_need(value);
+        self.set_exact(1, value);
     }
 
     pub fn set_happiness(&mut self, value: f32) {
-        self.happiness = clamp_need(value);
+        self.set_exact(2, value);
     }
 
     pub fn set_cleanliness(&mut self, value: f32) {
-        self.cleanliness = clamp_need(value);
+        self.set_exact(3, value);
     }
 
     pub fn adjust_hunger(&mut self, delta: f32) {
-        self.set_hunger(self.hunger + delta);
+        self.adjust_exact(0, delta);
+    }
+
+    pub(crate) fn adjust_hunger_precise(&mut self, delta: f64) {
+        self.adjust_exact_precise(0, delta);
     }
 
     pub fn adjust_energy(&mut self, delta: f32) {
-        self.set_energy(self.energy + delta);
+        self.adjust_exact(1, delta);
+    }
+
+    pub(crate) fn adjust_energy_precise(&mut self, delta: f64) {
+        self.adjust_exact_precise(1, delta);
     }
 
     pub fn adjust_happiness(&mut self, delta: f32) {
-        self.set_happiness(self.happiness + delta);
+        self.adjust_exact(2, delta);
+    }
+
+    pub(crate) fn adjust_happiness_precise(&mut self, delta: f64) {
+        self.adjust_exact_precise(2, delta);
     }
 
     pub fn adjust_cleanliness(&mut self, delta: f32) {
-        self.set_cleanliness(self.cleanliness + delta);
+        self.adjust_exact(3, delta);
+    }
+
+    pub(crate) fn adjust_cleanliness_precise(&mut self, delta: f64) {
+        self.adjust_exact_precise(3, delta);
+    }
+
+    fn sync_exact_from_visible(&mut self) {
+        self.exact = Some([
+            scale_need(self.hunger),
+            scale_need(self.energy),
+            scale_need(self.happiness),
+            scale_need(self.cleanliness),
+        ]);
+    }
+
+    fn set_exact(&mut self, index: usize, value: f32) {
+        if self.exact.is_none() {
+            self.sync_exact_from_visible();
+        }
+        let value = clamp_need(value);
+        self.exact.as_mut().expect("exact needs initialized")[index] = scale_need(value);
+        self.set_visible_from_exact(index);
+    }
+
+    fn adjust_exact(&mut self, index: usize, delta: f32) {
+        self.adjust_exact_precise(index, delta as f64);
+    }
+
+    fn adjust_exact_precise(&mut self, index: usize, delta: f64) {
+        if !delta.is_finite() {
+            self.set_exact(index, self.visible(index) + delta as f32);
+            return;
+        }
+        if self.exact.is_none() {
+            self.sync_exact_from_visible();
+        }
+        let exact = self.exact.as_mut().expect("exact needs initialized");
+        let scaled_delta = (delta * NEED_SCALE).round();
+        let scaled_delta = if scaled_delta >= i64::MAX as f64 {
+            i64::MAX
+        } else if scaled_delta <= i64::MIN as f64 {
+            i64::MIN
+        } else {
+            scaled_delta as i64
+        };
+        exact[index] = exact[index]
+            .saturating_add(scaled_delta)
+            .clamp(0, NEED_SCALE_MAX);
+        self.set_visible_from_exact(index);
+    }
+
+    fn visible(&self, index: usize) -> f32 {
+        match index {
+            0 => self.hunger,
+            1 => self.energy,
+            2 => self.happiness,
+            3 => self.cleanliness,
+            _ => unreachable!("need index"),
+        }
+    }
+
+    fn set_visible_from_exact(&mut self, index: usize) {
+        let value =
+            self.exact.as_ref().expect("exact needs initialized")[index] as f64 / NEED_SCALE;
+        let value = value as f32;
+        match index {
+            0 => self.hunger = value,
+            1 => self.energy = value,
+            2 => self.happiness = value,
+            3 => self.cleanliness = value,
+            _ => unreachable!("need index"),
+        }
     }
 
     pub(crate) fn is_valid(self) -> bool {
@@ -94,6 +185,19 @@ impl PetNeeds {
             .into_iter()
             .all(|value| value.is_finite() && (NEED_MIN..=NEED_MAX).contains(&value))
     }
+}
+
+impl PartialEq for PetNeeds {
+    fn eq(&self, other: &Self) -> bool {
+        self.hunger == other.hunger
+            && self.energy == other.energy
+            && self.happiness == other.happiness
+            && self.cleanliness == other.cleanliness
+    }
+}
+
+fn scale_need(value: f32) -> i64 {
+    (value as f64 * NEED_SCALE).round() as i64
 }
 
 impl Default for PetNeeds {
@@ -333,6 +437,7 @@ impl Pet {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)]
     pub(crate) fn from_snapshot(
         id: Uuid,
         name: String,

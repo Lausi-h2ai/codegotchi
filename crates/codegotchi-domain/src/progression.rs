@@ -7,6 +7,10 @@ use uuid::Uuid;
 
 use crate::{
     NAP_DURATION,
+    attention::{
+        AttentionIncidentKind, MAX_CATCH_UP_INCIDENTS, PetDemand, PetDemandKind, incident_delay_ms,
+        incident_id, incident_kind,
+    },
     behavior::BehaviorCoordinator,
     care::{CareCommand, CareError, CareResult},
     clock::Clock,
@@ -16,12 +20,9 @@ use crate::{
     poop::{DefaultPoopGenerationStrategy, PoopGenerationStrategy},
 };
 
-const SECONDS_PER_HOUR: f32 = 3_600.0;
-const ACTIVE_HUNGER_PER_HOUR: f32 = 4.0;
-const ACTIVE_ENERGY_PER_HOUR: f32 = -6.0;
-const IDLE_HUNGER_PER_HOUR: f32 = 1.0;
-const IDLE_ENERGY_PER_HOUR: f32 = 8.0;
-const POOP_CLEANLINESS_PER_HOUR: f32 = -2.0;
+const HUNGER_PER_HOUR: f32 = 25.0;
+const ENERGY_PER_HOUR: f32 = -50.0;
+const INCIDENT_PRESSURE_PER_HOUR: f32 = 240.0;
 /// A hammock nap is a deliberately fast power nap: 20 energy points per
 /// second, so a 5-second nap restores the full meter from empty.
 const NAP_ENERGY_PER_HOUR: f32 = 72_000.0;
@@ -36,18 +37,23 @@ pub trait NeedProgressionStrategy {
 pub struct DefaultNeedProgressionStrategy;
 
 impl NeedProgressionStrategy for DefaultNeedProgressionStrategy {
-    fn progress(&self, pet: &mut Pet, elapsed: Duration, previous_activity: AgentActivityState) {
-        let elapsed_hours = elapsed_hours(elapsed);
+    fn progress(&self, pet: &mut Pet, elapsed: Duration, _previous_activity: AgentActivityState) {
+        let elapsed_hours = elapsed_hours_precise(elapsed);
         if elapsed_hours <= 0.0 {
             return;
         }
 
-        let (hunger_rate, energy_rate) = match previous_activity {
-            AgentActivityState::Active(_) => (ACTIVE_HUNGER_PER_HOUR, ACTIVE_ENERGY_PER_HOUR),
-            AgentActivityState::Idle
-            | AgentActivityState::WaitingForUser
-            | AgentActivityState::Blocked => (IDLE_HUNGER_PER_HOUR, IDLE_ENERGY_PER_HOUR),
-        };
+        let affection_count = pet
+            .pending_demands()
+            .iter()
+            .filter(|demand| demand.kind() == PetDemandKind::Affection)
+            .count() as f64;
+        let snack_count = pet
+            .pending_demands()
+            .iter()
+            .filter(|demand| demand.kind() == PetDemandKind::Snack)
+            .count() as f64;
+        let poop_count = pet.pending_poops().len() as f64;
 
         // Energy recovers at the nap rate for the portion of this elapsed
         // segment that overlaps the nap window, and at the normal rate for
@@ -58,16 +64,24 @@ impl NeedProgressionStrategy for DefaultNeedProgressionStrategy {
         let segment_end = pet.last_updated_at();
         let nap_hours = pet
             .napping_until()
-            .map(|until| nap_elapsed_hours(segment_start, segment_end, until))
+            .map(|until| nap_elapsed_hours_precise(segment_start, segment_end, until))
             .unwrap_or_default();
 
-        let pending_poop_count = pet.pending_poops().len() as f32;
         let needs = pet.needs_mut();
-        needs.adjust_hunger(hunger_rate * elapsed_hours);
-        needs.adjust_energy(
-            energy_rate * (elapsed_hours - nap_hours) + NAP_ENERGY_PER_HOUR * nap_hours,
+        needs.adjust_hunger_precise(
+            (HUNGER_PER_HOUR as f64 + INCIDENT_PRESSURE_PER_HOUR as f64 * snack_count)
+                * elapsed_hours,
         );
-        needs.adjust_cleanliness(POOP_CLEANLINESS_PER_HOUR * elapsed_hours * pending_poop_count);
+        needs.adjust_happiness_precise(
+            -(INCIDENT_PRESSURE_PER_HOUR as f64) * affection_count * elapsed_hours,
+        );
+        needs.adjust_cleanliness_precise(
+            -(INCIDENT_PRESSURE_PER_HOUR as f64) * poop_count * elapsed_hours,
+        );
+        needs.adjust_energy_precise(
+            ENERGY_PER_HOUR as f64 * (elapsed_hours - nap_hours)
+                + NAP_ENERGY_PER_HOUR as f64 * nap_hours,
+        );
     }
 }
 
@@ -105,9 +119,15 @@ pub struct SimulationSnapshot {
     pub digestion_points: u64,
     pub last_updated_at: DateTime<Utc>,
     pub pending_poops: Vec<Poop>,
+    #[serde(default)]
+    pub pending_demands: Vec<PetDemand>,
     pub inventory: crate::pet::FoodInventory,
     pub processed_care_ids: BTreeSet<Uuid>,
     pub poop_sequence: u64,
+    #[serde(default)]
+    pub attention_sequence: u64,
+    #[serde(default)]
+    pub next_incident_at: Option<DateTime<Utc>>,
     pub session_activities: BTreeMap<Uuid, SessionActivity>,
     pub processed_event_ids: BTreeSet<Uuid>,
     pub last_activity_at: Option<DateTime<Utc>>,
@@ -145,6 +165,8 @@ pub struct PetSimulation<C, N, P = DefaultPoopGenerationStrategy> {
     last_outcome_at: Option<DateTime<Utc>>,
     consecutive_failures: u32,
     settings: PetSettings,
+    attention_sequence: u64,
+    next_incident_at: DateTime<Utc>,
 }
 
 impl<C, N> PetSimulation<C, N, DefaultPoopGenerationStrategy>
@@ -179,6 +201,9 @@ where
     /// Constructs a simulation with an explicitly injected poop strategy.
     pub fn with_poop_strategy(pet: Pet, clock: C, progression: N, poop_strategy: P) -> Self {
         let initial_timestamp = pet.last_updated_at();
+        let attention_sequence = 0;
+        let next_incident_at = initial_timestamp
+            + Duration::milliseconds(incident_delay_ms(pet.id(), attention_sequence) as i64);
         Self {
             pet,
             clock,
@@ -191,6 +216,8 @@ where
             last_outcome_at: None,
             consecutive_failures: 0,
             settings: PetSettings::default(),
+            attention_sequence,
+            next_incident_at,
         }
     }
 
@@ -291,9 +318,12 @@ where
             digestion_points: self.pet.digestion_points(),
             last_updated_at: self.pet.last_updated_at(),
             pending_poops: self.pet.pending_poops().to_vec(),
+            pending_demands: self.pet.pending_demands().to_vec(),
             inventory: self.pet.inventory().clone(),
             processed_care_ids: self.processed_care_ids.clone(),
             poop_sequence: self.pet.poop_sequence(),
+            attention_sequence: self.attention_sequence,
+            next_incident_at: Some(self.next_incident_at),
             session_activities: self.session_activities.clone(),
             processed_event_ids: self.processed_event_ids.clone(),
             last_activity_at: self.last_activity_at,
@@ -609,7 +639,7 @@ where
         }
     }
 
-    fn advance_elapsed_to(
+    fn progress_segment_to(
         &mut self,
         target: DateTime<Utc>,
         previous_activity: AgentActivityState,
@@ -621,6 +651,70 @@ where
         }
         self.pet.clear_expired_nap(target);
         elapsed
+    }
+
+    fn advance_elapsed_to(
+        &mut self,
+        target: DateTime<Utc>,
+        previous_activity: AgentActivityState,
+    ) -> Duration {
+        let start = self.pet.last_updated_at();
+        let mut created = 0usize;
+
+        while self.next_incident_at <= target && created < MAX_CATCH_UP_INCIDENTS {
+            let due = self.next_incident_at.max(self.pet.last_updated_at());
+            self.progress_segment_to(due, previous_activity);
+            self.create_attention_incident(due);
+            self.attention_sequence = self.attention_sequence.saturating_add(1);
+            self.next_incident_at = due
+                + Duration::milliseconds(
+                    incident_delay_ms(self.pet.id(), self.attention_sequence) as i64
+                );
+            created += 1;
+        }
+
+        if created == MAX_CATCH_UP_INCIDENTS && self.next_incident_at <= target {
+            self.progress_segment_to(target, previous_activity);
+            self.next_incident_at = target
+                + Duration::milliseconds(
+                    incident_delay_ms(self.pet.id(), self.attention_sequence) as i64
+                );
+        } else {
+            self.progress_segment_to(target, previous_activity);
+        }
+
+        target.signed_duration_since(start).max(Duration::zero())
+    }
+
+    fn create_attention_incident(&mut self, created_at: DateTime<Utc>) {
+        match incident_kind(self.pet.id(), self.attention_sequence) {
+            AttentionIncidentKind::Affection => self.pet.push_demand(PetDemand::new(
+                incident_id(
+                    self.pet.id(),
+                    self.attention_sequence,
+                    AttentionIncidentKind::Affection,
+                ),
+                PetDemandKind::Affection,
+                created_at,
+            )),
+            AttentionIncidentKind::Snack => self.pet.push_demand(PetDemand::new(
+                incident_id(
+                    self.pet.id(),
+                    self.attention_sequence,
+                    AttentionIncidentKind::Snack,
+                ),
+                PetDemandKind::Snack,
+                created_at,
+            )),
+            AttentionIncidentKind::Poop => self.pet.push_poop(Poop::new(
+                incident_id(
+                    self.pet.id(),
+                    self.attention_sequence,
+                    AttentionIncidentKind::Poop,
+                ),
+                created_at,
+            )),
+        }
     }
 
     fn refresh_activity(&mut self) {
@@ -656,9 +750,16 @@ where
         poop_strategy: P,
     ) -> Result<Self, SnapshotRestoreError> {
         let mut snapshot = snapshot;
+        let now = clock.now();
         validate_snapshot(&snapshot)?;
-        reanchor_snapshot_to_wall_clock(&mut snapshot, clock.now());
-        let pet = Pet::from_snapshot(
+        reanchor_snapshot_to_wall_clock(&mut snapshot, now);
+        let next_incident_at = snapshot.next_incident_at.unwrap_or_else(|| {
+            now + Duration::milliseconds(incident_delay_ms(
+                snapshot.pet_id,
+                snapshot.attention_sequence,
+            ) as i64)
+        });
+        let pet = Pet::from_snapshot_with_demands(
             snapshot.pet_id,
             snapshot.name.clone(),
             snapshot.species,
@@ -668,6 +769,7 @@ where
             snapshot.digestion_points,
             snapshot.last_updated_at,
             snapshot.pending_poops.clone(),
+            snapshot.pending_demands.clone(),
             snapshot.activity,
             snapshot.recent_outcome,
             snapshot.inventory.clone(),
@@ -686,6 +788,8 @@ where
             last_outcome_at: snapshot.last_outcome_at,
             consecutive_failures: snapshot.consecutive_failures,
             settings: PetSettings::new(snapshot.enforcement_mode),
+            attention_sequence: snapshot.attention_sequence,
+            next_incident_at,
         })
     }
 }
@@ -715,6 +819,10 @@ fn reanchor_snapshot_to_wall_clock(snapshot: &mut SimulationSnapshot, now: DateT
     for poop in &mut snapshot.pending_poops {
         poop.shift_created_at(-shift);
     }
+    for demand in &mut snapshot.pending_demands {
+        demand.shift_created_at(-shift);
+    }
+    snapshot.next_incident_at = snapshot.next_incident_at.map(shift_back);
 }
 
 fn validate_snapshot(snapshot: &SimulationSnapshot) -> Result<(), SnapshotRestoreError> {
@@ -750,9 +858,26 @@ fn validate_snapshot(snapshot: &SimulationSnapshot) -> Result<(), SnapshotRestor
             "pending poop ids must be unique".to_owned(),
         ));
     }
-    if !snapshot.pending_poops.is_empty() && snapshot.poop_sequence == 0 {
+    let has_non_attention_poop = snapshot.pending_poops.iter().any(|poop| {
+        !(0..snapshot.attention_sequence).any(|sequence| {
+            incident_id(snapshot.pet_id, sequence, AttentionIncidentKind::Poop) == poop.id()
+        })
+    });
+    if has_non_attention_poop && snapshot.poop_sequence == 0 {
         return Err(SnapshotRestoreError::InvariantViolation(
             "pending poops require a positive poop sequence".to_owned(),
+        ));
+    }
+    if snapshot
+        .pending_demands
+        .iter()
+        .map(|demand| demand.id())
+        .collect::<BTreeSet<_>>()
+        .len()
+        != snapshot.pending_demands.len()
+    {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "pending demand ids must be unique".to_owned(),
         ));
     }
     if snapshot
@@ -810,7 +935,7 @@ fn validate_snapshot(snapshot: &SimulationSnapshot) -> Result<(), SnapshotRestor
         ));
     }
 
-    let pet = Pet::from_snapshot(
+    let pet = Pet::from_snapshot_with_demands(
         snapshot.pet_id,
         snapshot.name.clone(),
         snapshot.species,
@@ -820,6 +945,7 @@ fn validate_snapshot(snapshot: &SimulationSnapshot) -> Result<(), SnapshotRestor
         snapshot.digestion_points,
         snapshot.last_updated_at,
         snapshot.pending_poops.clone(),
+        snapshot.pending_demands.clone(),
         snapshot.activity,
         snapshot.recent_outcome,
         snapshot.inventory.clone(),
@@ -904,23 +1030,22 @@ fn is_active(activity: AgentActivityState) -> bool {
     matches!(activity, AgentActivityState::Active(_))
 }
 
-fn elapsed_hours(elapsed: Duration) -> f32 {
-    let Ok(duration) = elapsed.to_std() else {
-        return 0.0;
-    };
-
-    duration.as_secs_f32() / SECONDS_PER_HOUR
+fn elapsed_hours_precise(elapsed: Duration) -> f64 {
+    let seconds = elapsed.num_seconds();
+    let remainder = elapsed - Duration::seconds(seconds);
+    seconds as f64 / 3_600.0
+        + remainder.num_nanoseconds().unwrap_or_default() as f64 / 3_600_000_000_000.0
 }
 
-fn nap_elapsed_hours(
+fn nap_elapsed_hours_precise(
     segment_start: DateTime<Utc>,
     segment_end: DateTime<Utc>,
     napping_until: DateTime<Utc>,
-) -> f32 {
+) -> f64 {
     if napping_until <= segment_start {
         return 0.0;
     }
-    elapsed_hours(segment_end.min(napping_until) - segment_start)
+    elapsed_hours_precise(segment_end.min(napping_until) - segment_start)
 }
 
 #[cfg(test)]
@@ -965,29 +1090,342 @@ mod tests {
         PetSimulation::new(pet, clock, DefaultNeedProgressionStrategy)
     }
 
-    #[test]
-    fn fractional_active_progression_and_multiple_poops_are_linear() {
-        let mut simulation = simulation();
-        simulation
-            .pet
-            .pending_poops
-            .push(Poop::new(Uuid::from_u128(1), start()));
-        simulation
-            .pet
-            .pending_poops
-            .push(Poop::new(Uuid::from_u128(2), start()));
-        simulation
-            .pet
-            .set_activity(AgentActivityState::Active(ActivityKind::Editing));
+    fn pet_with_activity(activity: AgentActivityState) -> Pet {
+        let mut pet = Pet::new(Uuid::from_u128(9), "Mochi", PetSpecies::Cat, start());
+        pet.set_activity(activity);
+        pet
+    }
 
-        simulation.advance_elapsed_to(
-            start() + Duration::minutes(30),
+    #[test]
+    fn healthy_pet_uses_wall_clock_baseline_in_every_activity_state() {
+        for activity in [
+            AgentActivityState::Idle,
+            AgentActivityState::WaitingForUser,
+            AgentActivityState::Blocked,
             AgentActivityState::Active(ActivityKind::Editing),
+        ] {
+            let mut pet = pet_with_activity(activity);
+            DefaultNeedProgressionStrategy.progress(&mut pet, Duration::hours(1), activity);
+            assert_eq!(pet.needs().hunger(), 25.0, "activity={activity:?}");
+            assert_eq!(pet.needs().energy(), 50.0, "activity={activity:?}");
+        }
+    }
+
+    #[test]
+    fn nap_recovery_applies_only_to_the_nap_covered_slice() {
+        let mut pet = pet_with_activity(AgentActivityState::Idle);
+        pet.needs_mut().set_energy(50.0);
+        pet.start_nap(start() + Duration::seconds(2));
+        let elapsed = pet.advance_to(start() + Duration::seconds(5));
+
+        DefaultNeedProgressionStrategy.progress(&mut pet, elapsed, AgentActivityState::Idle);
+
+        // Three seconds decay at 50/hour, then two seconds recover at 20/second.
+        let expected = 50.0 - 3.0 * (50.0 / 3_600.0) + 2.0 * 20.0;
+        assert!((pet.needs().energy() - expected).abs() < 0.0001);
+        assert_eq!(pet.needs().hunger(), 25.0 * (5.0 / 3_600.0));
+    }
+
+    #[test]
+    fn stacked_affection_pressure_is_four_points_per_minute_in_waiting_state() {
+        let at = start();
+        let mut pet = pet_with_activity(AgentActivityState::WaitingForUser);
+        pet.push_demand(PetDemand::new(
+            Uuid::from_u128(1),
+            PetDemandKind::Affection,
+            at,
+        ));
+        pet.push_demand(PetDemand::new(
+            Uuid::from_u128(2),
+            PetDemandKind::Affection,
+            at,
+        ));
+        let elapsed = pet.advance_to(at + Duration::minutes(5));
+
+        DefaultNeedProgressionStrategy.progress(
+            &mut pet,
+            elapsed,
+            AgentActivityState::WaitingForUser,
         );
 
-        assert_eq!(simulation.pet.needs().hunger(), 2.0);
-        assert_eq!(simulation.pet.needs().energy(), 97.0);
-        assert_eq!(simulation.pet.needs().cleanliness(), 98.0);
+        assert_eq!(pet.needs().happiness(), 60.0);
+    }
+
+    #[test]
+    fn stacked_snack_pressure_increases_hunger_beyond_the_wall_clock_baseline() {
+        let at = start();
+        let mut pet = pet_with_activity(AgentActivityState::WaitingForUser);
+        pet.push_demand(PetDemand::new(Uuid::from_u128(3), PetDemandKind::Snack, at));
+        pet.push_demand(PetDemand::new(Uuid::from_u128(4), PetDemandKind::Snack, at));
+        let elapsed = pet.advance_to(at + Duration::minutes(5));
+
+        DefaultNeedProgressionStrategy.progress(
+            &mut pet,
+            elapsed,
+            AgentActivityState::WaitingForUser,
+        );
+
+        let expected = (25.0 + 2.0 * 240.0) * (5.0 / 60.0);
+        assert!((pet.needs().hunger() - expected).abs() < 0.0001);
+    }
+
+    #[test]
+    fn stacked_poop_pressure_is_four_points_per_minute() {
+        let at = start();
+        let mut pet = pet_with_activity(AgentActivityState::WaitingForUser);
+        pet.push_poop(Poop::new(Uuid::from_u128(5), at));
+        pet.push_poop(Poop::new(Uuid::from_u128(6), at));
+        let elapsed = pet.advance_to(at + Duration::minutes(5));
+
+        DefaultNeedProgressionStrategy.progress(
+            &mut pet,
+            elapsed,
+            AgentActivityState::WaitingForUser,
+        );
+
+        assert_eq!(pet.needs().cleanliness(), 60.0);
+    }
+
+    #[test]
+    fn new_simulation_persists_an_absolute_first_incident_deadline() {
+        let simulation = simulation();
+        let snapshot = simulation.snapshot();
+
+        assert!(snapshot.pending_demands.is_empty());
+        assert_eq!(snapshot.attention_sequence, 0);
+        assert_eq!(
+            snapshot.next_incident_at,
+            Some(start() + Duration::milliseconds(incident_delay_ms(Uuid::from_u128(9), 0) as i64))
+        );
+    }
+
+    fn snapshot_with_deadline(deadline: DateTime<Utc>) -> SimulationSnapshot {
+        let simulation = simulation();
+        let mut snapshot = simulation.snapshot();
+        snapshot.next_incident_at = Some(deadline);
+        snapshot
+    }
+
+    #[test]
+    fn incident_creation_happens_only_after_crossing_the_due_timestamp() {
+        let snapshot = snapshot_with_deadline(start() + Duration::minutes(3));
+        let mut simulation = PetSimulation::from_snapshot(
+            snapshot,
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+
+        let before_due =
+            simulation.current_state_at(start() + Duration::minutes(3) - Duration::milliseconds(1));
+        assert!(before_due.pending_demands.is_empty());
+        assert!(before_due.pending_poops.is_empty());
+        assert_eq!(before_due.attention_sequence, 0);
+
+        let after_due =
+            simulation.current_state_at(start() + Duration::minutes(3) + Duration::milliseconds(1));
+        assert_eq!(after_due.attention_sequence, 1);
+        match incident_kind(Uuid::from_u128(9), 0) {
+            AttentionIncidentKind::Affection | AttentionIncidentKind::Snack => {
+                assert_eq!(after_due.pending_demands.len(), 1);
+                assert!(after_due.pending_poops.is_empty());
+                assert_eq!(
+                    after_due.pending_demands[0].created_at(),
+                    start() + Duration::minutes(3)
+                );
+            }
+            AttentionIncidentKind::Poop => {
+                assert!(after_due.pending_demands.is_empty());
+                assert_eq!(after_due.pending_poops.len(), 1);
+                assert_eq!(
+                    after_due.pending_poops[0].created_at(),
+                    start() + Duration::minutes(3)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn equivalent_wall_clock_advancement_is_deterministic_with_at_most_five_incidents() {
+        let snapshot = snapshot_with_deadline(start() + Duration::minutes(3));
+        let target = start() + Duration::minutes(14);
+        let mut jumped = PetSimulation::from_snapshot(
+            snapshot.clone(),
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+        let mut stepped = PetSimulation::from_snapshot(
+            snapshot,
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+
+        jumped.current_state_at(target);
+        let mut timestamp = start();
+        while timestamp < target {
+            timestamp += Duration::seconds(1);
+            stepped.current_state_at(timestamp.min(target));
+        }
+
+        assert!(jumped.snapshot().attention_sequence <= MAX_CATCH_UP_INCIDENTS as u64);
+        assert_eq!(jumped.snapshot(), stepped.snapshot());
+    }
+
+    #[test]
+    fn long_gap_creates_five_incidents_and_reanchors_after_the_target() {
+        let target = start() + Duration::hours(24);
+        let snapshot = snapshot_with_deadline(start() + Duration::minutes(3));
+        let mut simulation = PetSimulation::from_snapshot(
+            snapshot,
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+
+        let state = simulation.current_state_at(target);
+
+        assert_eq!(state.attention_sequence, MAX_CATCH_UP_INCIDENTS as u64);
+        assert_eq!(state.pending_demands.len() + state.pending_poops.len(), 5);
+        assert_eq!(state.needs.hunger(), 100.0);
+        assert_eq!(state.needs.energy(), 0.0);
+        assert_eq!(state.needs.happiness(), 0.0);
+        assert_eq!(state.needs.cleanliness(), 0.0);
+        let next = state.next_incident_at.unwrap();
+        assert!(next > target);
+        assert!(next <= target + Duration::minutes(5));
+
+        let after_one_second = simulation.current_state_at(target + Duration::seconds(1));
+        assert_eq!(after_one_second.attention_sequence, 5);
+        assert_eq!(
+            after_one_second.pending_demands.len() + after_one_second.pending_poops.len(),
+            5
+        );
+    }
+
+    #[test]
+    fn pending_demands_round_trip_through_simulation_snapshots() {
+        let mut original = simulation();
+        let demand = PetDemand::new(
+            Uuid::from_u128(77),
+            PetDemandKind::Affection,
+            start() - Duration::minutes(2),
+        );
+        original.pet.push_demand(demand.clone());
+
+        let restored = PetSimulation::from_snapshot(
+            original.snapshot(),
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+
+        assert_eq!(restored.pet().pending_demands(), &[demand]);
+    }
+
+    #[test]
+    fn future_reanchoring_shifts_pending_demand_and_incident_deadline_timestamps() {
+        let mut simulation = simulation();
+        simulation.pet.push_demand(PetDemand::new(
+            Uuid::from_u128(78),
+            PetDemandKind::Snack,
+            start(),
+        ));
+        let mut snapshot = simulation.snapshot();
+        let ahead = Duration::days(8);
+        snapshot.last_updated_at += ahead;
+        snapshot.behavior = PetBehavior::Sleeping;
+        snapshot.next_incident_at = snapshot.next_incident_at.map(|at| at + ahead);
+        snapshot.pending_demands[0] =
+            PetDemand::new(Uuid::from_u128(78), PetDemandKind::Snack, start() + ahead);
+
+        let restored = PetSimulation::from_snapshot(
+            snapshot,
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+        let resumed = restored.snapshot();
+
+        assert_eq!(resumed.last_updated_at, start());
+        assert_eq!(resumed.pending_demands[0].created_at(), start());
+        assert_eq!(
+            resumed.next_incident_at,
+            Some(start() + Duration::milliseconds(incident_delay_ms(Uuid::from_u128(9), 0) as i64))
+        );
+    }
+
+    #[test]
+    fn duplicate_pending_demand_ids_are_rejected_during_restore() {
+        let simulation = simulation();
+        let mut snapshot = simulation.snapshot();
+        let duplicate = PetDemand::new(Uuid::from_u128(79), PetDemandKind::Affection, start());
+        snapshot.pending_demands = vec![duplicate.clone(), duplicate];
+
+        let error = PetSimulation::from_snapshot(
+            snapshot,
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .err()
+        .expect("duplicate demand IDs must be rejected");
+        assert!(matches!(
+            error,
+            SnapshotRestoreError::InvariantViolation(message)
+                if message == "pending demand ids must be unique"
+        ));
+    }
+
+    #[test]
+    fn every_deterministic_schedule_reaches_strict_severe_neglect_within_thirty_minutes() {
+        use crate::permission::{
+            CommandCategory, CommandClassification, CommandPurpose, WorkPermissionPolicy,
+        };
+
+        for pet_id in 1..=100u128 {
+            let pet = Pet::new(Uuid::from_u128(pet_id), "Mochi", PetSpecies::Cat, start());
+            let mut simulation =
+                PetSimulation::new(pet, FakeClock::new(start()), DefaultNeedProgressionStrategy);
+            simulation.set_enforcement_mode(EnforcementMode::Strict);
+            simulation.current_state_at(start() + Duration::minutes(30));
+
+            let decision = WorkPermissionPolicy::evaluate(
+                simulation.pet(),
+                &CommandClassification::new(
+                    CommandCategory::Development,
+                    CommandPurpose::Uncertain,
+                ),
+                &PetSettings::new(EnforcementMode::Strict),
+            );
+            assert!(decision.is_blocked(), "pet_id={pet_id}");
+        }
+    }
+
+    #[test]
+    fn legacy_snapshots_without_attention_fields_schedule_from_restore_wall_clock() {
+        let snapshot = simulation().snapshot();
+        let mut encoded = serde_json::to_value(snapshot).unwrap();
+        let object = encoded.as_object_mut().expect("snapshot object");
+        object.remove("pendingDemands");
+        object.remove("attentionSequence");
+        object.remove("nextIncidentAt");
+
+        let legacy: SimulationSnapshot = serde_json::from_value(encoded).unwrap();
+        assert!(legacy.pending_demands.is_empty());
+        assert_eq!(legacy.attention_sequence, 0);
+        assert_eq!(legacy.next_incident_at, None);
+
+        let restored = PetSimulation::from_snapshot(
+            legacy,
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+        assert_eq!(
+            restored.snapshot().next_incident_at,
+            Some(start() + Duration::milliseconds(incident_delay_ms(Uuid::from_u128(9), 0) as i64))
+        );
     }
 
     #[test]
