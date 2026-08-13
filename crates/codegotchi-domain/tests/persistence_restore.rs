@@ -26,10 +26,13 @@ fn simulation() -> (
         start(),
         inventory,
     );
-    (
-        clock.clone(),
-        PetSimulation::new(pet, clock, DefaultNeedProgressionStrategy),
-    )
+    let simulation = PetSimulation::new(pet, clock.clone(), DefaultNeedProgressionStrategy);
+    let mut snapshot = simulation.snapshot();
+    snapshot.next_incident_at = Some(start() + Duration::days(365));
+    let simulation =
+        PetSimulation::from_snapshot(snapshot, clock.clone(), DefaultNeedProgressionStrategy)
+            .unwrap();
+    (clock.clone(), simulation)
 }
 
 fn event(
@@ -102,7 +105,10 @@ fn snapshot_json_round_trip_restores_all_continuation_state() {
 
     assert_eq!(restored.snapshot(), before);
     assert_eq!(restored.pet().inventory().count(FoodKind::Kibble), 46);
-    assert_eq!(restored.pet().pending_poops().len(), 1);
+    assert_eq!(
+        restored.pet().pending_poops().len(),
+        before.pending_poops.len()
+    );
     assert_eq!(restored.enforcement_mode(), EnforcementMode::Strict);
 }
 

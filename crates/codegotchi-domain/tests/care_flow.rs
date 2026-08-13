@@ -21,6 +21,12 @@ fn inventory(food: FoodKind, amount: u32) -> FoodInventory {
     inventory
 }
 
+fn without_attention(simulation: Simulation, clock: &FakeClock) -> Simulation {
+    let mut snapshot = simulation.snapshot();
+    snapshot.next_incident_at = Some(start() + Duration::days(365));
+    PetSimulation::from_snapshot(snapshot, clock.clone(), DefaultNeedProgressionStrategy).unwrap()
+}
+
 fn simulation_with_inventory(food: FoodKind, amount: u32) -> (FakeClock, Simulation) {
     let clock = FakeClock::new(start());
     let pet = Pet::with_inventory(
@@ -30,10 +36,11 @@ fn simulation_with_inventory(food: FoodKind, amount: u32) -> (FakeClock, Simulat
         start(),
         inventory(food, amount),
     );
-    (
-        clock.clone(),
-        PetSimulation::new(pet, clock, DefaultNeedProgressionStrategy),
-    )
+    let simulation = without_attention(
+        PetSimulation::new(pet, clock.clone(), DefaultNeedProgressionStrategy),
+        &clock,
+    );
+    (clock, simulation)
 }
 
 fn event(id: u128, session_id: u128, kind: AgentEventKind, timestamp: DateTime<Utc>) -> AgentEvent {
@@ -157,7 +164,7 @@ fn all_foods_apply_literal_effects_and_consume_one_authoritative_item() {
             })
             .unwrap();
 
-        assert_eq!(simulation.pet().needs().hunger(), 50.0 - hunger_reduction);
+        assert_eq!(simulation.pet().needs().hunger(), 100.0 - hunger_reduction);
         assert_eq!(simulation.pet().digestion_points(), digestion);
         assert_eq!(simulation.pet().inventory().count(food), 0);
     }
@@ -165,7 +172,7 @@ fn all_foods_apply_literal_effects_and_consume_one_authoritative_item() {
 
 #[test]
 fn care_need_effects_are_exact_at_unclamped_public_baselines() {
-    let baseline = start() + Duration::hours(40);
+    let baseline = start() + Duration::minutes(96);
 
     let (clock, mut kibble) = simulation_with_inventory(FoodKind::Kibble, 1);
     kibble
@@ -242,7 +249,10 @@ fn care_need_effects_are_exact_at_unclamped_public_baselines() {
 
     let clock = FakeClock::new(start());
     let pet = Pet::new(Uuid::from_u128(410), "Mochi", PetSpecies::Cat, start());
-    let mut petting = PetSimulation::new(pet, clock.clone(), DefaultNeedProgressionStrategy);
+    let mut petting = without_attention(
+        PetSimulation::new(pet, clock.clone(), DefaultNeedProgressionStrategy),
+        &clock,
+    );
     petting
         .apply_event(&event(411, 7, AgentEventKind::SessionStarted, baseline))
         .unwrap();
@@ -287,7 +297,7 @@ fn care_need_effects_are_exact_at_unclamped_public_baselines() {
     cleaning
         .apply_event(&event(430, 7, AgentEventKind::SessionEnded, start()))
         .unwrap();
-    clock.advance(Duration::hours(20));
+    clock.advance(Duration::minutes(10));
     let before_cleaning = cleaning.current_state();
     assert_eq!(before_cleaning.needs.cleanliness(), 60.0);
     let poop_id = before_cleaning.pending_poops[0].id();
@@ -314,15 +324,15 @@ fn energy_drink_restores_energy_and_gives_a_sugar_rush_without_digestion() {
     simulation
         .apply_event(&event(2, 7, AgentEventKind::CommandStarted, start()))
         .unwrap();
-    clock.advance(Duration::hours(10));
+    clock.advance(Duration::minutes(72));
     let drained = simulation.current_state();
     assert_eq!(drained.needs.energy(), 40.0);
     assert_eq!(drained.needs.happiness(), 100.0);
     simulation
-        .apply_event(&failure_event(3, 7, start() + Duration::hours(10)))
+        .apply_event(&failure_event(3, 7, start() + Duration::minutes(72)))
         .unwrap();
     simulation
-        .apply_event(&failure_event(4, 7, start() + Duration::hours(10)))
+        .apply_event(&failure_event(4, 7, start() + Duration::minutes(72)))
         .unwrap();
     let before = simulation.current_state();
     assert_eq!(before.needs.energy(), 40.0);

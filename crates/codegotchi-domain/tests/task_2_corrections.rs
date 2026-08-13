@@ -36,10 +36,13 @@ fn simulation() -> (
 ) {
     let clock = FakeClock::new(start());
     let pet = Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, start());
-    (
-        clock.clone(),
-        PetSimulation::new(pet, clock, DefaultNeedProgressionStrategy),
-    )
+    let simulation = PetSimulation::new(pet, clock.clone(), DefaultNeedProgressionStrategy);
+    let mut snapshot = simulation.snapshot();
+    snapshot.next_incident_at = Some(start() + Duration::days(365));
+    let simulation =
+        PetSimulation::from_snapshot(snapshot, clock.clone(), DefaultNeedProgressionStrategy)
+            .unwrap();
+    (clock.clone(), simulation)
 }
 
 struct PanicClock;
@@ -79,8 +82,8 @@ fn event_time_is_the_only_timeline_for_apply_and_replay_needs_no_clock_schedule(
 
     assert_eq!(first.snapshot(), second.snapshot());
     assert_eq!(first.pet().last_updated_at(), start() + Duration::hours(2));
-    assert_eq!(first.pet().needs().hunger(), 5.0);
-    assert_eq!(first.pet().needs().energy(), 94.0);
+    assert_eq!(first.pet().needs().hunger(), 50.0);
+    assert_eq!(first.pet().needs().energy(), 0.0);
 }
 
 #[test]
@@ -605,8 +608,8 @@ fn maintenance_is_the_only_clock_driven_operation_and_stores_behavior() {
     assert_eq!(simulation.snapshot(), before_clock_advance);
 
     let current = simulation.current_state();
-    assert_eq!(current.needs.hunger(), 4.0);
-    assert_eq!(current.needs.energy(), 94.0);
+    assert_eq!(current.needs.hunger(), 25.0);
+    assert_eq!(current.needs.energy(), 50.0);
     assert_eq!(simulation.pet().behavior(), current.behavior);
     assert_eq!(
         simulation.pet().activity(),

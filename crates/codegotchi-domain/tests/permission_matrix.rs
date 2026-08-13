@@ -2,7 +2,7 @@ use chrono::{Duration, TimeZone, Utc};
 use codegotchi_domain::{
     ActivityKind, AgentEvent, AgentEventKind, CareCommand, CareResult, CommandCategory,
     CommandClassification, CommandPurpose, DefaultNeedProgressionStrategy, EnforcementMode,
-    EventMetadata, EventSource, FakeClock, FoodInventory, FoodKind, Pet, PetSettings,
+    EventMetadata, EventSource, FakeClock, FoodInventory, FoodKind, NAP_DURATION, Pet, PetSettings,
     PetSimulation, PetSpecies, RequiredAction, WorkDecision, WorkPermissionPolicy, WorkReasonCode,
 };
 use uuid::Uuid;
@@ -11,6 +11,12 @@ type Simulation = PetSimulation<FakeClock, DefaultNeedProgressionStrategy>;
 
 fn start() -> chrono::DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap()
+}
+
+fn without_attention(simulation: Simulation, clock: &FakeClock) -> Simulation {
+    let mut snapshot = simulation.snapshot();
+    snapshot.next_incident_at = Some(start() + Duration::days(365));
+    PetSimulation::from_snapshot(snapshot, clock.clone(), DefaultNeedProgressionStrategy).unwrap()
 }
 
 fn classification(purpose: CommandPurpose) -> CommandClassification {
@@ -30,23 +36,49 @@ fn classification(purpose: CommandPurpose) -> CommandClassification {
 fn healthy_simulation() -> Simulation {
     let clock = FakeClock::new(start());
     let pet = Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, start());
-    PetSimulation::new(pet, clock, DefaultNeedProgressionStrategy)
+    without_attention(
+        PetSimulation::new(pet, clock.clone(), DefaultNeedProgressionStrategy),
+        &clock,
+    )
 }
 
-/// Hunger rises at 1 point per idle hour, so advancing the clock by
-/// `target_hunger` hours lands exactly on the requested need.
+/// Hunger rises at 25 points per wall-clock hour, so advancing the clock by
+/// `target_hunger / 25` hours lands exactly on the requested need.
 fn hunger_simulation(target_hunger: f32) -> Simulation {
     let clock = FakeClock::new(start());
-    let pet = Pet::new(Uuid::from_u128(2), "Mochi", PetSpecies::Cat, start());
-    let mut simulation = PetSimulation::new(pet, clock.clone(), DefaultNeedProgressionStrategy);
-    clock.advance(Duration::hours(target_hunger as i64));
+    let mut inventory = FoodInventory::default();
+    inventory.add(FoodKind::EnergyDrink, 2);
+    let pet = Pet::with_inventory(
+        Uuid::from_u128(2),
+        "Mochi",
+        PetSpecies::Cat,
+        start(),
+        inventory,
+    );
+    let mut simulation = without_attention(
+        PetSimulation::new(pet, clock.clone(), DefaultNeedProgressionStrategy),
+        &clock,
+    );
+    let elapsed_seconds = (target_hunger as f64 / 25.0 * 3_600.0) as i64;
+    clock.advance(Duration::seconds(elapsed_seconds));
     simulation.current_state();
+    for action_id in 100..102 {
+        assert_eq!(
+            simulation
+                .apply_care(&CareCommand::Feed {
+                    action_id: Uuid::from_u128(action_id),
+                    food_id: "energy_drink".to_owned(),
+                })
+                .unwrap(),
+            CareResult::Applied
+        );
+    }
     assert_eq!(simulation.pet().needs().hunger(), target_hunger);
     simulation
 }
 
-/// Energy drains at 6 points per active hour, so an active session advanced
-/// by `(100 - target_energy) / 6` hours lands on the requested need while
+/// Energy drains at 50 points per active hour, so an active session advanced
+/// by `(100 - target_energy) / 50` hours lands on the requested need while
 /// hunger stays below the mild boundary.
 fn energy_simulation(target_energy: f32) -> Simulation {
     let clock = FakeClock::new(start());
@@ -76,8 +108,9 @@ fn energy_simulation(target_energy: f32) -> Simulation {
             EventMetadata::default(),
         ))
         .unwrap();
-    let active_hours = (100.0 - target_energy) / 6.0;
-    clock.advance(Duration::minutes((active_hours * 60.0) as i64));
+    simulation = without_attention(simulation, &clock);
+    let active_seconds = ((100.0 - target_energy) as f64 / 50.0 * 3_600.0) as i64;
+    clock.advance(Duration::seconds(active_seconds));
     simulation.current_state();
     let energy = simulation.pet().needs().energy();
     assert!((energy - target_energy).abs() <= 1.0, "energy was {energy}");
@@ -85,12 +118,13 @@ fn energy_simulation(target_energy: f32) -> Simulation {
     simulation
 }
 
-/// One poop on the floor drains cleanliness at 2 points per idle hour, so
-/// advancing `(100 - target_cleanliness) / 2` hours lands on the requested
+/// One poop on the floor drains cleanliness at 240 points per wall-clock hour,
+/// so advancing `(100 - target_cleanliness) / 240` hours lands on the requested
 /// need while hunger stays below the mild boundary.
 fn cleanliness_simulation(target_cleanliness: f32) -> Simulation {
     let mut inventory = FoodInventory::default();
     inventory.add(FoodKind::Kibble, 3);
+    inventory.add(FoodKind::EnergyDrink, 2);
     let clock = FakeClock::new(start());
     let pet = Pet::with_inventory(
         Uuid::from_u128(3),
@@ -152,8 +186,9 @@ fn cleanliness_simulation(target_cleanliness: f32) -> Simulation {
         ))
         .unwrap();
 
-    let idle_hours = (100.0 - target_cleanliness) / 2.0;
-    clock.advance(Duration::minutes((idle_hours * 60.0) as i64));
+    simulation = without_attention(simulation, &clock);
+    let elapsed_seconds = ((100.0 - target_cleanliness) as f64 / 240.0 * 3_600.0) as i64;
+    clock.advance(Duration::seconds(elapsed_seconds));
     simulation.current_state();
     let cleanliness = simulation.pet().needs().cleanliness();
     assert!(
@@ -177,10 +212,21 @@ fn both_needs_critical_simulation() -> Simulation {
             EventSource::Codex,
             AgentEventKind::SessionStarted,
             None,
-            start() + Duration::hours(90),
+            start() + Duration::seconds(12_960),
             EventMetadata::default(),
         ))
         .unwrap();
+    for action_id in 200..202 {
+        assert_eq!(
+            simulation
+                .apply_care(&CareCommand::Feed {
+                    action_id: Uuid::from_u128(action_id),
+                    food_id: "energy_drink".to_owned(),
+                })
+                .unwrap(),
+            CareResult::Applied
+        );
+    }
     assert_eq!(simulation.pet().needs().hunger(), 90.0);
     assert_eq!(simulation.pet().needs().cleanliness(), 0.0);
     simulation
@@ -404,6 +450,7 @@ fn severe_neglect_blocks_every_tool_call_except_codegotchi_control() {
 fn strict_feed_recovery_moves_a_real_pet_from_blocked_to_allowed() {
     let mut inventory = FoodInventory::default();
     inventory.add(FoodKind::Kibble, 1);
+    inventory.add(FoodKind::EnergyDrink, 2);
     let clock = FakeClock::new(start());
     let pet = Pet::with_inventory(
         Uuid::from_u128(40),
@@ -412,9 +459,23 @@ fn strict_feed_recovery_moves_a_real_pet_from_blocked_to_allowed() {
         start(),
         inventory,
     );
-    let mut simulation = PetSimulation::new(pet, clock.clone(), DefaultNeedProgressionStrategy);
-    clock.advance(Duration::hours(90));
+    let mut simulation = without_attention(
+        PetSimulation::new(pet, clock.clone(), DefaultNeedProgressionStrategy),
+        &clock,
+    );
+    clock.advance(Duration::seconds(12_960));
     simulation.current_state();
+    for action_id in 50..52 {
+        assert_eq!(
+            simulation
+                .apply_care(&CareCommand::Feed {
+                    action_id: Uuid::from_u128(action_id),
+                    food_id: "energy_drink".to_owned(),
+                })
+                .unwrap(),
+            CareResult::Applied
+        );
+    }
 
     let command = classification(CommandPurpose::SafeDevelopment);
     let settings = PetSettings::new(EnforcementMode::Strict);
@@ -506,7 +567,8 @@ fn exhausted_pet_unblocks_after_resting() {
             EventMetadata::default(),
         ))
         .unwrap();
-    clock.advance(Duration::minutes(850));
+    simulation = without_attention(simulation, &clock);
+    clock.advance(Duration::hours(2));
     simulation.current_state();
     let strict = PetSettings::new(EnforcementMode::Strict);
     let shell = classification(CommandPurpose::ShellRecovery);
@@ -520,19 +582,15 @@ fn exhausted_pet_unblocks_after_resting() {
         }
     );
 
-    simulation
-        .apply_event(&AgentEvent::new(
-            Uuid::from_u128(12),
-            Uuid::from_u128(20),
-            "repo",
-            EventSource::Codex,
-            AgentEventKind::ToolCompleted,
-            Some(ActivityKind::Testing),
-            start(),
-            EventMetadata::default(),
-        ))
-        .unwrap();
-    clock.advance(Duration::minutes(120));
+    assert_eq!(
+        simulation
+            .apply_care(&CareCommand::Nap {
+                action_id: Uuid::from_u128(12),
+            })
+            .unwrap(),
+        CareResult::Applied
+    );
+    clock.advance(NAP_DURATION);
     simulation.current_state();
     assert!(simulation.pet().needs().energy() > 30.0);
     assert_eq!(

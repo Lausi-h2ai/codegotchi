@@ -16,10 +16,13 @@ fn simulation() -> (
 ) {
     let clock = FakeClock::new(start());
     let pet = Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, start());
-    (
-        clock.clone(),
-        PetSimulation::new(pet, clock, DefaultNeedProgressionStrategy),
-    )
+    let simulation = PetSimulation::new(pet, clock.clone(), DefaultNeedProgressionStrategy);
+    let mut snapshot = simulation.snapshot();
+    snapshot.next_incident_at = Some(start() + Duration::days(365));
+    let simulation =
+        PetSimulation::from_snapshot(snapshot, clock.clone(), DefaultNeedProgressionStrategy)
+            .unwrap();
+    (clock.clone(), simulation)
 }
 
 fn event(
@@ -67,8 +70,8 @@ fn active_progression_uses_the_previous_activity_state() {
         ))
         .unwrap();
 
-    assert_eq!(simulation.pet().needs().hunger(), 4.0);
-    assert_eq!(simulation.pet().needs().energy(), 94.0);
+    assert_eq!(simulation.pet().needs().hunger(), 25.0);
+    assert_eq!(simulation.pet().needs().energy(), 50.0);
     assert_eq!(
         simulation.pet().activity(),
         AgentActivityState::WaitingForUser
@@ -89,8 +92,8 @@ fn idle_progression_restores_energy_at_event_time() {
         ))
         .unwrap();
 
-    assert_eq!(simulation.pet().needs().hunger(), 1.0);
-    assert_eq!(simulation.pet().needs().energy(), 100.0);
+    assert_eq!(simulation.pet().needs().hunger(), 25.0);
+    assert_eq!(simulation.pet().needs().energy(), 50.0);
 }
 
 #[test]
