@@ -55,6 +55,16 @@ impl BehaviorCoordinator {
     }
 }
 
+fn is_recent(now: DateTime<Utc>, timestamp: Option<DateTime<Utc>>) -> bool {
+    timestamp.is_some_and(|timestamp| {
+        now >= timestamp && now.signed_duration_since(timestamp) <= RECENT_OUTCOME_WINDOW
+    })
+}
+
+fn is_elapsed_at_least(now: DateTime<Utc>, timestamp: DateTime<Utc>, threshold: Duration) -> bool {
+    now >= timestamp && now.signed_duration_since(timestamp) >= threshold
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,14 +84,4 @@ mod tests {
             PetBehavior::CriticalNeed
         );
     }
-}
-
-fn is_recent(now: DateTime<Utc>, timestamp: Option<DateTime<Utc>>) -> bool {
-    timestamp.is_some_and(|timestamp| {
-        now >= timestamp && now.signed_duration_since(timestamp) <= RECENT_OUTCOME_WINDOW
-    })
-}
-
-fn is_elapsed_at_least(now: DateTime<Utc>, timestamp: DateTime<Utc>, threshold: Duration) -> bool {
-    now >= timestamp && now.signed_duration_since(timestamp) >= threshold
 }
