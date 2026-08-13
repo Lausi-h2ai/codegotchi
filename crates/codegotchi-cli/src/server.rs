@@ -27,7 +27,7 @@ use crate::assets;
 use crate::persistence::PersistenceError;
 use crate::protocol::{
     CleanRequest, DebugRequest, DebugStatusResponse, ErrorEnvelope, EventIngestRequest,
-    EventIngestResponse, FeedRequest, HealthResponse, ModeRequest, NapRequest,
+    EventIngestResponse, FeedRequest, HealthResponse, ModeRequest, NapRequest, PetRequest,
     SnapshotMutationResponse,
 };
 use crate::runtime::{AuthoritativeRuntime, MutationReceipt, RuntimeError};
@@ -230,6 +230,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/care/feed", post(feed_handler))
         .route("/api/v1/care/clean", post(clean_handler))
         .route("/api/v1/care/nap", post(nap_handler))
+        .route("/api/v1/care/pet", post(pet_handler))
         .route("/api/v1/stream", get(stream_handler))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -411,6 +412,20 @@ async fn nap_handler(
     BoundedJson(request): BoundedJson<NapRequest>,
 ) -> Response {
     match state.runtime.nap(request.action_id) {
+        Ok(receipt) => mutation_response(receipt),
+        Err(error) => runtime_error_response(error),
+    }
+}
+
+async fn pet_handler(
+    State(state): State<AppState>,
+    BoundedJson(request): BoundedJson<PetRequest>,
+) -> Response {
+    match state.runtime.pet(
+        request.action_id,
+        request.interaction_ms,
+        request.pointer_distance,
+    ) {
         Ok(receipt) => mutation_response(receipt),
         Err(error) => runtime_error_response(error),
     }
@@ -603,7 +618,7 @@ fn denial_reason(decision: WorkDecision) -> Option<String> {
             "The pet refuses this action because its cleanliness is critical. Clean the pet in the CodeGotchi UI, then retry the Codex request afterward."
         }
         WorkReasonCode::CriticalHappiness => {
-            "The pet refuses this action because its happiness is critical. Pet the pet in the CodeGotchi UI, then retry the Codex request afterward."
+            "The pet refuses this action because it desperately needs attention. Pet it in the CodeGotchi UI, then retry the Codex request afterward."
         }
     };
     Some(reason.to_owned())
@@ -669,7 +684,7 @@ where
 mod tests {
     use chrono::{TimeZone, Utc};
     use codegotchi_domain::{
-        AgentEvent, AgentEventKind, EventMetadata, EventSource, Pet, PetSpecies,
+        AgentEvent, AgentEventKind, EventMetadata, EventSource, Pet, PetSpecies, WorkReasonCode,
     };
     use tokio::sync::broadcast::error::TryRecvError;
     use uuid::Uuid;
@@ -723,6 +738,109 @@ mod tests {
                 .await
                 .unwrap(),
             next
+        );
+    }
+
+    async fn request(
+        server: &super::RunningServer,
+        path: &str,
+        token: &str,
+        body: &[u8],
+    ) -> (u16, serde_json::Value) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpStream;
+
+        let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
+        let request = format!(
+            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        stream.write_all(request.as_bytes()).await.unwrap();
+        stream.write_all(body).await.unwrap();
+        let mut bytes = Vec::new();
+        stream.read_to_end(&mut bytes).await.unwrap();
+        let separator = bytes
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .unwrap();
+        let status = String::from_utf8_lossy(&bytes[..separator])
+            .lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .parse()
+            .unwrap();
+        let body = serde_json::from_slice(&bytes[separator + 4..]).unwrap();
+        (status, body)
+    }
+
+    #[tokio::test]
+    async fn authenticated_pet_route_validates_gesture_and_returns_mutation() {
+        let start = Utc.with_ymd_and_hms(2026, 8, 5, 12, 0, 0).unwrap();
+        let runtime = AuthoritativeRuntime::new(
+            SqliteStore::open(":memory:").unwrap(),
+            Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, start),
+        )
+        .unwrap();
+        let (_ticks, tick_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let server = super::RunningServer::start_with_maintenance_trigger(
+            runtime,
+            "task-4-pet-token",
+            tick_receiver,
+        )
+        .await
+        .unwrap();
+
+        let (status, body) = request(
+            &server,
+            "/api/v1/care/pet",
+            "task-4-pet-token",
+            br#"{"actionId":"00000000-0000-0000-0000-000000000001","interactionMs":1500,"pointerDistance":120.0}"#,
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert_eq!(body["duplicate"], false);
+
+        let (status, body) = request(
+            &server,
+            "/api/v1/care/pet",
+            "task-4-pet-token",
+            br#"{"actionId":"00000000-0000-0000-0000-000000000002","interactionMs":1499,"pointerDistance":120.0}"#,
+        )
+        .await;
+        assert_eq!(status, 422);
+        assert_eq!(body["error"]["code"], "insufficient_duration");
+
+        let (status, body) = request(
+            &server,
+            "/api/v1/care/pet",
+            "task-4-pet-token",
+            br#"{"actionId":"00000000-0000-0000-0000-000000000003","interactionMs":1500,"pointerDistance":119.0}"#,
+        )
+        .await;
+        assert_eq!(status, 422);
+        assert_eq!(body["error"]["code"], "insufficient_distance");
+
+        server.shutdown().await.unwrap();
+    }
+
+    #[test]
+    fn critical_happiness_denial_explains_the_attention_recovery_action() {
+        use codegotchi_domain::{RequiredAction, WorkDecision};
+
+        let decision = WorkDecision::Blocked {
+            reason_code: WorkReasonCode::CriticalHappiness,
+            required_action: RequiredAction::Pet {
+                minimum_happiness_recovery: 20.0,
+            },
+        };
+        assert_eq!(
+            super::denial_reason(decision).as_deref(),
+            Some(
+                "The pet refuses this action because it desperately needs attention. Pet it in the CodeGotchi UI, then retry the Codex request afterward."
+            )
         );
     }
 }

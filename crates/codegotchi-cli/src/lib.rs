@@ -22,7 +22,7 @@ pub use launcher::{LauncherError, ValidatedLaunch};
 pub use persistence::{PersistenceError, SQLITE_SCHEMA_VERSION, SqliteStore};
 pub use protocol::{
     CleanRequest, DebugRequest, ErrorEnvelope, EventIngestRequest, EventIngestResponse,
-    FeedRequest, HealthResponse, HookInput, HookOutput, ModeRequest, PermissionContext,
+    FeedRequest, HealthResponse, HookInput, HookOutput, ModeRequest, PermissionContext, PetRequest,
     RuntimeMetadataV1, SnapshotMutationResponse,
 };
 pub use runtime::{

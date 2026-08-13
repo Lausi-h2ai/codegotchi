@@ -330,6 +330,14 @@ pub struct NapRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PetRequest {
+    pub action_id: Uuid,
+    pub interaction_ms: u64,
+    pub pointer_distance: f32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotMutationResponse {
     #[serde(flatten)]
@@ -390,6 +398,35 @@ fn decision_is_blocked(value: &Value) -> bool {
             .filter_map(|key| object.get(*key).and_then(Value::as_str))
             .any(|decision| matches!(decision, "deny" | "denied" | "block" | "blocked")),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PetRequest;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    #[test]
+    fn pet_request_uses_bounded_camel_case_gesture_fields() {
+        let request: PetRequest = serde_json::from_value(json!({
+            "actionId": "00000000-0000-0000-0000-000000000001",
+            "interactionMs": 1_500,
+            "pointerDistance": 120.0,
+        }))
+        .expect("pet request should deserialize");
+
+        assert_eq!(request.action_id, Uuid::from_u128(1));
+        assert_eq!(request.interaction_ms, 1_500);
+        assert_eq!(request.pointer_distance, 120.0);
+        assert_eq!(
+            serde_json::to_value(&request).expect("pet request should serialize"),
+            json!({
+                "actionId": "00000000-0000-0000-0000-000000000001",
+                "interactionMs": 1_500,
+                "pointerDistance": 120.0,
+            })
+        );
     }
 }
 

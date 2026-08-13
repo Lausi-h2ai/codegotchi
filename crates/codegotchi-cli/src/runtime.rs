@@ -203,6 +203,19 @@ impl AuthoritativeRuntime {
         self.apply_care(CareCommand::Nap { action_id })
     }
 
+    pub fn pet(
+        &self,
+        action_id: Uuid,
+        interaction_ms: u64,
+        pointer_distance: f32,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        self.apply_care(CareCommand::Pet {
+            action_id,
+            interaction_ms,
+            pointer_distance,
+        })
+    }
+
     pub fn apply_care(&self, command: CareCommand) -> Result<MutationReceipt, RuntimeError> {
         let mut simulation = self.lock_simulation()?;
         let before = simulation.snapshot();
@@ -384,4 +397,118 @@ fn seed_new_pet(pet: Pet) -> Pet {
         pet.last_updated_at(),
         FoodInventory::starter(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, Utc};
+    use codegotchi_domain::{
+        AttentionIncidentKind, DefaultNeedProgressionStrategy, FakeClock, FoodInventory, Pet,
+        PetBehavior, PetNeeds, PetSimulation, PetSpecies, incident_delay_ms, incident_kind,
+    };
+    use tokio::sync::broadcast::error::TryRecvError;
+    use uuid::Uuid;
+
+    use super::AuthoritativeRuntime;
+    use crate::persistence::SqliteStore;
+
+    fn pet_id_with_first_affection_incident() -> Uuid {
+        (1..10_000)
+            .map(Uuid::from_u128)
+            .find(|pet_id| incident_kind(*pet_id, 0) == AttentionIncidentKind::Affection)
+            .expect("fixture should have an affection incident")
+    }
+
+    #[test]
+    fn pet_is_a_replay_safe_authoritative_mutation() {
+        let pet_id = pet_id_with_first_affection_incident();
+        let start = Utc::now();
+        let clock = FakeClock::new(start);
+        let delay = incident_delay_ms(pet_id, 0);
+        let pet = Pet::with_inventory(
+            pet_id,
+            "Mochi",
+            PetSpecies::Cat,
+            start,
+            FoodInventory::starter(),
+        );
+        let mut simulation = PetSimulation::new(pet, clock, DefaultNeedProgressionStrategy);
+        simulation.current_state_at(start + Duration::milliseconds(delay as i64));
+        let mut initial = simulation.snapshot();
+        initial.needs = PetNeeds::new(0.0, 100.0, 50.0, 100.0);
+        initial.behavior = PetBehavior::Wandering;
+        let initial_happiness = initial.needs.happiness();
+
+        let runtime = AuthoritativeRuntime::new(SqliteStore::open(":memory:").unwrap(), initial)
+            .expect("runtime should restore the fixture");
+        let action_id = Uuid::from_u128(9001);
+
+        let first = runtime
+            .pet(action_id, 1_500, 120.0)
+            .expect("first pet should apply");
+        assert!(!first.duplicate);
+        assert_eq!(first.snapshot.pending_demands.len(), 0);
+        assert!(first.snapshot.needs.happiness() > initial_happiness);
+        assert!(first.snapshot.needs.happiness() <= initial_happiness + 10.0);
+
+        let second = runtime
+            .pet(action_id, 1_500, 120.0)
+            .expect("replayed pet should be accepted");
+        assert!(second.duplicate);
+        assert_eq!(second.snapshot, first.snapshot);
+    }
+
+    #[tokio::test]
+    async fn maintenance_catch_up_persists_and_broadcasts_one_bounded_snapshot() {
+        let initial_time = Utc::now() - Duration::days(2);
+        let pet_id = Uuid::from_u128(42);
+        let pet = Pet::with_inventory(
+            pet_id,
+            "Mochi",
+            PetSpecies::Cat,
+            initial_time,
+            FoodInventory::starter(),
+        );
+        let simulation = PetSimulation::new(
+            pet,
+            FakeClock::new(initial_time),
+            DefaultNeedProgressionStrategy,
+        );
+        let mut initial = simulation.snapshot();
+        initial.next_incident_at = Some(initial_time + Duration::minutes(1));
+        let store = SqliteStore::open(":memory:").unwrap();
+        let runtime = AuthoritativeRuntime::new(store.clone(), initial).unwrap();
+        let before = runtime.snapshot();
+        let (_, mut snapshots) = runtime.subscribe().unwrap();
+        let target = Utc::now();
+
+        assert!(before.last_updated_at < target);
+        assert!(before.next_incident_at.expect("scheduled incident") < target);
+        assert!(runtime.maintenance_tick_at(target).unwrap());
+
+        let broadcast = snapshots.recv().await.unwrap();
+        let persisted = store.load().unwrap().expect("maintenance should persist");
+        assert_eq!(broadcast, persisted);
+        assert_eq!(broadcast, runtime.snapshot());
+        let generated_incidents = broadcast.pending_demands.len() + broadcast.pending_poops.len();
+        assert!((1..=5).contains(&generated_incidents));
+        assert!(broadcast.last_updated_at >= target);
+        assert!(broadcast.next_incident_at.expect("future schedule") > target);
+        assert!(
+            broadcast.needs.hunger() > before.needs.hunger()
+                || broadcast.needs.energy() < before.needs.energy()
+                || broadcast.needs.happiness() < before.needs.happiness()
+                || broadcast.needs.cleanliness() < before.needs.cleanliness()
+        );
+
+        let second_target = target + Duration::seconds(1);
+        assert!(runtime.maintenance_tick_at(second_target).unwrap());
+        let second = snapshots.recv().await.unwrap();
+        assert_eq!(
+            second.pending_demands.len() + second.pending_poops.len(),
+            generated_incidents
+        );
+        assert!(second.next_incident_at.expect("future schedule") > second_target);
+        assert!(matches!(snapshots.try_recv(), Err(TryRecvError::Empty)));
+    }
 }
