@@ -5,7 +5,7 @@ import {
     render,
     screen,
 } from "@testing-library/react";
-import { StrictMode } from "react";
+import { StrictMode, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
@@ -63,7 +63,7 @@ function snapshot(
 
 function renderApp(
     state: Partial<ReturnType<typeof useCodeGotchi>> = {},
-): void {
+): ReturnType<typeof render> {
     mockedUseCodeGotchi.mockReturnValue({
         snapshot: null,
         connectionStatus: "loading",
@@ -77,7 +77,7 @@ function renderApp(
         restock: vi.fn().mockResolvedValue(undefined),
         ...state,
     });
-    render(<App launchToken="test-token" />);
+    return render(<App launchToken="test-token" />);
 }
 
 describe("CodeGotchi pet room", () => {
@@ -434,6 +434,7 @@ describe("CodeGotchi petting adapter", () => {
             clientX: 10,
             clientY: 10,
             pointerId: 7,
+            isPrimary: true,
         });
         vi.advanceTimersByTime(1_500);
         fireEvent.pointerMove(pet, {
@@ -447,16 +448,17 @@ describe("CodeGotchi petting adapter", () => {
             pointerId: 7,
         });
         fireEvent.pointerUp(pet, {
-            clientX: 130,
+            clientX: 150,
             clientY: 10,
             pointerId: 7,
+            isPrimary: true,
         });
 
         expect(setPointerCapture).toHaveBeenCalledWith(7);
-        expect(petCare).toHaveBeenCalledWith(1_500, 120);
+        expect(petCare).toHaveBeenCalledWith(1_500, 140);
     });
 
-    it("ignores secondary mouse input, unrelated pointers, and canceled gestures", () => {
+    it("ignores non-primary pointer input", () => {
         const petCare = vi.fn().mockResolvedValue(undefined);
         renderApp({
             snapshot: snapshot(),
@@ -471,57 +473,220 @@ describe("CodeGotchi petting adapter", () => {
         vi.spyOn(performance, "now").mockReturnValue(1_000);
 
         fireEvent.pointerDown(pet, {
-            button: 2,
+            button: 0,
             clientX: 10,
             clientY: 10,
             pointerId: 1,
+            isPrimary: false,
         });
         fireEvent.pointerUp(pet, {
-            button: 2,
+            button: 0,
             clientX: 10,
             clientY: 10,
             pointerId: 1,
+            isPrimary: false,
         });
+
+        expect(petCare).not.toHaveBeenCalled();
+    });
+
+    it("does not replace an active gesture with a second pointerdown", () => {
+        const petCare = vi.fn().mockResolvedValue(undefined);
+        renderApp({
+            snapshot: snapshot(),
+            connectionStatus: "connected",
+            pet: petCare,
+        });
+        const pet = screen.getByTestId("pet");
+        Object.defineProperty(pet, "setPointerCapture", {
+            configurable: true,
+            value: vi.fn(),
+        });
+        vi.spyOn(performance, "now").mockReturnValue(1_000);
 
         fireEvent.pointerDown(pet, {
             button: 0,
             clientX: 10,
             clientY: 10,
             pointerId: 2,
+            isPrimary: true,
         });
-        fireEvent.pointerMove(pet, {
+        fireEvent.pointerDown(pet, {
+            button: 0,
             clientX: 100,
             clientY: 10,
             pointerId: 3,
+            isPrimary: true,
         });
-        fireEvent.pointerCancel(pet, { pointerId: 2 });
-        fireEvent.pointerUp(pet, { pointerId: 2 });
+        fireEvent.pointerMove(pet, {
+            clientX: 40,
+            clientY: 10,
+            pointerId: 2,
+            isPrimary: true,
+        });
+        fireEvent.pointerUp(pet, {
+            clientX: 40,
+            clientY: 10,
+            pointerId: 2,
+            isPrimary: true,
+        });
+
+        expect(petCare).toHaveBeenCalledWith(0, 30);
+        expect(petCare).toHaveBeenCalledTimes(1);
+    });
+
+    it("sends nothing after matching lost pointer capture", () => {
+        const petCare = vi.fn().mockResolvedValue(undefined);
+        renderApp({
+            snapshot: snapshot(),
+            connectionStatus: "connected",
+            pet: petCare,
+        });
+        const pet = screen.getByTestId("pet");
+        Object.defineProperty(pet, "setPointerCapture", {
+            configurable: true,
+            value: vi.fn(),
+        });
+        vi.spyOn(performance, "now").mockReturnValue(1_000);
+
+        fireEvent.pointerDown(pet, {
+            button: 0,
+            clientX: 10,
+            clientY: 10,
+            pointerId: 1,
+            isPrimary: true,
+        });
+        fireEvent.lostPointerCapture(pet, { pointerId: 1 });
+        fireEvent.pointerUp(pet, {
+            clientX: 100,
+            clientY: 10,
+            pointerId: 1,
+            isPrimary: true,
+        });
 
         expect(petCare).not.toHaveBeenCalled();
     });
 
-    it("keeps the authoritative demand and backend error after rejected pet care", async () => {
+    it("sends nothing after a matching pointer cancel", () => {
+        const petCare = vi.fn().mockResolvedValue(undefined);
+        renderApp({
+            snapshot: snapshot(),
+            connectionStatus: "connected",
+            pet: petCare,
+        });
+        const pet = screen.getByTestId("pet");
+        Object.defineProperty(pet, "setPointerCapture", {
+            configurable: true,
+            value: vi.fn(),
+        });
+        vi.spyOn(performance, "now").mockReturnValue(1_000);
+
+        fireEvent.pointerDown(pet, {
+            button: 0,
+            clientX: 10,
+            clientY: 10,
+            pointerId: 1,
+            isPrimary: true,
+        });
+        fireEvent.pointerCancel(pet, { pointerId: 1, isPrimary: true });
+        fireEvent.pointerUp(pet, {
+            clientX: 100,
+            clientY: 10,
+            pointerId: 1,
+            isPrimary: true,
+        });
+
+        expect(petCare).not.toHaveBeenCalled();
+    });
+
+    it("clears a gesture when the pet element is remounted", () => {
+        const petCare = vi.fn().mockResolvedValue(undefined);
+        const state = {
+            snapshot: snapshot(),
+            connectionStatus: "connected" as const,
+            error: null,
+            feedback: null,
+            debugEnabled: false,
+            feed: vi.fn().mockResolvedValue(undefined),
+            clean: vi.fn().mockResolvedValue(undefined),
+            nap: vi.fn().mockResolvedValue(undefined),
+            pet: petCare,
+            restock: vi.fn().mockResolvedValue(undefined),
+        };
+        mockedUseCodeGotchi.mockReturnValue(state);
+        const view = render(<App launchToken="test-token" />);
+        const firstPet = screen.getByTestId("pet");
+        Object.defineProperty(firstPet, "setPointerCapture", {
+            configurable: true,
+            value: vi.fn(),
+        });
+        vi.spyOn(performance, "now").mockReturnValue(1_000);
+        fireEvent.pointerDown(firstPet, {
+            button: 0,
+            clientX: 10,
+            clientY: 10,
+            pointerId: 1,
+            isPrimary: true,
+        });
+
+        mockedUseCodeGotchi.mockReturnValue({ ...state, snapshot: null });
+        view.rerender(<App launchToken="test-token" />);
+        mockedUseCodeGotchi.mockReturnValue(state);
+        view.rerender(<App launchToken="test-token" />);
+
+        fireEvent.pointerUp(screen.getByTestId("pet"), {
+            clientX: 100,
+            clientY: 10,
+            pointerId: 1,
+            isPrimary: true,
+        });
+
+        expect(petCare).not.toHaveBeenCalled();
+    });
+
+    it("keeps the authoritative demand after a stateful rejected pet care", async () => {
         const petCareError = {
             code: "insufficient_duration",
             message: "petting duration is below the minimum",
         };
-        const rejectedPet = Promise.reject(petCareError);
-        void rejectedPet.catch(() => undefined);
-        const petCare = vi.fn().mockReturnValue(rejectedPet);
-        renderApp({
-            snapshot: snapshot({
-                pendingDemands: [
-                    {
-                        id: "affection-1",
-                        kind: "affection",
-                        createdAt: "2026-08-13T12:00:00Z",
-                    },
-                ],
-            }),
-            connectionStatus: "connected",
-            error: petCareError,
-            pet: petCare,
+        const demandSnapshot = snapshot({
+            pendingDemands: [
+                {
+                    id: "affection-1",
+                    kind: "affection",
+                    createdAt: "2026-08-13T12:00:00Z",
+                },
+            ],
         });
+        const rejectedPet = vi.fn().mockRejectedValue(petCareError);
+        mockedUseCodeGotchi.mockImplementation(() => {
+            const [error, setError] = useState<typeof petCareError | null>(
+                null,
+            );
+            const pet = async (
+                interactionMs: number,
+                pointerDistance: number,
+            ): Promise<void> => {
+                try {
+                    await rejectedPet(interactionMs, pointerDistance);
+                } catch (nextError) {
+                    setError(nextError as typeof petCareError);
+                }
+            };
+            return {
+                snapshot: demandSnapshot,
+                connectionStatus: "connected" as const,
+                error,
+                feedback: null,
+                debugEnabled: false,
+                feed: vi.fn().mockResolvedValue(undefined),
+                clean: vi.fn().mockResolvedValue(undefined),
+                nap: vi.fn().mockResolvedValue(undefined),
+                pet,
+                restock: vi.fn().mockResolvedValue(undefined),
+            };
+        });
+        render(<App launchToken="test-token" />);
 
         const pet = screen.getByTestId("pet");
         Object.defineProperty(pet, "setPointerCapture", {
@@ -534,21 +699,21 @@ describe("CodeGotchi petting adapter", () => {
             clientX: 10,
             clientY: 10,
             pointerId: 1,
+            isPrimary: true,
         });
         fireEvent.pointerUp(pet, {
             clientX: 10,
             clientY: 10,
             pointerId: 1,
+            isPrimary: true,
         });
-        await act(async () => {
-            await rejectedPet.catch(() => undefined);
-        });
+        await act(async () => await Promise.resolve());
 
         expect(screen.getByText("Needs attention")).toBeInTheDocument();
         expect(screen.getByRole("alert")).toHaveTextContent(
             "petting duration is below the minimum",
         );
-        expect(petCare).toHaveBeenCalledWith(0, 0);
+        expect(rejectedPet).toHaveBeenCalledWith(0, 0);
     });
 });
 

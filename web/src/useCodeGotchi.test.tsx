@@ -40,6 +40,7 @@ function snapshot(
 
 interface FakeResponse {
     ok: boolean;
+    status?: number;
     json: () => Promise<unknown>;
 }
 
@@ -206,6 +207,100 @@ describe("useCodeGotchi authoritative projection", () => {
             "2026-08-05T12:00:06Z",
         );
         expect(result.current.feedback).toBe("Cozy nap in the hammock…");
+        unmount();
+    });
+
+    it("reports a rejected pet care response without clearing authoritative demands", async () => {
+        const demand = {
+            id: "affection-1",
+            kind: "affection" as const,
+            createdAt: "2026-08-13T12:00:00Z",
+        };
+        const initial = snapshot("pet demand", {
+            pendingDemands: [demand],
+        });
+        const fetch = vi.fn((input: unknown) => {
+            const url = String(input);
+            if (url.endsWith("/api/v1/state")) {
+                return Promise.resolve(responseFor(initial));
+            }
+            if (url.endsWith("/api/v1/debug/status")) {
+                return Promise.resolve(responseFor({ debugEnabled: false }));
+            }
+            return Promise.resolve({
+                ok: false,
+                status: 422,
+                json: async () => ({
+                    error: {
+                        code: "insufficient_duration",
+                        message: "petting duration is below the minimum",
+                    },
+                }),
+            });
+        });
+        vi.stubGlobal("fetch", fetch);
+        vi.stubGlobal("WebSocket", FakeWebSocket);
+
+        const { result, unmount } = renderHook(() =>
+            useCodeGotchi("pet-secret"),
+        );
+        await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        await act(async () => {
+            await result.current.pet(0, 0);
+        });
+
+        expect(result.current.snapshot).toEqual(initial);
+        expect(result.current.snapshot?.pendingDemands).toEqual([demand]);
+        expect(result.current.error).toEqual({
+            code: "insufficient_duration",
+            message: "petting duration is below the minimum",
+            status: 422,
+        });
+        expect(result.current.feedback).toBeNull();
+        unmount();
+    });
+
+    it("publishes the authoritative pet response and feedback after successful care", async () => {
+        const initial = snapshot("before pet");
+        const cared = snapshot("after pet", {
+            lastUpdatedAt: "2026-08-13T12:00:01Z",
+            attentionSequence: 1,
+        });
+        const fetch = vi.fn((input: unknown) => {
+            const url = String(input);
+            if (url.endsWith("/api/v1/state")) {
+                return Promise.resolve(responseFor(initial));
+            }
+            if (url.endsWith("/api/v1/debug/status")) {
+                return Promise.resolve(responseFor({ debugEnabled: false }));
+            }
+            return Promise.resolve(responseFor({ ...cared, duplicate: false }));
+        });
+        vi.stubGlobal("fetch", fetch);
+        vi.stubGlobal("WebSocket", FakeWebSocket);
+
+        const { result, unmount } = renderHook(() =>
+            useCodeGotchi("pet-secret"),
+        );
+        await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        await act(async () => {
+            await result.current.pet(1_500, 120);
+        });
+
+        expect(result.current.snapshot).toEqual({
+            ...cared,
+            duplicate: false,
+        });
+        expect(result.current.error).toBeNull();
+        expect(result.current.feedback).toBe("Got some attention ♡");
         unmount();
     });
 });

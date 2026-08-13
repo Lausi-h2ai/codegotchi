@@ -1,4 +1,6 @@
 import {
+    useCallback,
+    useEffect,
     useRef,
     useState,
     type CSSProperties,
@@ -60,6 +62,20 @@ function App({ launchToken }: AppProps) {
     const [shovelArmed, setShovelArmed] = useState(false);
     const [cleaningPoopId, setCleaningPoopId] = useState<string | null>(null);
     const petGestureRef = useRef<PetGesture | null>(null);
+    const petElementRef = useRef<HTMLDivElement | null>(null);
+    const setPetElementRef = useCallback((element: HTMLDivElement | null) => {
+        if (petElementRef.current !== element) {
+            petGestureRef.current = null;
+            petElementRef.current = element;
+        }
+    }, []);
+    useEffect(
+        () => () => {
+            petGestureRef.current = null;
+            petElementRef.current = null;
+        },
+        [],
+    );
     const motionState = usePetMotion(snapshot);
     const blinking = useBlink(
         snapshot !== null && motionState.semanticMode !== "napping",
@@ -162,7 +178,11 @@ function App({ launchToken }: AppProps) {
     }
 
     function handlePetPointerDown(event: PointerEvent<HTMLDivElement>): void {
-        if (event.button > 0) {
+        if (
+            !event.isPrimary ||
+            event.button > 0 ||
+            petGestureRef.current !== null
+        ) {
             return;
         }
         if (typeof event.currentTarget.setPointerCapture === "function") {
@@ -198,12 +218,23 @@ function App({ launchToken }: AppProps) {
             0,
             Math.round(performance.now() - gesture.startedAt),
         );
-        const distance = gesture.distance;
+        const dx = event.clientX - gesture.lastX;
+        const dy = event.clientY - gesture.lastY;
+        const distance = gesture.distance + Math.hypot(dx, dy);
         petGestureRef.current = null;
         void pet(duration, distance);
     }
 
     function handlePetPointerCancel(event: PointerEvent<HTMLDivElement>): void {
+        const gesture = petGestureRef.current;
+        if (gesture !== null && event.pointerId === gesture.pointerId) {
+            petGestureRef.current = null;
+        }
+    }
+
+    function handlePetLostPointerCapture(
+        event: PointerEvent<HTMLDivElement>,
+    ): void {
         const gesture = petGestureRef.current;
         if (gesture !== null && event.pointerId === gesture.pointerId) {
             petGestureRef.current = null;
@@ -302,6 +333,7 @@ function App({ launchToken }: AppProps) {
 
                             <div
                                 className={`pet pet--${poseClass(snapshot)}`}
+                                ref={setPetElementRef}
                                 role="img"
                                 aria-label={`${snapshot.name}, ${activityLabel}`}
                                 data-testid="pet"
@@ -319,6 +351,9 @@ function App({ launchToken }: AppProps) {
                                 onPointerMove={handlePetPointerMove}
                                 onPointerUp={handlePetPointerUp}
                                 onPointerCancel={handlePetPointerCancel}
+                                onLostPointerCapture={
+                                    handlePetLostPointerCapture
+                                }
                             >
                                 <span className="pet-ear pet-ear--left" />
                                 <span className="pet-ear pet-ear--right" />
