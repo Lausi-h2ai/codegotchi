@@ -817,6 +817,12 @@ h3 {
     background: #fff8e6eb;
 }
 
+.demand-bubble__icon {
+    flex: 0 0 auto;
+    font-size: 1rem;
+    line-height: 1;
+}
+
 .demand-bubble__count {
     display: grid;
     min-width: 1.55rem;

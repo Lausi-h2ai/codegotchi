@@ -31,6 +31,9 @@ pub struct PetNeeds {
     energy: f32,
     happiness: f32,
     cleanliness: f32,
+    // The exact accumulator is intentionally in-memory only. JSON restores
+    // it from the visible f32 values; progression tests bound that restart
+    // drift below 1e-5 for the representative incident window.
     #[serde(skip)]
     exact: Option<[i64; 4]>,
 }

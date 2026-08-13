@@ -387,6 +387,18 @@ describe("CodeGotchi pet room", () => {
 
         expect(screen.getByText("Needs attention")).toBeInTheDocument();
         expect(screen.getByText("Wants a snack")).toBeInTheDocument();
+        expect(screen.getByTestId("demand-affection-icon")).toHaveAttribute(
+            "aria-hidden",
+            "true",
+        );
+        expect(screen.getByTestId("demand-affection-icon")).toHaveTextContent(
+            "♡",
+        );
+        expect(screen.getByTestId("demand-snack-icon")).toHaveAttribute(
+            "aria-hidden",
+            "true",
+        );
+        expect(screen.getByTestId("demand-snack-icon")).toHaveTextContent("🥣");
         expect(screen.getByTestId("demand-affection-count")).toHaveTextContent(
             "2",
         );

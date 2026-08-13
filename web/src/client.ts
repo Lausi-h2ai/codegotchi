@@ -350,9 +350,9 @@ function shouldAcceptSnapshot(
         return true;
     }
 
-    const currentTime = Date.parse(current.lastUpdatedAt);
-    const incomingTime = Date.parse(incoming.lastUpdatedAt);
-    if (!Number.isFinite(currentTime) || !Number.isFinite(incomingTime)) {
+    const currentTime = snapshotTimestamp(current.lastUpdatedAt);
+    const incomingTime = snapshotTimestamp(incoming.lastUpdatedAt);
+    if (currentTime === null || incomingTime === null) {
         return false;
     }
     if (incomingTime > currentTime) {
@@ -362,6 +362,12 @@ function shouldAcceptSnapshot(
         return false;
     }
 
+    // The runtime serializes mutations under one lock. At this precision,
+    // only replay sets, scheduler counters/deadline, and pending-object
+    // continuation are ordered monotonically; care IDs are the explicit
+    // authority for removals. Accept an equal-time snapshot only when it is
+    // a strict extension of that server ordering, and reject incomparable
+    // states instead of inventing an arbitrary payload ordering.
     const careIdsAdvance = continuationSetAdvances(
         current.processedCareIds,
         incoming.processedCareIds,
@@ -373,13 +379,61 @@ function shouldAcceptSnapshot(
     const continuationSetsContainCurrent =
         containsAll(current.processedCareIds, incoming.processedCareIds) &&
         containsAll(current.processedEventIds, incoming.processedEventIds);
+    if (
+        !continuationSetsContainCurrent ||
+        incoming.poopSequence < current.poopSequence ||
+        incoming.attentionSequence < current.attentionSequence
+    ) {
+        return false;
+    }
+
+    const schedulerOrder = compareSnapshotTimestamps(
+        current.nextIncidentAt,
+        incoming.nextIncidentAt,
+    );
+    if (schedulerOrder === null || schedulerOrder < 0) {
+        return false;
+    }
+
+    const currentDemandIds = current.pendingDemands.map((demand) => demand.id);
+    const incomingDemandIds = incoming.pendingDemands.map(
+        (demand) => demand.id,
+    );
+    const currentPoopIds = current.pendingPoops.map((poop) => poop.id);
+    const incomingPoopIds = incoming.pendingPoops.map((poop) => poop.id);
+    const demandsContainCurrent = containsAll(
+        currentDemandIds,
+        incomingDemandIds,
+    );
+    const poopsContainCurrent = containsAll(currentPoopIds, incomingPoopIds);
+    if (
+        (!careIdsAdvance && !demandsContainCurrent) ||
+        (!careIdsAdvance && !poopsContainCurrent)
+    ) {
+        return false;
+    }
+
+    const demandIdsAdvance = continuationSetAdvances(
+        currentDemandIds,
+        incomingDemandIds,
+    );
+    const poopIdsAdvance = continuationSetAdvances(
+        currentPoopIds,
+        incomingPoopIds,
+    );
+    const poopSequenceAdvance = incoming.poopSequence > current.poopSequence;
+    const attentionSequenceAdvance =
+        incoming.attentionSequence > current.attentionSequence;
+    const schedulerAdvances = schedulerOrder > 0;
 
     return (
-        continuationSetsContainCurrent &&
-        incoming.poopSequence >= current.poopSequence &&
-        (careIdsAdvance ||
-            eventIdsAdvance ||
-            incoming.poopSequence > current.poopSequence)
+        careIdsAdvance ||
+        eventIdsAdvance ||
+        poopSequenceAdvance ||
+        attentionSequenceAdvance ||
+        schedulerAdvances ||
+        demandIdsAdvance ||
+        poopIdsAdvance
     );
 }
 
@@ -387,12 +441,49 @@ function continuationSetAdvances(
     current: string[],
     incoming: string[],
 ): boolean {
-    return incoming.length > current.length;
+    const currentIds = new Set(current);
+    const incomingIds = new Set(incoming);
+    return incomingIds.size > currentIds.size && containsAll(current, incoming);
 }
 
 function containsAll(current: string[], incoming: string[]): boolean {
     const incomingIds = new Set(incoming);
     return current.every((id) => incomingIds.has(id));
+}
+
+function compareSnapshotTimestamps(
+    current: string,
+    incoming: string,
+): number | null {
+    const currentTime = snapshotTimestamp(current);
+    const incomingTime = snapshotTimestamp(incoming);
+    if (currentTime === null || incomingTime === null) {
+        return null;
+    }
+    return incomingTime > currentTime ? 1 : incomingTime < currentTime ? -1 : 0;
+}
+
+/**
+ * Date.parse intentionally exposes only milliseconds. Rust snapshots retain
+ * sub-millisecond precision, so preserve their fractional RFC3339 component
+ * before comparing snapshots that land in the same browser millisecond.
+ */
+function snapshotTimestamp(value: string): bigint | null {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const fractionMatch = value.match(/\.(\d+)(?=(?:Z|[+-]\d{2}:\d{2})$)/);
+    const base = fractionMatch
+        ? value.slice(0, fractionMatch.index) +
+          value.slice(fractionMatch.index! + fractionMatch[0].length)
+        : value;
+    const milliseconds = Date.parse(base);
+    if (!Number.isFinite(milliseconds)) {
+        return null;
+    }
+    const fraction = fractionMatch?.[1] ?? "";
+    const nanoseconds = BigInt(fraction.slice(0, 9).padEnd(9, "0") || "0");
+    return BigInt(milliseconds) * 1_000_000n + nanoseconds;
 }
 
 export function createActionId(): string {

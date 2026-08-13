@@ -23,6 +23,11 @@ use crate::{
 const HUNGER_PER_HOUR: f32 = 25.0;
 const ENERGY_PER_HOUR: f32 = -50.0;
 const INCIDENT_PRESSURE_PER_HOUR: f32 = 240.0;
+/// The scheduler has one representable terminal deadline. It keeps the
+/// internal scheduler type as `DateTime<Utc>` while making the final valid
+/// attention sequence persistable without ever attempting to add another
+/// incident.
+const TERMINAL_INCIDENT_AT: DateTime<Utc> = DateTime::<Utc>::MAX_UTC;
 /// A hammock nap is a deliberately fast power nap: 20 energy points per
 /// second, so a 5-second nap restores the full meter from empty.
 const NAP_ENERGY_PER_HOUR: f32 = 72_000.0;
@@ -125,6 +130,9 @@ pub struct SimulationSnapshot {
     pub processed_care_ids: BTreeSet<Uuid>,
     pub poop_sequence: u64,
     #[serde(default)]
+    /// The next incident sequence while the scheduler is active. A terminal
+    /// scheduler keeps the final issued sequence (`u64::MAX - 1`) here and
+    /// stores [`TERMINAL_INCIDENT_AT`] as `next_incident_at`.
     pub attention_sequence: u64,
     #[serde(default)]
     pub next_incident_at: Option<DateTime<Utc>>,
@@ -297,6 +305,9 @@ where
 
     /// Advances to an explicit logical timestamp for deterministic maintenance.
     pub fn current_state_at(&mut self, timestamp: DateTime<Utc>) -> SimulationSnapshot {
+        if timestamp <= self.pet.last_updated_at() {
+            return self.snapshot();
+        }
         let previous_activity = self.pet.activity();
         self.advance_elapsed_to(timestamp, previous_activity);
         self.refresh_behavior(self.pet.last_updated_at());
@@ -674,21 +685,36 @@ where
         previous_activity: AgentActivityState,
     ) -> Duration {
         let start = self.pet.last_updated_at();
+        if target <= start {
+            return Duration::zero();
+        }
         let mut created = 0usize;
 
-        while self.next_incident_at <= target && created < MAX_CATCH_UP_INCIDENTS {
+        while self.next_incident_at != TERMINAL_INCIDENT_AT
+            && self.next_incident_at <= target
+            && created < MAX_CATCH_UP_INCIDENTS
+        {
             let due = self.next_incident_at.max(self.pet.last_updated_at());
             self.progress_segment_to(due, previous_activity);
             self.create_attention_incident(due);
-            self.attention_sequence = self.attention_sequence.saturating_add(1);
+            created += 1;
+
+            if self.attention_sequence == u64::MAX - 1 {
+                self.next_incident_at = TERMINAL_INCIDENT_AT;
+                break;
+            }
+
+            self.attention_sequence += 1;
             self.next_incident_at = due
                 + Duration::milliseconds(
                     incident_delay_ms(self.pet.id(), self.attention_sequence) as i64
                 );
-            created += 1;
         }
 
-        if created == MAX_CATCH_UP_INCIDENTS && self.next_incident_at <= target {
+        if created == MAX_CATCH_UP_INCIDENTS
+            && self.next_incident_at != TERMINAL_INCIDENT_AT
+            && self.next_incident_at <= target
+        {
             self.progress_segment_to(target, previous_activity);
             self.next_incident_at = target
                 + Duration::milliseconds(
@@ -838,7 +864,13 @@ fn reanchor_snapshot_to_wall_clock(snapshot: &mut SimulationSnapshot, now: DateT
     for demand in &mut snapshot.pending_demands {
         demand.shift_created_at(-shift);
     }
-    snapshot.next_incident_at = snapshot.next_incident_at.map(shift_back);
+    snapshot.next_incident_at = snapshot.next_incident_at.map(|timestamp| {
+        if timestamp == TERMINAL_INCIDENT_AT {
+            timestamp
+        } else {
+            shift_back(timestamp)
+        }
+    });
 }
 
 fn validate_snapshot(snapshot: &SimulationSnapshot) -> Result<(), SnapshotRestoreError> {
@@ -855,6 +887,17 @@ fn validate_snapshot(snapshot: &SimulationSnapshot) -> Result<(), SnapshotRestor
     if snapshot.name.trim().is_empty() {
         return Err(SnapshotRestoreError::InvariantViolation(
             "pet name must not be empty".to_owned(),
+        ));
+    }
+    if snapshot.attention_sequence == u64::MAX {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "attention sequence exhausted".to_owned(),
+        ));
+    }
+    let terminal_schedule = snapshot.next_incident_at == Some(TERMINAL_INCIDENT_AT);
+    if terminal_schedule && snapshot.attention_sequence != u64::MAX - 1 {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "terminal incident schedule requires the final sequence".to_owned(),
         ));
     }
     if !snapshot.needs.is_valid() {
@@ -878,7 +921,8 @@ fn validate_snapshot(snapshot: &SimulationSnapshot) -> Result<(), SnapshotRestor
         let Some(sequence) = poop.attention_sequence() else {
             return false;
         };
-        sequence >= snapshot.attention_sequence
+        sequence > snapshot.attention_sequence
+            || (!terminal_schedule && sequence == snapshot.attention_sequence)
             || incident_kind(snapshot.pet_id, sequence) != AttentionIncidentKind::Poop
             || incident_id(snapshot.pet_id, sequence, AttentionIncidentKind::Poop) != poop.id()
     });
@@ -1555,6 +1599,131 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn rollback_or_equal_target_does_not_consume_an_overdue_incident_schedule() {
+        let snapshot = snapshot_with_deadline(start() - Duration::minutes(1));
+        let mut simulation = PetSimulation::from_snapshot(
+            snapshot,
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+        let before = simulation.snapshot();
+
+        let equal = simulation.current_state_at(start());
+        assert_eq!(equal, before);
+
+        let rollback = simulation.current_state_at(start() - Duration::seconds(1));
+        assert_eq!(rollback, before);
+    }
+
+    #[test]
+    fn restored_exhausted_attention_sequence_is_rejected_explicitly() {
+        let mut snapshot = simulation().snapshot();
+        snapshot.attention_sequence = u64::MAX;
+
+        let error = PetSimulation::from_snapshot(
+            snapshot,
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .err()
+        .expect("an exhausted attention sequence cannot be restored");
+
+        assert!(matches!(
+            error,
+            SnapshotRestoreError::InvariantViolation(message)
+                if message == "attention sequence exhausted"
+        ));
+    }
+
+    #[test]
+    fn final_attention_incident_enters_a_terminal_schedule_without_repeating() {
+        let mut snapshot = simulation().snapshot();
+        snapshot.attention_sequence = u64::MAX - 1;
+        snapshot.next_incident_at = Some(start());
+        let mut simulation = PetSimulation::from_snapshot(
+            snapshot,
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+
+        let final_state = simulation.current_state_at(start() + Duration::seconds(1));
+        assert_eq!(final_state.attention_sequence, u64::MAX - 1);
+        assert_eq!(final_state.next_incident_at, Some(DateTime::<Utc>::MAX_UTC));
+        assert_eq!(
+            final_state.pending_demands.len() + final_state.pending_poops.len(),
+            1
+        );
+
+        let encoded = serde_json::to_string(&final_state).unwrap();
+        let restored_final_state: SimulationSnapshot = serde_json::from_str(&encoded).unwrap();
+        let mut resumed = PetSimulation::from_snapshot(
+            restored_final_state,
+            FakeClock::new(start() + Duration::seconds(1)),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+        let after_resume = resumed.current_state_at(start() + Duration::seconds(2));
+        assert_eq!(
+            after_resume.attention_sequence,
+            final_state.attention_sequence
+        );
+        assert_eq!(after_resume.next_incident_at, final_state.next_incident_at);
+        assert_eq!(after_resume.pending_demands, final_state.pending_demands);
+        assert_eq!(after_resume.pending_poops, final_state.pending_poops);
+    }
+
+    #[test]
+    fn serialized_restart_keeps_partitioned_need_progression_within_float_bound() {
+        let snapshot = snapshot_with_deadline(start() + Duration::minutes(3));
+        let split = start() + Duration::minutes(7);
+        let target = start() + Duration::minutes(14);
+        let mut uninterrupted = PetSimulation::from_snapshot(
+            snapshot.clone(),
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+        let expected = uninterrupted.current_state_at(target);
+
+        let mut partitioned = PetSimulation::from_snapshot(
+            snapshot,
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+        partitioned.current_state_at(split);
+        let encoded = serde_json::to_string(&partitioned.snapshot()).unwrap();
+        let restored_snapshot: SimulationSnapshot = serde_json::from_str(&encoded).unwrap();
+        let mut resumed = PetSimulation::from_snapshot(
+            restored_snapshot,
+            FakeClock::new(split),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+        let actual = resumed.current_state_at(target);
+
+        assert_eq!(actual.attention_sequence, expected.attention_sequence);
+        assert_eq!(actual.pending_demands, expected.pending_demands);
+        assert_eq!(actual.pending_poops, expected.pending_poops);
+        assert_eq!(actual.next_incident_at, expected.next_incident_at);
+        let maximum_drift = [
+            (actual.needs.hunger() - expected.needs.hunger()).abs(),
+            (actual.needs.energy() - expected.needs.energy()).abs(),
+            (actual.needs.happiness() - expected.needs.happiness()).abs(),
+            (actual.needs.cleanliness() - expected.needs.cleanliness()).abs(),
+        ]
+        .into_iter()
+        .fold(0.0_f32, f32::max);
+        // PetNeeds restores its skipped fixed-point accumulator from the
+        // visible f32 values. Across this representative at-most-five-incident
+        // window, the resulting restart drift stays below one f32 ULP at
+        // the 0..=100 need range (7.63e-6), with a small 1e-5 safety bound.
+        assert!(maximum_drift <= 0.00001, "restart drift: {maximum_drift}");
     }
 
     #[test]

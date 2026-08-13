@@ -491,7 +491,7 @@ mod tests {
         assert_eq!(broadcast, persisted);
         assert_eq!(broadcast, runtime.snapshot());
         let generated_incidents = broadcast.pending_demands.len() + broadcast.pending_poops.len();
-        assert!((1..=5).contains(&generated_incidents));
+        assert_eq!(generated_incidents, 5);
         assert!(broadcast.last_updated_at >= target);
         assert!(broadcast.next_incident_at.expect("future schedule") > target);
         assert!(

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
     CodeGotchiClient,
+    createActionId,
     extractLaunchToken,
     type ClientStatus,
 } from "./client";
@@ -423,6 +424,180 @@ describe("CodeGotchi browser client", () => {
 
         expect(snapshots).toEqual([streamed]);
         client.close();
+    });
+
+    it("accepts an equal-timestamp automatic incident snapshot with newer demand state", async () => {
+        let resolveInitial!: (response: FakeResponse) => void;
+        const initialRequest = new Promise<FakeResponse>((resolve) => {
+            resolveInitial = resolve;
+        });
+        const timestamp = "2026-08-05T12:00:00Z";
+        const streamed = snapshot("stream state", {
+            lastUpdatedAt: timestamp,
+            nextIncidentAt: "2026-08-05T12:05:00Z",
+        });
+        const automaticIncident = snapshot("automatic incident", {
+            lastUpdatedAt: timestamp,
+            attentionSequence: 1,
+            nextIncidentAt: "2026-08-05T12:09:00Z",
+            pendingDemands: [
+                {
+                    id: "automatic-affection",
+                    kind: "affection",
+                    createdAt: timestamp,
+                },
+            ],
+        });
+        const fetch = vi.fn().mockReturnValue(initialRequest);
+        const snapshots: SimulationSnapshot[] = [];
+        const client = new CodeGotchiClient("stream-secret", {
+            fetch,
+            WebSocket: FakeWebSocket,
+            baseUrl: "http://127.0.0.1:4242",
+        });
+
+        client.start({
+            onSnapshot: (value) => snapshots.push(value),
+        });
+        const socket = FakeWebSocket.instances[0];
+        socket?.message(streamed);
+
+        resolveInitial(responseFor(automaticIncident));
+        await initialRequest;
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+        expect(snapshots).toEqual([streamed, automaticIncident]);
+        client.close();
+    });
+
+    it("orders sub-millisecond Rust timestamps before applying the equal-time tie-breaker", () => {
+        const fetch = vi
+            .fn()
+            .mockResolvedValue(responseFor(snapshot("initial state")));
+        const snapshots: SimulationSnapshot[] = [];
+        const client = new CodeGotchiClient("stream-secret", {
+            fetch,
+            WebSocket: FakeWebSocket,
+            baseUrl: "http://127.0.0.1:4242",
+        });
+
+        client.start({
+            onSnapshot: (value) => snapshots.push(value),
+        });
+        const socket = FakeWebSocket.instances[0];
+        socket?.message(
+            snapshot("first", {
+                lastUpdatedAt: "2026-08-05T12:00:00.100000000Z",
+            }),
+        );
+        socket?.message(
+            snapshot("second", {
+                lastUpdatedAt: "2026-08-05T12:00:00.100000001Z",
+            }),
+        );
+
+        expect(snapshots.slice(-2)).toEqual([
+            snapshot("first", {
+                lastUpdatedAt: "2026-08-05T12:00:00.100000000Z",
+            }),
+            snapshot("second", {
+                lastUpdatedAt: "2026-08-05T12:00:00.100000001Z",
+            }),
+        ]);
+        client.close();
+    });
+
+    it("rejects an equal-timestamp stale incident snapshot with an older scheduler", async () => {
+        let resolveInitial!: (response: FakeResponse) => void;
+        const initialRequest = new Promise<FakeResponse>((resolve) => {
+            resolveInitial = resolve;
+        });
+        const timestamp = "2026-08-05T12:00:00Z";
+        const streamed = snapshot("stream state", {
+            lastUpdatedAt: timestamp,
+            attentionSequence: 1,
+            nextIncidentAt: "2026-08-05T12:09:00Z",
+            pendingDemands: [
+                {
+                    id: "automatic-affection",
+                    kind: "affection",
+                    createdAt: timestamp,
+                },
+            ],
+        });
+        const staleIncident = snapshot("stale incident", {
+            lastUpdatedAt: timestamp,
+            attentionSequence: 0,
+            nextIncidentAt: "2026-08-05T12:05:00Z",
+        });
+        const fetch = vi.fn().mockReturnValue(initialRequest);
+        const snapshots: SimulationSnapshot[] = [];
+        const client = new CodeGotchiClient("stream-secret", {
+            fetch,
+            WebSocket: FakeWebSocket,
+            baseUrl: "http://127.0.0.1:4242",
+        });
+
+        client.start({
+            onSnapshot: (value) => snapshots.push(value),
+        });
+        const socket = FakeWebSocket.instances[0];
+        socket?.message(streamed);
+
+        resolveInitial(responseFor(staleIncident));
+        await initialRequest;
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+        expect(snapshots).toEqual([streamed]);
+        client.close();
+    });
+
+    it("accepts an equal-timestamp care snapshot that resolves a demand", async () => {
+        let resolveInitial!: (response: FakeResponse) => void;
+        const initialRequest = new Promise<FakeResponse>((resolve) => {
+            resolveInitial = resolve;
+        });
+        const timestamp = "2026-08-05T12:00:00Z";
+        const streamed = snapshot("stream state", {
+            lastUpdatedAt: timestamp,
+            pendingDemands: [
+                {
+                    id: "automatic-affection",
+                    kind: "affection",
+                    createdAt: timestamp,
+                },
+            ],
+        });
+        const cared = snapshot("cared state", {
+            lastUpdatedAt: timestamp,
+            processedCareIds: ["care-action"],
+        });
+        const fetch = vi.fn().mockReturnValue(initialRequest);
+        const snapshots: SimulationSnapshot[] = [];
+        const client = new CodeGotchiClient("stream-secret", {
+            fetch,
+            WebSocket: FakeWebSocket,
+            baseUrl: "http://127.0.0.1:4242",
+        });
+
+        client.start({
+            onSnapshot: (value) => snapshots.push(value),
+        });
+        const socket = FakeWebSocket.instances[0];
+        socket?.message(streamed);
+
+        resolveInitial(responseFor(cared));
+        await initialRequest;
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+        expect(snapshots).toEqual([streamed, cared]);
+        client.close();
+    });
+
+    it("creates a UUID action id with the browser default", () => {
+        expect(createActionId()).toMatch(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        );
     });
 
     it("ends in disconnected after the bounded retry budget", async () => {

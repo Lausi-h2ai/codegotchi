@@ -658,8 +658,16 @@ function DemandBubble({
     count: number;
 }) {
     const label = kind === "affection" ? "Needs attention" : "Wants a snack";
+    const icon = kind === "affection" ? "♡" : "🥣";
     return (
         <div className={`demand-bubble demand-bubble--${kind}`}>
+            <span
+                className="demand-bubble__icon"
+                data-testid={`demand-${kind}-icon`}
+                aria-hidden="true"
+            >
+                {icon}
+            </span>
             <span className="demand-bubble__label">{label}</span>
             <strong
                 className="demand-bubble__count"
