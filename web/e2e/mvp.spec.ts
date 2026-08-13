@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const launchUrl = "/#token=task3-playwright-token";
+const fixtureToken = "task3-playwright-token";
 const motionRegions = new Set([
     "window",
     "shelf",
@@ -9,6 +10,20 @@ const motionRegions = new Set([
     "floor-right",
     "furniture",
 ]);
+
+type FixtureState = {
+    needs: {
+        hunger: number;
+        energy: number;
+        happiness: number;
+        cleanliness: number;
+    };
+    pendingDemands: Array<{ id: string; kind: string }>;
+    pendingPoops: Array<{ id: string }>;
+    attentionSequence: number;
+    lastUpdatedAt: string;
+    nextIncidentAt: string;
+};
 
 let nextHookEventId = 0xaa01;
 
@@ -45,6 +60,10 @@ type HookEventOptions = {
         | "unknown_work"
         | null;
     exitStatus?: number | null;
+    permission?: {
+        category: "development";
+        purpose: "safe_development";
+    };
 };
 
 function nextEventId(): string {
@@ -55,9 +74,9 @@ function nextEventId(): string {
 async function sendHookEvent(
     page: Page,
     options: HookEventOptions,
-): Promise<void> {
+): Promise<Record<string, unknown>> {
     const response = await page.evaluate(
-        async ({ eventId, kind, activity, exitStatus }) => {
+        async ({ eventId, kind, activity, exitStatus, permission }) => {
             const result = await fetch("/api/v1/events", {
                 method: "POST",
                 headers: {
@@ -82,6 +101,7 @@ async function sendHookEvent(
                             blocked: false,
                         },
                     },
+                    permission: permission ?? undefined,
                 }),
             });
             return { status: result.status, body: await result.json() };
@@ -93,6 +113,39 @@ async function sendHookEvent(
     );
     expect(response.status).toBe(200);
     expect(response.body.accepted).toBe(true);
+    return response.body as Record<string, unknown>;
+}
+
+async function resetFixture(page: Page, mode: string): Promise<void> {
+    const response = await page.request.post(
+        `/__fixture/reset?mode=${encodeURIComponent(mode)}`,
+    );
+    expect(response.status()).toBe(200);
+    const body = (await response.json()) as { mode?: string };
+    expect(body.mode).toBe(mode);
+}
+
+async function fetchAuthoritativeState(page: Page): Promise<FixtureState> {
+    const response = await page.evaluate(async (token) => {
+        const result = await fetch("/api/v1/state", {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        return { status: result.status, body: await result.json() };
+    }, fixtureToken);
+    expect(response.status).toBe(200);
+    return response.body as FixtureState;
+}
+
+async function needValue(page: Page, label: string): Promise<number> {
+    const text = await page
+        .locator(".need strong")
+        .filter({ hasText: label })
+        .textContent();
+    const value = Number.parseFloat(
+        text?.match(/([0-9]+(?:\.[0-9]+)?)%$/)?.[1] ?? "NaN",
+    );
+    expect(value).toBeGreaterThanOrEqual(0);
+    return value;
 }
 
 function petLocator(page: Page) {
@@ -722,5 +775,152 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         await expect(
             page.getByRole("button", { name: "Hammock nap" }),
         ).toBeVisible({ timeout: 8_000 });
+    });
+
+    test("resolves an affection demand with a real sustained petting gesture", async ({
+        page,
+    }) => {
+        await resetFixture(page, "affection");
+        await page.goto(launchUrl);
+
+        await expect(page.getByText("Needs attention")).toBeVisible();
+        await expect(page.getByTestId("demand-affection-count")).toHaveText(
+            "1",
+        );
+        const happinessBefore = await needValue(page, "Happiness");
+        const pet = petLocator(page);
+        await pet.evaluate((element) =>
+            element.scrollIntoView({ block: "center", inline: "center" }),
+        );
+        const box = await pet.boundingBox();
+        expect(box).not.toBeNull();
+        if (!box) {
+            return;
+        }
+
+        const startX = box.x + box.width / 2;
+        const startY = box.y + box.height / 2;
+        await page.mouse.move(startX, startY);
+        await page.mouse.down();
+        await page.waitForTimeout(800);
+        await page.mouse.move(startX + 70, startY, { steps: 20 });
+        await page.waitForTimeout(800);
+        await page.mouse.move(startX + 70, startY + 70, { steps: 20 });
+        await page.mouse.up();
+
+        await expect(page.getByText("Needs attention")).toHaveCount(0, {
+            timeout: 5_000,
+        });
+        expect(await needValue(page, "Happiness")).toBeGreaterThan(
+            happinessBefore,
+        );
+        const state = await fetchAuthoritativeState(page);
+        expect(
+            state.pendingDemands.some((demand) => demand.kind === "affection"),
+        ).toBe(false);
+    });
+
+    test("resolves one snack demand and one poop through the existing care UI", async ({
+        page,
+    }) => {
+        await resetFixture(page, "snack-poop");
+        await page.goto(launchUrl);
+
+        await expect(page.getByText("Wants a snack")).toBeVisible();
+        await expect(page.getByTestId("demand-snack-count")).toHaveText("1");
+        const poops = page.locator("[data-poop-id]");
+        await expect(poops).toHaveCount(1);
+
+        await page
+            .getByTestId("food-treat")
+            .dragTo(page.getByRole("button", { name: /feed target/i }));
+        await expect(page.getByText("Eating a treat")).toBeVisible();
+        await expect(page.getByText("Wants a snack")).toHaveCount(0);
+        await expect(page.getByTestId("demand-snack-count")).toHaveCount(0);
+
+        await page.getByRole("button", { name: "Shovel" }).click();
+        await poops.first().click();
+        await expect(page.getByRole("button", { name: "Trash" })).toBeVisible();
+        await page.getByRole("button", { name: "Trash" }).click();
+        await expect(page.getByText("Cleaned up")).toBeVisible();
+        await expect(poops).toHaveCount(0);
+
+        const state = await fetchAuthoritativeState(page);
+        expect(
+            state.pendingDemands.some((demand) => demand.kind === "snack"),
+        ).toBe(false);
+        expect(state.pendingPoops).toHaveLength(0);
+    });
+
+    test("denies a safe development PreToolUse fixture for severe happiness neglect", async ({
+        page,
+    }) => {
+        await resetFixture(page, "strict-happiness");
+        await page.goto(launchUrl);
+        await expect(page.getByText("Connected")).toBeVisible();
+
+        const state = await fetchAuthoritativeState(page);
+        expect(state.needs.happiness).toBeLessThanOrEqual(5);
+        expect(state.needs.hunger).toBeLessThan(70);
+        expect(state.needs.energy).toBeGreaterThan(30);
+        expect(state.needs.cleanliness).toBeGreaterThan(30);
+
+        const response = await sendHookEvent(page, {
+            kind: "tool_started",
+            activity: "testing",
+            permission: {
+                category: "development",
+                purpose: "safe_development",
+            },
+        });
+        expect(response.blocked).toBe(true);
+        expect(response.reason).toContain("desperately needs attention");
+        expect(response.reason).toContain("Pet it in the CodeGotchi UI");
+    });
+
+    test("catches up overdue persisted care pressure once and keeps it after refresh", async ({
+        page,
+    }) => {
+        await resetFixture(page, "overdue");
+        await page.goto(launchUrl);
+
+        const before = await fetchAuthoritativeState(page);
+        expect(Date.parse(before.lastUpdatedAt)).toBeLessThan(Date.now());
+        expect(before.pendingDemands).toHaveLength(0);
+        expect(before.pendingPoops).toHaveLength(0);
+
+        let after = before;
+        await expect
+            .poll(
+                async () => {
+                    after = await fetchAuthoritativeState(page);
+                    return (
+                        after.pendingDemands.length + after.pendingPoops.length
+                    );
+                },
+                { timeout: 10_000, intervals: [100, 250, 500] },
+            )
+            .toBeGreaterThan(0);
+
+        const caughtUpCount =
+            after.pendingDemands.length + after.pendingPoops.length;
+        expect(caughtUpCount).toBeGreaterThanOrEqual(1);
+        expect(caughtUpCount).toBeLessThanOrEqual(5);
+        expect(after.needs.hunger).toBeGreaterThan(before.needs.hunger);
+        expect(after.needs.energy).toBeLessThan(before.needs.energy);
+        expect(after.needs.happiness).toBeLessThan(before.needs.happiness);
+        expect(after.needs.cleanliness).toBeLessThan(before.needs.cleanliness);
+        expect(Date.parse(after.nextIncidentAt)).toBeGreaterThan(Date.now());
+
+        const demandIds = after.pendingDemands.map((demand) => demand.id);
+        const poopIds = after.pendingPoops.map((poop) => poop.id);
+        await page.reload();
+        await expect(page.getByText("Connected")).toBeVisible();
+        const refreshed = await fetchAuthoritativeState(page);
+        expect(refreshed.pendingDemands.map((demand) => demand.id)).toEqual(
+            demandIds,
+        );
+        expect(refreshed.pendingPoops.map((poop) => poop.id)).toEqual(poopIds);
+        expect(refreshed.attentionSequence).toBe(after.attentionSequence);
     });
 });

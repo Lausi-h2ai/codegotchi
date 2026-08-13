@@ -13,26 +13,32 @@ const webRoot = path.resolve(
 );
 const repositoryRoot = path.resolve(webRoot, "..");
 const port = Number(process.env.CODEGOTCHI_PLAYWRIGHT_PORT ?? "4173");
+const fixtureModes = new Set([
+    "default",
+    "affection",
+    "snack",
+    "poop",
+    "snack-poop",
+    "strict-happiness",
+    "overdue",
+]);
 
-const backend = spawn(
-    "cargo",
-    [
-        "run",
-        "--quiet",
-        "--package",
-        "codegotchi-cli",
-        "--example",
-        "task3_fixture",
-    ],
-    {
-        cwd: repositoryRoot,
-        stdio: ["ignore", "pipe", "inherit"],
-    },
-);
+let backend;
+let backendPort;
+let restartPromise = Promise.resolve();
 
-const backendInfo = await waitForBackend(backend);
-const backendPort = new URL(backendInfo.baseUrl).port;
+await startBackend("default");
+
 const proxy = createServer((request, response) => {
+    const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (
+        request.method === "POST" &&
+        requestUrl.pathname === "/__fixture/reset"
+    ) {
+        void handleReset(requestUrl, request, response);
+        return;
+    }
+
     const upstream = proxyRequest(
         {
             hostname: "127.0.0.1",
@@ -96,16 +102,107 @@ async function shutdown() {
     }
     shuttingDown = true;
     await new Promise((resolve) => proxy.close(resolve));
-    backend.kill("SIGTERM");
+    await stopBackend();
 }
 
 process.once("SIGINT", () => void shutdown());
 process.once("SIGTERM", () => void shutdown());
 process.once("exit", () => {
-    if (!backend.killed) {
+    if (backend && !backend.killed) {
         backend.kill("SIGTERM");
     }
 });
+
+async function handleReset(requestUrl, request, response) {
+    request.resume();
+    const mode = requestUrl.searchParams.get("mode") ?? "default";
+    if (!fixtureModes.has(mode)) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(
+            JSON.stringify({ error: `unsupported fixture mode: ${mode}` }),
+        );
+        return;
+    }
+
+    try {
+        await restartBackend(mode);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ mode }));
+    } catch (error) {
+        response.writeHead(500, { "content-type": "application/json" });
+        response.end(
+            JSON.stringify({
+                error: error instanceof Error ? error.message : String(error),
+            }),
+        );
+    }
+}
+
+function restartBackend(mode) {
+    const next = restartPromise.then(async () => {
+        await stopBackend();
+        await startBackend(mode);
+    });
+    restartPromise = next.catch(() => {});
+    return next;
+}
+
+async function startBackend(mode) {
+    const child = spawn(
+        "cargo",
+        [
+            "run",
+            "--quiet",
+            "--package",
+            "codegotchi-cli",
+            "--example",
+            "task3_fixture",
+            "--",
+            mode,
+        ],
+        {
+            cwd: repositoryRoot,
+            env: {
+                ...process.env,
+                CODEGOTCHI_PLAYWRIGHT_MODE: mode,
+            },
+            stdio: ["ignore", "pipe", "inherit"],
+        },
+    );
+    backend = child;
+    const backendInfo = await waitForBackend(child);
+    backendPort = new URL(backendInfo.baseUrl).port;
+}
+
+async function stopBackend() {
+    const child = backend;
+    backend = undefined;
+    backendPort = undefined;
+    if (!child || child.exitCode !== null) {
+        return;
+    }
+
+    await new Promise((resolve) => {
+        let settled = false;
+        const timer = globalThis.setTimeout(() => {
+            if (settled) {
+                return;
+            }
+            child.kill("SIGKILL");
+            finish();
+        }, 5_000);
+        const finish = () => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            globalThis.clearTimeout(timer);
+            resolve();
+        };
+        child.once("exit", finish);
+        child.kill("SIGTERM");
+    });
+}
 
 async function waitForBackend(child) {
     return new Promise((resolve, reject) => {
