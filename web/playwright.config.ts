@@ -16,6 +16,10 @@ export default defineConfig({
         command: "node e2e/fixture.mjs",
         url: "http://127.0.0.1:4173",
         reuseExistingServer: false,
+        gracefulShutdown: {
+            signal: "SIGTERM",
+            timeout: 10_000,
+        },
         timeout: 120_000,
     },
 });

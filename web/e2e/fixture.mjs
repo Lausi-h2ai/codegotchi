@@ -30,6 +30,7 @@ let backendPort;
 let backendReady = false;
 let backendDatabasePath;
 const trackedDatabasePaths = new Set();
+const activeProxySockets = new Set();
 let restartPromise = Promise.resolve();
 
 await startBackend("default");
@@ -73,6 +74,11 @@ const proxy = createServer((request, response) => {
     request.pipe(upstream);
 });
 
+proxy.on("connection", (socket) => {
+    activeProxySockets.add(socket);
+    socket.once("close", () => activeProxySockets.delete(socket));
+});
+
 proxy.on("upgrade", (request, socket, head) => {
     if (!backendReady || !backendPort) {
         rejectUnavailableUpgrade(socket);
@@ -102,6 +108,7 @@ proxy.on("upgrade", (request, socket, head) => {
     };
     upstream.on("error", closeBoth);
     socket.on("error", closeBoth);
+    socket.on("close", closeBoth);
 });
 
 await new Promise((resolve, reject) => {
@@ -117,6 +124,9 @@ async function shutdown() {
     }
     shuttingDown = true;
     backendReady = false;
+    for (const socket of activeProxySockets) {
+        socket.destroy();
+    }
     await new Promise((resolve) => proxy.close(resolve));
     await stopBackend();
 }
