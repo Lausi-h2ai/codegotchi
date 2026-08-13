@@ -2,40 +2,38 @@
 
 ## Goal
 
-Make CodeGotchi require regular caretaker attention during active coding. While the agent is actively working, the pet should produce a small care problem roughly every 3–5 minutes. A user who reacts promptly can clear each problem with a quick existing room interaction. A user who ignores several problems should naturally move through the existing mild, moderate, and severe strict-mode enforcement tiers until normal coding becomes effectively impossible after roughly half an hour of continuous neglect.
+Make CodeGotchi behave like a creature that continues to need care in real time, not like a productivity timer that only advances while Codex is busy. The pet should usually create a small care problem every 3–5 minutes of wall-clock time, remain needy while the user is away, and greet a returning user with believable neglect: hunger, tiredness, reduced happiness, and some accumulated poop or other demands.
 
-The system must achieve this by strengthening the authoritative pet simulation and reusing the existing need-based enforcement policy. It must not add a second independent blocking system or make the browser authoritative for timers, randomness, or need changes.
+The feature must continue to use the authoritative Rust simulation and the existing need-based strict-mode enforcement. It must not add a second blocking system or make the browser authoritative for timers, randomness, incident creation, or need changes.
 
 ## Product Experience
 
 The intended loop is:
 
-1. The coding agent works normally.
-2. After 3–5 minutes of accumulated active agent time, CodeGotchi creates one care incident.
-3. The room makes the incident obvious: an affection or snack thought bubble appears, or a new poop appears on the floor.
-4. The caretaker can resolve it immediately with a short interaction: pet the creature, feed it, or clean the poop.
-5. While an incident is unresolved and the agent continues active work, the associated need deteriorates quickly.
-6. Additional incidents continue to arrive every 3–5 minutes of active work and may overlap.
-7. The existing strict-mode policy reacts to the resulting need values. Mild neglect blocks normal development work, moderate neglect widens the blocked command set, and severe neglect allows only CodeGotchi control.
-8. A caretaker who has ignored the room for about 30 minutes should normally return to several outstanding chores and at least one severely neglected need.
+1. CodeGotchi exists continuously in wall-clock time while its state persists.
+2. Roughly every 3–5 real minutes, a new care incident becomes due.
+3. The room makes that problem visible: an affection or snack demand appears, or a real poop appears on the floor.
+4. The user can resolve it with an existing-style room interaction: pet the creature, feed it, or clean the poop.
+5. If the problem is ignored, the associated need deteriorates quickly in real time.
+6. Additional incidents continue to appear and may overlap.
+7. Existing mild, moderate, and severe strict-mode enforcement reacts only to the resulting need values.
+8. Returning after a lunch break should commonly reveal several chores and visibly worse needs.
+9. Returning after a long absence should reveal a clearly neglected pet and may immediately place strict mode in the severe tier, but the room must not contain dozens or hundreds of accumulated incident objects.
 
-The system deliberately distinguishes active coding from breaks. New incidents are scheduled against accumulated active agent time, not raw wall-clock time, so leaving Codex waiting for the user or taking a break does not create a large unseen incident backlog.
+The pet does not freeze because Codex is idle, waiting for the user, the browser tab is closed, the process was suspended, or the runtime was restarted. Elapsed wall-clock time is authoritative.
 
-## Need Progression
+## Baseline Need Progression
 
-The existing active need rates are too slow for this product loop. Change the active progression constants to:
+Replace activity-dependent hunger and normal energy rates with wall-clock physiology:
 
-- active hunger: `+25.0` points/hour
-- active energy: `-50.0` points/hour
+- hunger: `+25.0` points/hour
+- energy: `-50.0` points/hour
 
-Keep the existing idle rates unchanged:
+These rates apply regardless of `Active`, `Idle`, `WaitingForUser`, or `Blocked` activity. Hunger and energy therefore continue to worsen while the user is away.
 
-- idle/waiting hunger: `+1.0` point/hour
-- idle/waiting energy: `+8.0` points/hour
+The existing five-second hammock nap keeps its special fast energy recovery for the portion of elapsed time covered by the nap window. Normal `-50/hour` energy decay applies outside that window.
 
-The five-second hammock nap keeps its existing recovery behavior.
-
-The accelerated baseline makes food and rest relevant during an ordinary coding session, while the random incident system supplies the much faster 3–5 minute interaction cadence.
+The old idle/waiting rates of `+1 hunger/hour` and `+8 energy/hour` are removed. A lunch break is not passive recovery; the caretaker must actually feed or rest the pet.
 
 ## Attention Incidents
 
@@ -43,49 +41,68 @@ The accelerated baseline makes food and rest relevant during an ordinary coding 
 
 The first version has exactly three incident kinds:
 
-- `Affection`: CodeGotchi wants direct attention. It creates one pending affection demand and pressures happiness until resolved.
-- `Snack`: CodeGotchi wants food. It creates one pending snack demand and pressures hunger until resolved.
-- `Poop`: CodeGotchi creates a real authoritative poop using the existing poop representation. The poop pressures cleanliness until cleaned.
+- `Affection`: creates one pending affection demand and pressures happiness until resolved.
+- `Snack`: creates one pending snack demand and pressures hunger until resolved.
+- `Poop`: creates one real authoritative poop using the existing poop representation and pressures cleanliness until cleaned.
 
-No new toy, minigame, medicine, thirst, or bathroom need is added in this feature.
+No toy, minigame, medicine, thirst, sickness, or additional need is introduced.
 
-### Cadence
+### Wall-clock cadence
 
-Each incident is scheduled after an inclusive randomized delay of 180–300 seconds of accumulated active agent time. The interval is chosen again after every incident.
+Each incident is scheduled after an inclusive randomized delay of 180–300 seconds of wall-clock time. After an incident is created, the next interval is derived immediately.
 
-The incident clock advances only while the authoritative aggregate activity is active agent work. It pauses while the agent is idle, waiting for the user, or napping. A blocked call does not generate additional incident cadence by itself. Existing unresolved incidents remain present until cared for.
+The scheduler stores an absolute `next_incident_at` timestamp. It does not pause for idle state, `WaitingForUser`, blocked work, browser closure, or runtime restart.
 
-The schedule is simulation state and therefore persists across browser reloads and runtime restarts. Restarting CodeGotchi must not reset an almost-due incident to another fresh five-minute wait.
+A new pet receives its first `next_incident_at` as `created_at + derived_delay(sequence=0)`. A persisted pet restores the exact already-scheduled timestamp, so reopening CodeGotchi does not reroll an almost-due incident.
 
-### Variety without starvation
+### Deterministic variety
 
-Incident timing and kind selection are deterministic pseudo-random domain behavior derived from the pet ID and an incident sequence number; they do not use the existing cosmetic `RandomSource` port.
+Incident timing and kind selection are deterministic pseudo-random domain behavior derived from the pet ID and incident sequence. Important domain behavior does not use the existing cosmetic `RandomSource` port.
 
-Kinds use randomized three-item shuffle bags. Every consecutive group of three incidents contains exactly one `Affection`, one `Snack`, and one `Poop`, with the order randomized per group. This prevents long random streaks that would make one care interaction disappear for an entire session while preserving an unpredictable order.
+Kinds use three-item shuffle bags. Every consecutive group of three incidents contains exactly one `Affection`, one `Snack`, and one `Poop`, with order deterministically shuffled per bag. The six permutations are selected from a UUID-v5 hash of `(pet_id, bag_index)`.
 
-The six possible permutations are selected deterministically from a UUID-v5 hash of `(pet_id, bag_index)`. Each delay is independently derived from a UUID-v5 hash of `(pet_id, incident_sequence)` and mapped into the inclusive 180,000–300,000 ms range. The same pet snapshot therefore produces the same future schedule after restoration.
+Each delay is independently derived from a UUID-v5 hash of `(pet_id, incident_sequence)` and mapped into the inclusive 180,000–300,000 ms range.
 
-## Unresolved Incident Pressure
+Demand and random-poop IDs are also deterministic UUID-v5 values derived from `(pet_id, incident_sequence)` using distinct names from the existing work/digestion poop sequence.
 
-Incidents are intentionally cheap when handled quickly and punishing when ignored.
+## Incident Pressure
 
-While the agent is actively working, each unresolved incident applies `240.0` need points/hour of additional pressure:
+Unresolved incidents are cheap when handled quickly and punishing when ignored. Pressure applies in wall-clock time, including while Codex is idle or closed.
 
-- every pending `Affection` demand: happiness `-240.0/hour`
-- every pending `Snack` demand: hunger `+240.0/hour`
-- every pending poop: cleanliness `-240.0/hour`
+Each unresolved item applies `240.0` need points/hour of additional pressure:
 
-Pressure stacks linearly. Two unresolved affection demands therefore drain happiness at `-480.0/hour` while active.
+- pending `Affection`: happiness `-240.0/hour`
+- pending `Snack`: hunger `+240.0/hour`
+- pending poop: cleanliness `-240.0/hour`
 
-This rate is deliberately much faster than baseline physiology. One unresolved problem costs four need points per active minute. A quick response after a minute or two is minor; repeatedly ignoring incidents causes compounding neglect. With a maximum five-minute incident spacing, six incidents can occur within 30 active minutes. The accumulated age of those six incidents is sufficient for at least one incident class to apply severe-scale pressure even before passive hunger and energy decay are considered.
+Pressure stacks linearly. Two unresolved affection demands drain happiness at `-480/hour`.
 
-Incident pressure pauses whenever active coding pauses. The pet does not continue losing hundreds of points per hour while Codex is merely waiting for the user or while the runtime is not actively being used.
+At `240/hour`, one unresolved problem costs four need points per minute. An incident that is ignored for twenty-five minutes can by itself drive a full 100-point lower-is-better need to zero. Because the first incident is guaranteed within five minutes, thirty minutes without care must reach severe-scale neglect even under the slowest allowed cadence.
 
-The existing low cleanliness decay of `-2.0/hour` per poop is replaced by the incident pressure above. All authoritative poops, including those produced by the existing work/digestion threshold mechanism, use the same high-pressure cleanliness behavior; there is no distinction between a random attention poop and a threshold-generated poop once it exists.
+The old `-2 cleanliness/hour` per poop is replaced by the unified `-240/hour` per unresolved poop. Existing work/digestion-generated poops and random attention poops behave identically once present.
+
+## Bounded Catch-up after Long Gaps
+
+Real-time progression must survive long process gaps without producing absurd object counts.
+
+Set `MAX_CATCH_UP_INCIDENTS` to `5` for any single elapsed-time advancement. This cap normally has no effect while the runtime is healthy because the maintenance loop advances once per second. It matters after restart, laptop suspend, process stall, large test jumps, or clock gaps.
+
+When advancing from `last_updated_at` to a target timestamp:
+
+1. Progress baseline needs and all currently unresolved incident pressure up to `next_incident_at`.
+2. If the incident is due and fewer than five incidents have been created in this advancement, create it at its scheduled timestamp, increment the sequence, derive the next delay, and continue.
+3. Repeat until the target is reached or five incidents have been created.
+4. If more historical incidents would still be due after the fifth, deliberately discard those missed incident objects.
+5. Progress the remaining elapsed wall-clock interval using the five newly created incidents plus any earlier unresolved state, so long absences still create severe neglect.
+6. Re-anchor `next_incident_at` to `target + derived_delay(current_sequence)` so the next live incident arrives normally in another 3–5 minutes rather than draining a hidden backlog one maintenance tick at a time.
+
+The cap is intentionally lossy for missed incident objects, not for elapsed need progression. After an eight-hour absence the pet may be starving, exhausted, filthy, and miserable, but the room gains at most five catch-up incidents from that single gap.
+
+For elapsed windows that contain at most five due incidents, advancing in one large jump and advancing through one-second ticks must produce identical authoritative state.
 
 ## Pending Demand State
 
-Add a small domain type for non-poop demands:
+Add focused domain state for non-poop demands:
 
 ```rust
 pub enum PetDemandKind {
@@ -100,137 +117,121 @@ pub struct PetDemand {
 }
 ```
 
-The simulation snapshot persists:
+The authoritative simulation snapshot persists:
 
 - `pending_demands: Vec<PetDemand>`
 - `attention_sequence: u64`
-- `active_ms_until_next_incident: u64`
+- `next_incident_at: DateTime<Utc>`
 
-Demand IDs are UUID-v5 values derived from `(pet_id, incident_sequence)` so replay and restore cannot create duplicate logical incidents.
+`Pet` owns pending demands alongside pending poops. `PetSimulation` owns the sequence and next scheduled timestamp.
 
-New pets initialize `active_ms_until_next_incident` from incident sequence zero. Older snapshots that predate these fields restore with no pending demands and receive a freshly derived first interval instead of generating an immediate incident. The additive snapshot fields use serde defaults and a restore migration; the snapshot schema version does not need to change for this backward-compatible addition.
+Older snapshots that predate these fields restore with an empty demand backlog and initialize `next_incident_at` to `restore_wall_clock + derived_delay(sequence=0)`. The feature does not retroactively invent incidents for time during which the old application version had no attention scheduler.
 
-## Time Advancement
-
-The simulation must remain deterministic whether time advances in one large jump or through the production one-second maintenance tick.
-
-When active elapsed time crosses one or more incident boundaries, `PetSimulation` splits the elapsed interval at each boundary:
-
-1. progress baseline needs and all currently unresolved incident pressure up to the next incident boundary;
-2. create exactly one incident at that logical timestamp;
-3. advance the incident sequence and derive the next 180–300 second interval;
-4. continue with the remaining elapsed time;
-5. repeat until the target timestamp is reached.
-
-This prevents a 30-minute test jump from incorrectly creating six incidents at the end of the interval with zero accumulated pressure. A single 30-minute jump and thirty minutes of one-second maintenance ticks must produce the same authoritative result.
-
-Idle/waiting elapsed time uses the existing normal need progression and does not decrement `active_ms_until_next_incident`.
+The additive fields use serde defaults plus explicit restore migration. Keep the existing snapshot schema version if backward compatibility remains clean; increase it only if implementation proves an invariant cannot be expressed safely with additive defaults.
 
 ## Care Resolution
 
-The feature reuses the current care commands instead of adding bespoke incident-dismiss buttons.
+The feature reuses actual care interactions rather than adding generic dismiss buttons.
 
 ### Affection
 
-A successful `CareCommand::Pet` resolves the oldest pending `Affection` demand, if one exists, in addition to its existing happiness recovery. One petting gesture resolves one demand; it does not clear an entire backlog.
+A successful `CareCommand::Pet` resolves exactly the oldest pending `Affection` demand, if one exists, in addition to its existing `+10 happiness` effect.
 
-The domain already validates a real petting gesture with at least 1,500 ms duration and 120 px pointer travel. The CLI/server/web currently do not expose that care command, so this feature must wire the existing domain action through the authenticated care API and room UI rather than weakening those validation rules.
+The existing domain validation remains unchanged: at least 1,500 ms of interaction and at least 120 px of pointer travel. The CLI/server/web must expose this already-existing domain command rather than weakening it.
 
 ### Snack
 
-A successful `CareCommand::Feed` with kibble, treat, or fruit resolves the oldest pending `Snack` demand, if one exists, in addition to the food's existing hunger/digestion effects. An energy drink does not count as satisfying a snack request.
+A successful feed with kibble, treat, or fruit resolves exactly the oldest pending `Snack` demand, if one exists, in addition to normal food effects. An energy drink does not satisfy a snack request.
 
-One feeding resolves one snack demand. Feeding remains valid when no snack demand exists.
+Feeding remains allowed when no snack demand exists.
 
 ### Poop
 
-The existing `CleanPoop` interaction remains authoritative. Removing one poop removes exactly that poop's cleanliness pressure and restores the existing cleanliness recovery amount.
+Existing `CleanPoop` removes exactly the selected poop. Removing that poop immediately removes its cleanliness pressure and retains the existing `+25 cleanliness` recovery.
 
-### Nap and energy drinks
+### Energy
 
-Energy remains primarily a baseline physiological need. Hammock naps and energy drinks retain their existing behavior and do not resolve affection or snack demands.
+Hammock naps and energy drinks retain existing behavior. They do not resolve affection or snack demands.
 
 ## Enforcement
 
-Do not create an incident-specific refusal policy. Strict-mode refusal continues to be computed exclusively from pet needs.
+Do not add incident-specific refusal logic. `WorkPermissionPolicy` remains the only source of strict-mode blocking.
 
-Keep the current hunger, energy, and cleanliness tier thresholds:
+Keep the current hunger, energy, and cleanliness thresholds:
 
 - mild: hunger `>= 70`, energy `<= 30`, cleanliness `<= 30`
 - moderate: hunger `>= 85`, energy `<= 15`, cleanliness `<= 15`
 - severe: hunger `>= 95`, energy `<= 5`, cleanliness `<= 5`
 
-Add happiness as a fourth enforceable need using the same lower-is-worse bands as energy and cleanliness:
+Add happiness as a fourth enforceable need:
 
 - mild happiness: `<= 30`
 - moderate happiness: `<= 15`
 - severe happiness: `<= 5`
 
-Add `CriticalHappiness` and `RequiredAction::Pet` to the existing structured decision model. Dominant-need selection compares normalized neglect across all four needs and keeps deterministic tie breaking in this order: hunger, energy, cleanliness, happiness.
+Add `CriticalHappiness` and `RequiredAction::Pet` to the structured decision model. Dominant-need selection compares normalized neglect across all four needs with deterministic tie breaking: hunger, energy, cleanliness, happiness.
 
-The existing blocked command scopes remain unchanged:
+Blocked command scopes remain unchanged:
 
 - mild blocks safe development work;
 - moderate blocks all classified work except CodeGotchi control and uncertain work;
 - severe blocks everything except CodeGotchi control.
 
-Decorative and gentle modes continue to behave as they do now. The feature changes the pet simulation, not the meaning of the enforcement-mode switch.
+Decorative and gentle modes keep their current meanings.
 
 ## Pet Behavior
 
-`BehaviorCoordinator` must also treat happiness `<= 10` as a `CriticalNeed`, alongside the existing critical hunger, energy, and cleanliness checks. This keeps room presentation aligned with the enforcement model when the pet has been ignored socially.
+`BehaviorCoordinator` must treat happiness `<= 10` as `CriticalNeed`, alongside current hunger, energy, and cleanliness checks.
 
-Outstanding demands do not create a new top-level `PetBehavior` variant. They are explicit snapshot state rendered by the room and can coexist with working, failure, success, and critical presentations.
+Outstanding affection/snack demands do not add a new top-level `PetBehavior`. They are explicit snapshot state and may coexist with working, success, failure, sleeping, and critical presentation.
 
 ## API and Protocol
 
-Extend the authoritative snapshot JSON with the pending demands and incident scheduler fields. Rust and TypeScript protocol representations must agree exactly.
+Extend the authoritative snapshot JSON and TypeScript protocol with pending demands, attention sequence, and `nextIncidentAt`.
 
-Expose the already-existing `CareCommand::Pet` through:
+Expose the existing `CareCommand::Pet` through:
 
 - `POST /api/v1/care/pet`
-- a bounded request containing `actionId`, `interactionMs`, and `pointerDistance`
+- request fields `actionId`, `interactionMs`, `pointerDistance`
 - `AuthoritativeRuntime::pet(...)`
 - `CodeGotchiClient.pet(...)`
 - `useCodeGotchi().pet(...)`
 
-The route follows the same bearer authentication, replay-safe action ID, mutation receipt, persistence, and WebSocket broadcast path as feed, clean, and nap.
+The route uses the same bearer authentication, replay-safe action IDs, persistence, mutation receipt, and WebSocket broadcast path as feed, clean, and nap.
 
-No incident creation endpoint is added. Incidents originate only from authoritative simulation time progression.
+No incident creation API is added. Incidents originate only from simulation time advancement.
 
 ## Room UI
 
 The browser remains a projection of authoritative state.
 
-### Demand presentation
+Render a compact demand stack near the pet:
 
-Render a compact demand stack anchored near the pet:
+- affection: heart icon plus accessible text `Needs attention`
+- snack: bowl/food icon plus accessible text `Wants a snack`
+- multiple demands of one kind collapse visually into one bubble with a count badge
 
-- affection demand: heart icon and accessible text `Needs attention`
-- snack demand: food/bowl icon and accessible text `Wants a snack`
-- if multiple demands of the same kind are pending, show one bubble with a numeric count badge
+Poops remain physical floor objects and are not duplicated as thought bubbles.
 
-Poops continue to render as floor objects and are not duplicated as a separate poop thought bubble.
+Make the existing pet element pointer-interactive for petting. Pointer-down records start time and position; pointer-move accumulates path length; pointer-up sends measured `interactionMs` and `pointerDistance`. The backend decides whether the gesture is valid.
 
-The demand stack is visible independently of the cosmetic thinking bubbles used for agent activity. It must compose with blinking, movement, desk work, nap, success, and failure presentation rather than replacing those systems.
+The UI must not optimistically clear a demand or mutate needs. It waits for the authoritative mutation response / WebSocket snapshot.
 
-### Petting gesture
-
-Make the pet itself pointer-interactive without changing its room-motion authority. A pointer-down on the pet starts a local gesture measurement; pointer movement accumulates path distance; pointer-up sends `interactionMs` and `pointerDistance` through the new pet care endpoint. The backend remains responsible for deciding whether the gesture satisfies the existing 1,500 ms / 120 px minimum.
-
-The UI may show transient feedback for a successful pet but must not optimistically remove a demand or change happiness before the authoritative snapshot arrives.
-
-### Existing interactions
-
-Feeding remains click/drag based. Poop cleaning remains shovel/trash based. The hammock remains the energy recovery interaction. No extra modal, confirmation dialog, or generic `Resolve demand` button is added.
+Feeding, shovel/trash cleaning, hammock use, movement, blinking, and existing activity presentation remain intact.
 
 ## Persistence and Restart Behavior
 
-The SQLite snapshot remains the sole persisted source of truth. Pending demands, schedule sequence, and remaining active interval survive restart.
+SQLite remains the sole persisted source of truth.
 
-A restart with two affection demands and 90 active seconds remaining until the next incident restores exactly that state. Browser reloads do not affect timing because the browser owns no incident timer.
+A restart restores pending demands, pending poops, need values, attention sequence, and the exact `next_incident_at`. The first maintenance advancement then applies elapsed wall-clock progression and creates up to five missed incidents.
 
-Old snapshots without attention state restore with an empty backlog and a fresh deterministic first interval. They must not fail snapshot validation or spawn an immediate incident.
+Examples of intended behavior:
+
+- Return after ~20 minutes: expect clearly worse hunger/energy and commonly several total demands/poops, depending on the deterministic schedule and prior state.
+- Return after ~30–60 minutes without care: strict mode should commonly be severe and normal coding effectively unavailable until care is performed.
+- Return after overnight or several days: needs clamp at their extrema; at most five incident objects are added for the long catch-up advancement; the pet is severely neglected rather than the room containing an unbounded backlog.
+
+Browser reload has no timing effect because the browser owns no incident clock.
 
 ## Testing
 
@@ -238,65 +239,62 @@ Old snapshots without attention state restore with an empty backlog and a fresh 
 
 Add deterministic tests covering:
 
-- active hunger progresses at `+25/hour` and active energy at `-50/hour`;
-- idle/waiting rates remain `+1/hour` and `+8/hour`;
-- incident delays are always within inclusive 180–300 seconds;
+- hunger progresses `+25/hour` and energy `-50/hour` in active, idle, waiting, and blocked states;
+- hammock overlap still uses nap recovery for only the covered interval;
+- delay derivation is always in inclusive 180–300 seconds;
 - every three consecutive incident kinds contain one affection, one snack, and one poop;
-- the same pet ID and sequence derive the same schedule after restore;
-- active time advances the incident countdown while idle/waiting time does not;
-- a large elapsed jump and equivalent small ticks create identical incidents and need values;
-- affection, snack, and poop pressure each apply `240/hour` per unresolved item and stack linearly;
+- identical pet ID + sequence derives identical delays, kinds, and IDs;
+- wall-clock incident scheduling continues regardless of activity state;
+- one large advancement and equivalent one-second ticks match when at most five incidents are due;
+- a long advancement creates exactly five catch-up incidents, progresses needs across the full elapsed interval, and re-anchors the next incident after the target;
+- affection, snack, and poop pressure apply `240/hour` per unresolved item in every activity state and stack linearly;
 - petting resolves exactly one oldest affection demand;
-- non-energy food resolves exactly one oldest snack demand;
+- kibble/treat/fruit resolve exactly one oldest snack demand;
 - energy drinks do not resolve snack demands;
 - cleaning one poop removes only that poop's pressure;
 - happiness participates in mild/moderate/severe enforcement;
-- severe happiness blocks uncertain work just like other severe needs;
-- `BehaviorCoordinator` reports critical need at happiness `<= 10`;
-- 30 minutes of uninterrupted active work with no care reaches severe neglect under every tested deterministic shuffle-bag ordering and the policy would permit only CodeGotchi control.
+- severe happiness blocks uncertain work like the other severe needs;
+- `BehaviorCoordinator` reports `CriticalNeed` at happiness `<= 10`;
+- thirty minutes of wall-clock time without care reaches severe neglect for every tested legal 3–5 minute schedule/shuffle-bag ordering;
+- legacy snapshots migrate to an empty attention backlog and a first incident scheduled after restore, not in the past.
 
 ### Runtime/server
 
-Cover persistence and broadcast behavior for automatically generated incidents and the new pet endpoint. A maintenance tick crossing an incident boundary must persist and broadcast the changed snapshot even when no Codex hook event occurs at that instant.
+Cover persistence and broadcast behavior for automatically generated incidents and the pet endpoint. A maintenance tick that crosses an incident boundary must persist and broadcast even without a Codex hook event. A restart fixture must prove elapsed offline wall-clock time is applied on the first maintenance advancement and that catch-up is capped at five incidents.
 
 ### Web
 
-Add tests for:
-
-- protocol parsing/types for pending demands;
-- affection and snack demand bubbles and count badges;
-- pointer gesture measurement and the pet care request;
-- failed/insufficient petting leaves authoritative state unchanged and shows backend error;
-- feeding clears one snack demand only after authoritative response;
-- existing poop, hammock, motion, blink, and food interactions remain functional.
+Add tests for protocol fields, demand bubbles/count badges, pointer gesture measurement, the pet care request, backend validation errors, authoritative clearing of one demand, and regression coverage for existing food/poop/hammock/motion/blink behavior.
 
 ### End-to-end
 
-Extend the production Playwright fixture with deterministic incident state so a browser test can verify the complete care loop without waiting real minutes:
+Extend the production Playwright fixture with deterministic persisted demand state instead of waiting real minutes:
 
 1. show an affection demand;
-2. perform a valid petting gesture;
-3. observe the demand disappear from the authoritative snapshot;
-4. show a snack demand and satisfy it with food;
-5. show a poop and clean it with the existing shovel/trash interaction;
-6. verify strict-mode denial copy can now request petting for critical happiness.
+2. perform a valid petting gesture and observe authoritative removal;
+3. show a snack demand and satisfy it with food;
+4. show a poop and clean it through shovel/trash;
+5. verify strict denial copy can request petting for critical happiness;
+6. restore a snapshot whose `nextIncidentAt` is in the past and verify catch-up state appears after maintenance without browser-owned timers.
 
 ## Acceptance Criteria
 
-The feature is complete when all of the following are true:
+The feature is complete when:
 
-- During continuous active coding, incidents occur at randomized 3–5 minute active-time intervals.
-- Breaks and `WaitingForUser` periods do not consume the incident countdown.
-- A caretaker who addresses incidents promptly can keep working with short room interactions.
-- Ignored affection, snack, and poop incidents visibly degrade happiness, hunger, and cleanliness respectively.
-- Multiple ignored incidents stack rather than replacing one another.
-- Hunger and energy use the new `+25/hour` and `-50/hour` active rates.
-- Happiness is a first-class strict-mode blocking need.
-- No new blocking mechanism exists outside `WorkPermissionPolicy`.
-- Thirty active minutes without care produces severe-scale neglect in deterministic simulation coverage and therefore reaches the existing near-total strict-mode refusal tier.
-- Restarting the browser or runtime neither clears pending demands nor rerolls an already-scheduled incident.
-- The browser cannot manufacture, dismiss, or locally mutate incidents.
-- All existing Rust, web, formatting, lint, build, and Playwright quality gates remain green.
+- incidents occur at randomized 3–5 minute wall-clock intervals;
+- idle/waiting time and browser closure do not freeze needs or incident timing;
+- runtime restart applies elapsed real time;
+- one long catch-up advancement creates at most five missed incident objects;
+- hunger and energy use `+25/hour` and `-50/hour` across normal wall-clock time;
+- ignored affection, snack, and poop incidents degrade happiness, hunger, and cleanliness respectively at `240/hour` each;
+- multiple incidents stack;
+- happiness is a first-class strict-mode blocking need;
+- no blocking mechanism exists outside `WorkPermissionPolicy`;
+- thirty minutes with no care reaches the existing severe near-total refusal tier;
+- restarting neither clears existing demands nor rerolls an already scheduled future incident;
+- the browser cannot manufacture, dismiss, schedule, or locally mutate incidents;
+- returning after a long absence produces severe neglect and a bounded physical backlog rather than freezing the pet or generating unbounded objects;
+- all existing Rust, web, formatting, lint, build, and Playwright quality gates remain green.
 
 ## Out of Scope
 
