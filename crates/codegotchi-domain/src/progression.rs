@@ -876,7 +876,15 @@ fn validate_snapshot(snapshot: &SimulationSnapshot) -> Result<(), SnapshotRestor
         .pending_poops
         .iter()
         .any(|poop| poop.attention_sequence().is_none());
-    if has_work_poop && snapshot.poop_sequence == 0 {
+    // Snapshots written before Poop provenance was added can contain an
+    // attention-generated poop without `attention_sequence`. Their persisted
+    // scheduler fields identify the trusted legacy shape; retain those poops
+    // as unprovenanced entries rather than attempting an unbounded ID lookup.
+    let is_legacy_unprovenanced_snapshot = has_work_poop
+        && snapshot.attention_sequence > 0
+        && snapshot.next_incident_at.is_some()
+        && snapshot.poop_sequence == 0;
+    if has_work_poop && snapshot.poop_sequence == 0 && !is_legacy_unprovenanced_snapshot {
         return Err(SnapshotRestoreError::InvariantViolation(
             "pending poops require a positive poop sequence".to_owned(),
         ));
@@ -1228,13 +1236,28 @@ mod tests {
         })
     }
 
-    fn snapshot_with_raw_poop(attention_sequence: u64, poop: Value) -> SimulationSnapshot {
+    fn legacy_raw_poop(id: Uuid, created_at: DateTime<Utc>) -> Value {
+        json!({
+            "id": id,
+            "createdAt": created_at,
+        })
+    }
+
+    fn snapshot_with_raw_poops(
+        attention_sequence: u64,
+        poop_sequence: u64,
+        poops: Value,
+    ) -> SimulationSnapshot {
         let mut encoded = serde_json::to_value(simulation().snapshot()).unwrap();
         let object = encoded.as_object_mut().expect("snapshot object");
         object.insert("attentionSequence".to_owned(), json!(attention_sequence));
-        object.insert("poopSequence".to_owned(), json!(1));
-        object.insert("pendingPoops".to_owned(), json!([poop]));
+        object.insert("poopSequence".to_owned(), json!(poop_sequence));
+        object.insert("pendingPoops".to_owned(), poops);
         serde_json::from_value(encoded).unwrap()
+    }
+
+    fn snapshot_with_raw_poop(attention_sequence: u64, poop: Value) -> SimulationSnapshot {
+        snapshot_with_raw_poops(attention_sequence, 1, json!([poop]))
     }
 
     fn restore_raw_poop(
@@ -1280,6 +1303,92 @@ mod tests {
             restore_raw_poop(snapshot),
             Err(SnapshotRestoreError::InvariantViolation(_))
         ));
+    }
+
+    #[test]
+    fn legacy_attention_poop_restores_reanchors_and_reserializes_without_provenance() {
+        let pet_id = Uuid::from_u128(9);
+        let attention_sequence = (0..3)
+            .find(|sequence| incident_kind(pet_id, *sequence) == AttentionIncidentKind::Poop)
+            .expect("one of the first three incidents is poop");
+        let ahead = Duration::days(8);
+        let mut encoded = serde_json::to_value(simulation().snapshot()).unwrap();
+        let object = encoded.as_object_mut().expect("snapshot object");
+        object.insert("lastUpdatedAt".to_owned(), json!(start() + ahead));
+        object.insert("behavior".to_owned(), json!("Sleeping"));
+        object.insert(
+            "attentionSequence".to_owned(),
+            json!(attention_sequence + 1),
+        );
+        object.insert("poopSequence".to_owned(), json!(0));
+        object.insert(
+            "pendingPoops".to_owned(),
+            json!([legacy_raw_poop(
+                incident_id(pet_id, attention_sequence, AttentionIncidentKind::Poop),
+                start() + ahead,
+            )]),
+        );
+
+        let legacy: SimulationSnapshot = serde_json::from_value(encoded).unwrap();
+        assert_eq!(legacy.pending_poops[0].attention_sequence(), None);
+        let restored = PetSimulation::from_snapshot(
+            legacy,
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+        assert_eq!(restored.pet().pending_poops()[0].created_at(), start());
+
+        let serialized = serde_json::to_value(restored.snapshot()).unwrap();
+        assert!(
+            !serialized["pendingPoops"][0]
+                .as_object()
+                .expect("poop object")
+                .contains_key("attentionSequence")
+        );
+        let restored_again = PetSimulation::from_snapshot(
+            serde_json::from_value(serialized).unwrap(),
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+        .unwrap();
+        assert_eq!(
+            restored_again.pet().pending_poops()[0].created_at(),
+            start()
+        );
+    }
+
+    #[test]
+    fn mixed_legacy_and_provenanced_attention_poops_restore_without_downgrading_provenance() {
+        let pet_id = Uuid::from_u128(9);
+        let poop_sequences = (0..6)
+            .filter(|sequence| incident_kind(pet_id, *sequence) == AttentionIncidentKind::Poop)
+            .take(2)
+            .collect::<Vec<_>>();
+        let legacy_sequence = poop_sequences[0];
+        let provenanced_sequence = poop_sequences[1];
+        let attention_sequence = provenanced_sequence + 1;
+        let snapshot = snapshot_with_raw_poops(
+            attention_sequence,
+            0,
+            json!([
+                legacy_raw_poop(
+                    incident_id(pet_id, legacy_sequence, AttentionIncidentKind::Poop),
+                    start(),
+                ),
+                raw_poop(
+                    incident_id(pet_id, provenanced_sequence, AttentionIncidentKind::Poop),
+                    provenanced_sequence,
+                ),
+            ]),
+        );
+
+        let restored = restore_raw_poop(snapshot).unwrap();
+        assert_eq!(restored.pet().pending_poops()[0].attention_sequence(), None);
+        assert_eq!(
+            restored.pet().pending_poops()[1].attention_sequence(),
+            Some(provenanced_sequence)
+        );
     }
 
     #[test]
