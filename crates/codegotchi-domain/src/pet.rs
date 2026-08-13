@@ -356,11 +356,29 @@ impl FoodInventory {
 pub struct Poop {
     id: Uuid,
     created_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    attention_sequence: Option<u64>,
 }
 
 impl Poop {
     pub fn new(id: Uuid, created_at: DateTime<Utc>) -> Self {
-        Self { id, created_at }
+        Self {
+            id,
+            created_at,
+            attention_sequence: None,
+        }
+    }
+
+    pub(crate) fn new_attention(
+        id: Uuid,
+        created_at: DateTime<Utc>,
+        attention_sequence: u64,
+    ) -> Self {
+        Self {
+            id,
+            created_at,
+            attention_sequence: Some(attention_sequence),
+        }
     }
 
     pub fn id(self) -> Uuid {
@@ -369,6 +387,10 @@ impl Poop {
 
     pub fn created_at(self) -> DateTime<Utc> {
         self.created_at
+    }
+
+    pub fn attention_sequence(self) -> Option<u64> {
+        self.attention_sequence
     }
 
     pub(crate) fn shift_created_at(&mut self, shift: Duration) {

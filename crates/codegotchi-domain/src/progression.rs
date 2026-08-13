@@ -706,13 +706,14 @@ where
                 PetDemandKind::Snack,
                 created_at,
             )),
-            AttentionIncidentKind::Poop => self.pet.push_poop(Poop::new(
+            AttentionIncidentKind::Poop => self.pet.push_poop(Poop::new_attention(
                 incident_id(
                     self.pet.id(),
                     self.attention_sequence,
                     AttentionIncidentKind::Poop,
                 ),
                 created_at,
+                self.attention_sequence,
             )),
         }
     }
@@ -858,12 +859,24 @@ fn validate_snapshot(snapshot: &SimulationSnapshot) -> Result<(), SnapshotRestor
             "pending poop ids must be unique".to_owned(),
         ));
     }
-    let has_non_attention_poop = snapshot.pending_poops.iter().any(|poop| {
-        !(0..snapshot.attention_sequence).any(|sequence| {
-            incident_id(snapshot.pet_id, sequence, AttentionIncidentKind::Poop) == poop.id()
-        })
+    let has_invalid_attention_poop = snapshot.pending_poops.iter().any(|poop| {
+        let Some(sequence) = poop.attention_sequence() else {
+            return false;
+        };
+        sequence >= snapshot.attention_sequence
+            || incident_kind(snapshot.pet_id, sequence) != AttentionIncidentKind::Poop
+            || incident_id(snapshot.pet_id, sequence, AttentionIncidentKind::Poop) != poop.id()
     });
-    if has_non_attention_poop && snapshot.poop_sequence == 0 {
+    if has_invalid_attention_poop {
+        return Err(SnapshotRestoreError::InvariantViolation(
+            "attention poop provenance is invalid".to_owned(),
+        ));
+    }
+    let has_work_poop = snapshot
+        .pending_poops
+        .iter()
+        .any(|poop| poop.attention_sequence().is_none());
+    if has_work_poop && snapshot.poop_sequence == 0 {
         return Err(SnapshotRestoreError::InvariantViolation(
             "pending poops require a positive poop sequence".to_owned(),
         ));
@@ -1054,6 +1067,7 @@ mod tests {
     use crate::clock::FakeClock;
     use crate::pet::{FoodInventory, PetSpecies};
     use chrono::TimeZone;
+    use serde_json::{Value, json};
 
     fn start() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap()
@@ -1204,6 +1218,68 @@ mod tests {
         let mut snapshot = simulation.snapshot();
         snapshot.next_incident_at = Some(deadline);
         snapshot
+    }
+
+    fn raw_poop(id: Uuid, attention_sequence: u64) -> Value {
+        json!({
+            "id": id,
+            "createdAt": start(),
+            "attentionSequence": attention_sequence,
+        })
+    }
+
+    fn snapshot_with_raw_poop(attention_sequence: u64, poop: Value) -> SimulationSnapshot {
+        let mut encoded = serde_json::to_value(simulation().snapshot()).unwrap();
+        let object = encoded.as_object_mut().expect("snapshot object");
+        object.insert("attentionSequence".to_owned(), json!(attention_sequence));
+        object.insert("poopSequence".to_owned(), json!(1));
+        object.insert("pendingPoops".to_owned(), json!([poop]));
+        serde_json::from_value(encoded).unwrap()
+    }
+
+    fn restore_raw_poop(
+        snapshot: SimulationSnapshot,
+    ) -> Result<PetSimulation<FakeClock, DefaultNeedProgressionStrategy>, SnapshotRestoreError>
+    {
+        PetSimulation::from_snapshot(
+            snapshot,
+            FakeClock::new(start()),
+            DefaultNeedProgressionStrategy,
+        )
+    }
+
+    #[test]
+    fn restore_rejects_attention_poop_with_invalid_kind_or_id_provenance() {
+        let pet_id = Uuid::from_u128(9);
+        let kind_mismatch = snapshot_with_raw_poop(
+            1,
+            raw_poop(incident_id(pet_id, 0, AttentionIncidentKind::Affection), 0),
+        );
+        assert!(matches!(
+            restore_raw_poop(kind_mismatch),
+            Err(SnapshotRestoreError::InvariantViolation(_))
+        ));
+
+        let poop_sequence = (0..3)
+            .find(|sequence| incident_kind(pet_id, *sequence) == AttentionIncidentKind::Poop)
+            .expect("one of the first three incidents is poop");
+        let id_mismatch = snapshot_with_raw_poop(
+            poop_sequence + 1,
+            raw_poop(Uuid::from_u128(123), poop_sequence),
+        );
+        assert!(matches!(
+            restore_raw_poop(id_mismatch),
+            Err(SnapshotRestoreError::InvariantViolation(_))
+        ));
+    }
+
+    #[test]
+    fn restore_rejects_extreme_attention_sequence_without_historical_scan() {
+        let snapshot = snapshot_with_raw_poop(u64::MAX, raw_poop(Uuid::from_u128(123), 0));
+        assert!(matches!(
+            restore_raw_poop(snapshot),
+            Err(SnapshotRestoreError::InvariantViolation(_))
+        ));
     }
 
     #[test]
