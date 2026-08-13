@@ -469,6 +469,12 @@ h3 {
     background: #20263b;
 }
 
+.pet[data-blinking="true"] .pet-eye {
+    top: 31%;
+    height: 0.22rem;
+    border-radius: 0.15rem;
+}
+
 .pet-eye--left {
     left: 27%;
 }

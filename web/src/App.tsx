@@ -12,6 +12,7 @@ import {
     type FoodId,
     type SimulationSnapshot,
 } from "./protocol";
+import { useBlink } from "./useBlink";
 import { useCodeGotchi } from "./useCodeGotchi";
 import { usePetMotion } from "./usePetMotion";
 
@@ -44,6 +45,9 @@ function App({ launchToken }: AppProps) {
     const [shovelArmed, setShovelArmed] = useState(false);
     const [cleaningPoopId, setCleaningPoopId] = useState<string | null>(null);
     const motionState = usePetMotion(snapshot);
+    const blinking = useBlink(
+        snapshot !== null && motionState.semanticMode !== "napping",
+    );
 
     const activityLabel = snapshot ? presentationActivity(snapshot) : "Waiting";
     const behaviorLabel = snapshot ? presentationBehavior(snapshot) : "Waiting";
@@ -238,6 +242,7 @@ function App({ launchToken }: AppProps) {
                                 data-motion-facing={motionState.facing}
                                 data-motion-phase={motionState.phase}
                                 data-motion-region={motionRegion}
+                                data-blinking={blinking ? "true" : undefined}
                                 style={motionStyle}
                             >
                                 <span className="pet-ear pet-ear--left" />

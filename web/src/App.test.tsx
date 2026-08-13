@@ -366,7 +366,38 @@ describe("CodeGotchi motion presentation adapter", () => {
 
     afterEach(() => {
         cleanup();
+        vi.restoreAllMocks();
         vi.useRealTimers();
+    });
+
+    it("exposes one awake blink after five seconds and reopens after 120ms", () => {
+        vi.spyOn(Math, "random").mockReturnValue(0);
+        renderApp({
+            snapshot: snapshot({ behavior: "Wandering", activity: "Idle" }),
+            connectionStatus: "connected",
+        });
+        const pet = screen.getByTestId("pet");
+
+        expect(pet).not.toHaveAttribute("data-blinking");
+        act(() => vi.advanceTimersByTime(5_000));
+        expect(pet).toHaveAttribute("data-blinking", "true");
+        act(() => vi.advanceTimersByTime(120));
+        expect(pet).not.toHaveAttribute("data-blinking");
+    });
+
+    it("does not schedule awake blinking while napping", () => {
+        vi.spyOn(Math, "random").mockReturnValue(0);
+        renderApp({
+            snapshot: snapshot({
+                behavior: "Sleeping",
+                nappingUntil: "2026-08-05T12:00:10Z",
+            }),
+            connectionStatus: "connected",
+        });
+        const pet = screen.getByTestId("pet");
+
+        act(() => vi.advanceTimersByTime(10_000));
+        expect(pet).not.toHaveAttribute("data-blinking");
     });
 
     it.each([
