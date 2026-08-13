@@ -370,7 +370,9 @@ h3 {
     left: var(--pet-x, 33%);
     width: clamp(8rem, 19vw, 11rem);
     height: clamp(9rem, 21vw, 12rem);
-    pointer-events: none;
+    pointer-events: auto;
+    touch-action: none;
+    cursor: grab;
     opacity: 1;
     transform: translate(-50%, -100%);
     transform-origin: 50% 100%;
@@ -385,6 +387,10 @@ h3 {
         rotate 180ms ease,
         scale 180ms ease;
     will-change: left, top, transform;
+}
+
+.pet:active {
+    cursor: grabbing;
 }
 
 .pet--napping {
@@ -743,6 +749,94 @@ h3 {
     font-weight: 700;
 }
 
+.demand-stack {
+    position: absolute;
+    z-index: 4;
+    top: var(--pet-y, 58%);
+    left: var(--pet-x, 50%);
+    display: grid;
+    gap: 0.4rem;
+    width: max-content;
+    max-width: calc(100% - 1rem);
+    pointer-events: none;
+    transform: translate(-50%, -100%) translateY(-1rem);
+}
+
+.room-illustration:has(.pet[data-motion-mode="desk"]) .demand-stack {
+    top: 63%;
+    left: 50%;
+}
+
+.room-illustration:has(.pet[data-motion-mode="thinking"]) .demand-stack {
+    top: 54%;
+    left: 52%;
+}
+
+.room-illustration:has(.pet[data-motion-mode="napping"]) .demand-stack {
+    top: 44%;
+    left: 27%;
+}
+
+.room-illustration:has(.pet[data-motion-mode="critical"]) .demand-stack,
+.room-illustration:has(.pet[data-motion-mode="failure"]) .demand-stack {
+    top: 64%;
+    left: 63%;
+}
+
+.room-illustration:has(.pet[data-motion-mode="success"]) .demand-stack {
+    top: 58%;
+    left: 50%;
+}
+
+.demand-bubble {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    min-width: 8.8rem;
+    padding: 0.45rem 0.5rem 0.45rem 0.7rem;
+    border: 1px solid #ffffffc7;
+    border-radius: 999px;
+    color: #33426e;
+    background: #ffffffeb;
+    box-shadow: 0 0.4rem 1rem #323d5b26;
+    font-size: 0.72rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.demand-bubble--affection {
+    border-color: #e9b5cb;
+    color: #8a3f67;
+    background: #fff0f6eb;
+}
+
+.demand-bubble--snack {
+    border-color: #f0cf87;
+    color: #80590a;
+    background: #fff8e6eb;
+}
+
+.demand-bubble__count {
+    display: grid;
+    min-width: 1.55rem;
+    min-height: 1.55rem;
+    place-items: center;
+    padding: 0 0.3rem;
+    border-radius: 50%;
+    color: #ffffff;
+    background: #687bc0;
+    font-size: 0.76rem;
+}
+
+.demand-bubble--affection .demand-bubble__count {
+    background: #c25f91;
+}
+
+.demand-bubble--snack .demand-bubble__count {
+    background: #d08a32;
+}
+
 .feedback {
     position: absolute;
     top: 15%;
@@ -757,12 +851,11 @@ h3 {
 }
 
 /*
- * Motion is a presentation layer. The pet can sit above the floor and still
- * never intercept a care gesture; controls own the next stacking layer.
+ * Motion is a presentation layer. The pet can sit above the floor and own a
+ * petting gesture; care controls own the next stacking layer.
  * Positioning uses the pet's bottom-center as an anchor, so moving a waypoint
  * changes left/top without asking an animation to replace that placement.
  */
-.pet,
 .pet *,
 .pet::before,
 .pet::after {

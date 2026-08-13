@@ -1,4 +1,10 @@
-import { useState, type CSSProperties, type DragEvent } from "react";
+import {
+    useRef,
+    useState,
+    type CSSProperties,
+    type DragEvent,
+    type PointerEvent,
+} from "react";
 
 import "./App.css";
 
@@ -27,6 +33,14 @@ interface AppProps {
     launchToken?: string | null;
 }
 
+interface PetGesture {
+    startedAt: number;
+    lastX: number;
+    lastY: number;
+    distance: number;
+    pointerId: number;
+}
+
 function App({ launchToken }: AppProps) {
     const [token] = useState<string | null>(() =>
         launchToken === undefined ? extractLaunchToken() : launchToken,
@@ -40,10 +54,12 @@ function App({ launchToken }: AppProps) {
         feed,
         clean,
         nap,
+        pet,
         restock,
     } = useCodeGotchi(token);
     const [shovelArmed, setShovelArmed] = useState(false);
     const [cleaningPoopId, setCleaningPoopId] = useState<string | null>(null);
+    const petGestureRef = useRef<PetGesture | null>(null);
     const motionState = usePetMotion(snapshot);
     const blinking = useBlink(
         snapshot !== null && motionState.semanticMode !== "napping",
@@ -65,6 +81,12 @@ function App({ launchToken }: AppProps) {
         (motionState.action === "think" || motionState.action === "pulse") &&
         motionState.phase !== "static";
     const showSparkles = motionState.semanticMode === "success";
+    const affectionDemandCount =
+        snapshot?.pendingDemands.filter((demand) => demand.kind === "affection")
+            .length ?? 0;
+    const snackDemandCount =
+        snapshot?.pendingDemands.filter((demand) => demand.kind === "snack")
+            .length ?? 0;
 
     function submitFeed(foodId: string): void {
         if (!isFoodId(foodId)) {
@@ -136,6 +158,55 @@ function App({ launchToken }: AppProps) {
             setShovelArmed(false);
         } catch {
             // The hook owns the backend error; retain the authoritative poop.
+        }
+    }
+
+    function handlePetPointerDown(event: PointerEvent<HTMLDivElement>): void {
+        if (event.button > 0) {
+            return;
+        }
+        if (typeof event.currentTarget.setPointerCapture === "function") {
+            event.currentTarget.setPointerCapture(event.pointerId);
+        }
+        petGestureRef.current = {
+            startedAt: performance.now(),
+            lastX: event.clientX,
+            lastY: event.clientY,
+            distance: 0,
+            pointerId: event.pointerId,
+        };
+    }
+
+    function handlePetPointerMove(event: PointerEvent<HTMLDivElement>): void {
+        const gesture = petGestureRef.current;
+        if (gesture === null || event.pointerId !== gesture.pointerId) {
+            return;
+        }
+        const dx = event.clientX - gesture.lastX;
+        const dy = event.clientY - gesture.lastY;
+        gesture.distance += Math.hypot(dx, dy);
+        gesture.lastX = event.clientX;
+        gesture.lastY = event.clientY;
+    }
+
+    function handlePetPointerUp(event: PointerEvent<HTMLDivElement>): void {
+        const gesture = petGestureRef.current;
+        if (gesture === null || event.pointerId !== gesture.pointerId) {
+            return;
+        }
+        const duration = Math.max(
+            0,
+            Math.round(performance.now() - gesture.startedAt),
+        );
+        const distance = gesture.distance;
+        petGestureRef.current = null;
+        void pet(duration, distance);
+    }
+
+    function handlePetPointerCancel(event: PointerEvent<HTMLDivElement>): void {
+        const gesture = petGestureRef.current;
+        if (gesture !== null && event.pointerId === gesture.pointerId) {
+            petGestureRef.current = null;
         }
     }
 
@@ -244,6 +315,10 @@ function App({ launchToken }: AppProps) {
                                 data-motion-region={motionRegion}
                                 data-blinking={blinking ? "true" : undefined}
                                 style={motionStyle}
+                                onPointerDown={handlePetPointerDown}
+                                onPointerMove={handlePetPointerMove}
+                                onPointerUp={handlePetPointerUp}
+                                onPointerCancel={handlePetPointerCancel}
                             >
                                 <span className="pet-ear pet-ear--left" />
                                 <span className="pet-ear pet-ear--right" />
@@ -297,6 +372,29 @@ function App({ launchToken }: AppProps) {
                                     </span>
                                 ) : null}
                             </div>
+
+                            {affectionDemandCount > 0 ||
+                            snackDemandCount > 0 ? (
+                                <div
+                                    className="demand-stack"
+                                    data-testid="demand-stack"
+                                    aria-live="polite"
+                                    style={motionStyle}
+                                >
+                                    {affectionDemandCount > 0 ? (
+                                        <DemandBubble
+                                            kind="affection"
+                                            count={affectionDemandCount}
+                                        />
+                                    ) : null}
+                                    {snackDemandCount > 0 ? (
+                                        <DemandBubble
+                                            kind="snack"
+                                            count={snackDemandCount}
+                                        />
+                                    ) : null}
+                                </div>
+                            ) : null}
 
                             <button
                                 className="feed-target"
@@ -513,6 +611,28 @@ function Need({ label, value }: { label: string; value: number }) {
                     style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
                 />
             </div>
+        </div>
+    );
+}
+
+function DemandBubble({
+    kind,
+    count,
+}: {
+    kind: "affection" | "snack";
+    count: number;
+}) {
+    const label = kind === "affection" ? "Needs attention" : "Wants a snack";
+    return (
+        <div className={`demand-bubble demand-bubble--${kind}`}>
+            <span className="demand-bubble__label">{label}</span>
+            <strong
+                className="demand-bubble__count"
+                data-testid={`demand-${kind}-count`}
+                aria-label={`${count} ${kind} demand${count === 1 ? "" : "s"}`}
+            >
+                {count}
+            </strong>
         </div>
     );
 }

@@ -360,6 +360,196 @@ describe("CodeGotchi pet room", () => {
             "00000000-0000-0000-0000-000000000099",
         );
     });
+
+    it("renders grouped authoritative demand bubbles without duplicating poops", () => {
+        renderApp({
+            snapshot: snapshot({
+                pendingDemands: [
+                    {
+                        id: "affection-1",
+                        kind: "affection",
+                        createdAt: "2026-08-13T12:00:00Z",
+                    },
+                    {
+                        id: "affection-2",
+                        kind: "affection",
+                        createdAt: "2026-08-13T12:01:00Z",
+                    },
+                    {
+                        id: "snack-1",
+                        kind: "snack",
+                        createdAt: "2026-08-13T12:02:00Z",
+                    },
+                ],
+            }),
+            connectionStatus: "connected",
+        });
+
+        expect(screen.getByText("Needs attention")).toBeInTheDocument();
+        expect(screen.getByText("Wants a snack")).toBeInTheDocument();
+        expect(screen.getByTestId("demand-affection-count")).toHaveTextContent(
+            "2",
+        );
+        expect(screen.getByTestId("demand-snack-count")).toHaveTextContent("1");
+        expect(screen.getByTestId("demand-stack")).not.toHaveTextContent(
+            /poop/i,
+        );
+        expect(
+            screen.getByTestId("poop-00000000-0000-0000-0000-000000000099"),
+        ).toBeInTheDocument();
+        expect(
+            screen.queryByTestId("demand-poop-count"),
+        ).not.toBeInTheDocument();
+    });
+});
+
+describe("CodeGotchi petting adapter", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-08-13T12:00:00Z"));
+    });
+
+    afterEach(() => {
+        cleanup();
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+    });
+
+    it("measures the captured primary-pointer path and sends duration and distance", () => {
+        const petCare = vi.fn().mockResolvedValue(undefined);
+        renderApp({
+            snapshot: snapshot(),
+            connectionStatus: "connected",
+            pet: petCare,
+        });
+        const pet = screen.getByTestId("pet");
+        const setPointerCapture = vi.fn();
+        Object.defineProperty(pet, "setPointerCapture", {
+            configurable: true,
+            value: setPointerCapture,
+        });
+
+        fireEvent.pointerDown(pet, {
+            button: 0,
+            clientX: 10,
+            clientY: 10,
+            pointerId: 7,
+        });
+        vi.advanceTimersByTime(1_500);
+        fireEvent.pointerMove(pet, {
+            clientX: 70,
+            clientY: 10,
+            pointerId: 7,
+        });
+        fireEvent.pointerMove(pet, {
+            clientX: 130,
+            clientY: 10,
+            pointerId: 7,
+        });
+        fireEvent.pointerUp(pet, {
+            clientX: 130,
+            clientY: 10,
+            pointerId: 7,
+        });
+
+        expect(setPointerCapture).toHaveBeenCalledWith(7);
+        expect(petCare).toHaveBeenCalledWith(1_500, 120);
+    });
+
+    it("ignores secondary mouse input, unrelated pointers, and canceled gestures", () => {
+        const petCare = vi.fn().mockResolvedValue(undefined);
+        renderApp({
+            snapshot: snapshot(),
+            connectionStatus: "connected",
+            pet: petCare,
+        });
+        const pet = screen.getByTestId("pet");
+        Object.defineProperty(pet, "setPointerCapture", {
+            configurable: true,
+            value: vi.fn(),
+        });
+        vi.spyOn(performance, "now").mockReturnValue(1_000);
+
+        fireEvent.pointerDown(pet, {
+            button: 2,
+            clientX: 10,
+            clientY: 10,
+            pointerId: 1,
+        });
+        fireEvent.pointerUp(pet, {
+            button: 2,
+            clientX: 10,
+            clientY: 10,
+            pointerId: 1,
+        });
+
+        fireEvent.pointerDown(pet, {
+            button: 0,
+            clientX: 10,
+            clientY: 10,
+            pointerId: 2,
+        });
+        fireEvent.pointerMove(pet, {
+            clientX: 100,
+            clientY: 10,
+            pointerId: 3,
+        });
+        fireEvent.pointerCancel(pet, { pointerId: 2 });
+        fireEvent.pointerUp(pet, { pointerId: 2 });
+
+        expect(petCare).not.toHaveBeenCalled();
+    });
+
+    it("keeps the authoritative demand and backend error after rejected pet care", async () => {
+        const petCareError = {
+            code: "insufficient_duration",
+            message: "petting duration is below the minimum",
+        };
+        const rejectedPet = Promise.reject(petCareError);
+        void rejectedPet.catch(() => undefined);
+        const petCare = vi.fn().mockReturnValue(rejectedPet);
+        renderApp({
+            snapshot: snapshot({
+                pendingDemands: [
+                    {
+                        id: "affection-1",
+                        kind: "affection",
+                        createdAt: "2026-08-13T12:00:00Z",
+                    },
+                ],
+            }),
+            connectionStatus: "connected",
+            error: petCareError,
+            pet: petCare,
+        });
+
+        const pet = screen.getByTestId("pet");
+        Object.defineProperty(pet, "setPointerCapture", {
+            configurable: true,
+            value: vi.fn(),
+        });
+        vi.spyOn(performance, "now").mockReturnValue(1_000);
+        fireEvent.pointerDown(pet, {
+            button: 0,
+            clientX: 10,
+            clientY: 10,
+            pointerId: 1,
+        });
+        fireEvent.pointerUp(pet, {
+            clientX: 10,
+            clientY: 10,
+            pointerId: 1,
+        });
+        await act(async () => {
+            await rejectedPet.catch(() => undefined);
+        });
+
+        expect(screen.getByText("Needs attention")).toBeInTheDocument();
+        expect(screen.getByRole("alert")).toHaveTextContent(
+            "petting duration is below the minimum",
+        );
+        expect(petCare).toHaveBeenCalledWith(0, 0);
+    });
 });
 
 describe("CodeGotchi motion presentation adapter", () => {
