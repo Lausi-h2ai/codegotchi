@@ -334,9 +334,9 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
             )));
         }
     };
-    let mut child_command = profile_guard.codex_command(&validated.codex_path);
+    let invocation = profile_guard.invocation(&validated.codex_path, &validated.trailing_arguments);
+    let mut child_command = invocation.std_command();
     child_command
-        .args(&validated.trailing_arguments)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());

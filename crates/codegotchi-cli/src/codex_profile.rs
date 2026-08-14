@@ -85,6 +85,13 @@ pub struct PersistentCodexProfileGuard<'a> {
     directory_lock: Flock<File>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CodexInvocation {
+    pub program: PathBuf,
+    pub arguments: Vec<OsString>,
+    pub environment: Vec<(OsString, OsString)>,
+}
+
 impl PersistentCodexProfile {
     /// Renders the complete hook configuration, derives a stable profile name
     /// from those exact bytes, and creates or safely reuses that profile.
@@ -192,11 +199,54 @@ impl PersistentCodexProfileGuard<'_> {
         self.profile.codex_command(codex_program)
     }
 
+    pub fn invocation<I, A>(
+        &self,
+        codex_program: impl AsRef<OsStr>,
+        trailing_arguments: I,
+    ) -> CodexInvocation
+    where
+        I: IntoIterator<Item = A>,
+        A: AsRef<OsStr>,
+    {
+        let mut arguments = Vec::with_capacity(2);
+        arguments.push(OsString::from("--profile"));
+        arguments.push(OsString::from(&self.profile.profile_name));
+        arguments.extend(
+            trailing_arguments
+                .into_iter()
+                .map(|argument| argument.as_ref().to_os_string()),
+        );
+
+        CodexInvocation {
+            program: PathBuf::from(codex_program.as_ref()),
+            arguments,
+            environment: vec![
+                (
+                    OsString::from("CODEX_HOME"),
+                    self.profile.codex_home.as_os_str().to_os_string(),
+                ),
+                (
+                    OsString::from("CODEGOTCHI_SESSION_FILE"),
+                    self.profile.session_file.as_os_str().to_os_string(),
+                ),
+            ],
+        }
+    }
+
     /// Spawns a prepared Codex command while this cooperative directory guard
     /// is still held. The caller may drop the guard immediately after this
     /// method returns.
     pub fn spawn(&self, command: &mut Command) -> std::io::Result<Child> {
         command.spawn()
+    }
+}
+
+impl CodexInvocation {
+    pub fn std_command(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        command.args(&self.arguments);
+        command.envs(self.environment.iter().map(|(key, value)| (key, value)));
+        command
     }
 }
 
@@ -614,9 +664,116 @@ fn escape_toml(value: &str) -> String {
 mod tests {
     use super::*;
     use std::fs;
+    use std::os::unix::ffi::OsStringExt;
     use std::os::unix::fs::PermissionsExt;
     use std::sync::mpsc;
     use std::thread;
+
+    #[test]
+    fn guarded_invocation_contains_exact_profile_arguments_and_environment() {
+        let home =
+            std::env::temp_dir().join(format!("codegotchi-profile-invocation-{}", Uuid::new_v4()));
+        fs::create_dir_all(&home).unwrap();
+        let session_file = home.join("runtime-metadata.json");
+        let profile =
+            PersistentCodexProfile::ensure(&home, &session_file, "codegotchi hook").unwrap();
+        let guard = profile.acquire_spawn_guard().unwrap();
+        let trailing_arguments = os(&["--model", "x"]);
+
+        let invocation = guard.invocation(Path::new("/usr/bin/codex"), &trailing_arguments);
+
+        assert_eq!(invocation.program, PathBuf::from("/usr/bin/codex"));
+        let mut expected_arguments = os(&["--profile"]);
+        expected_arguments.push(OsString::from(profile.profile_name()));
+        expected_arguments.extend(os(&["--model", "x"]));
+        assert_eq!(invocation.arguments, expected_arguments);
+        assert_eq!(
+            env_value(&invocation, "CODEX_HOME"),
+            Some(profile.codex_home().as_os_str())
+        );
+        assert_eq!(
+            env_value(&invocation, "CODEGOTCHI_SESSION_FILE"),
+            Some(profile.session_file().as_os_str())
+        );
+
+        drop(guard);
+        drop(profile);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn std_command_exposes_only_the_invocation_program_arguments_and_environment() {
+        let home = std::env::temp_dir().join(format!(
+            "codegotchi-profile-command-adapter-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&home).unwrap();
+        let session_file = home.join("runtime-metadata.json");
+        let profile =
+            PersistentCodexProfile::ensure(&home, &session_file, "codegotchi hook").unwrap();
+        let guard = profile.acquire_spawn_guard().unwrap();
+        let invocation = guard.invocation(Path::new("/usr/bin/codex"), os(&["--model", "x"]));
+        let command = invocation.std_command();
+
+        assert_eq!(command.get_program(), invocation.program.as_os_str());
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            invocation
+                .arguments
+                .iter()
+                .map(OsString::as_os_str)
+                .collect::<Vec<_>>()
+        );
+        let command_environment = command
+            .get_envs()
+            .map(|(key, value)| (key.to_os_string(), value.map(std::ffi::OsStr::to_os_string)))
+            .collect::<Vec<_>>();
+        assert_eq!(command_environment.len(), invocation.environment.len());
+        for (key, value) in &invocation.environment {
+            assert!(command_environment.contains(&(key.clone(), Some(value.clone()))));
+        }
+
+        drop(guard);
+        drop(profile);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn guarded_invocation_preserves_non_utf8_trailing_arguments() {
+        let home = std::env::temp_dir().join(format!(
+            "codegotchi-profile-invocation-non-utf8-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&home).unwrap();
+        let session_file = home.join("runtime-metadata.json");
+        let profile =
+            PersistentCodexProfile::ensure(&home, &session_file, "codegotchi hook").unwrap();
+        let guard = profile.acquire_spawn_guard().unwrap();
+        let trailing_argument = OsString::from_vec(vec![b'-', b'x', 0x80, b'y']);
+        let invocation = guard.invocation(Path::new("/usr/bin/codex"), [&trailing_argument]);
+
+        assert_eq!(invocation.arguments.last(), Some(&trailing_argument));
+        assert_eq!(
+            invocation.std_command().get_args().last(),
+            Some(trailing_argument.as_os_str())
+        );
+
+        drop(guard);
+        drop(profile);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    fn os(values: &[&str]) -> Vec<OsString> {
+        values.iter().map(OsString::from).collect()
+    }
+
+    fn env_value<'a>(invocation: &'a CodexInvocation, key: &str) -> Option<&'a OsStr> {
+        invocation
+            .environment
+            .iter()
+            .find(|(name, _)| name == OsStr::new(key))
+            .map(|(_, value)| value.as_os_str())
+    }
 
     #[test]
     fn abandoned_partial_temp_cannot_poison_atomic_profile_publication() {
