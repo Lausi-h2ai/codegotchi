@@ -423,41 +423,41 @@ impl<B: TerminalBackend> TerminalGuard<B> {
             ));
         }
 
+        guard.acquired.add(TerminalStep::RawMode);
         if let Err(error) = guard.backend.enable_raw_mode() {
             return Err(guard.entry_failure(EntryStage::RawMode, EntryDetail::Operation(error)));
         }
-        guard.acquired.add(TerminalStep::RawMode);
 
+        guard.acquired.add(TerminalStep::AlternateScreen);
         if let Err(error) = guard.backend.enter_alternate_screen() {
             return Err(
                 guard.entry_failure(EntryStage::AlternateScreen, EntryDetail::Operation(error))
             );
         }
-        guard.acquired.add(TerminalStep::AlternateScreen);
 
+        guard.acquired.add(TerminalStep::Cursor);
         if let Err(error) = guard.backend.hide_cursor() {
             return Err(guard.entry_failure(EntryStage::Cursor, EntryDetail::Operation(error)));
         }
-        guard.acquired.add(TerminalStep::Cursor);
 
+        guard.acquired.add(TerminalStep::MouseCapture);
         if let Err(error) = guard.backend.enable_mouse_capture() {
             return Err(
                 guard.entry_failure(EntryStage::MouseCapture, EntryDetail::Operation(error))
             );
         }
-        guard.acquired.add(TerminalStep::MouseCapture);
 
+        guard.acquired.add(TerminalStep::FocusChange);
         if let Err(error) = guard.backend.enable_focus_change() {
             return Err(guard.entry_failure(EntryStage::FocusChange, EntryDetail::Operation(error)));
         }
-        guard.acquired.add(TerminalStep::FocusChange);
 
+        guard.acquired.add(TerminalStep::BracketedPaste);
         if let Err(error) = guard.backend.enable_bracketed_paste() {
             return Err(
                 guard.entry_failure(EntryStage::BracketedPaste, EntryDetail::Operation(error))
             );
         }
-        guard.acquired.add(TerminalStep::BracketedPaste);
 
         Ok(guard)
     }
@@ -789,13 +789,17 @@ mod tests {
     #[test]
     fn terminal_lifecycle_each_partial_entry_failure_restores_every_acquired_responsibility() {
         let cases = [
-            (TerminalStep::RawMode, vec![Call::Size, Call::EnableRawMode]),
+            (
+                TerminalStep::RawMode,
+                vec![Call::Size, Call::EnableRawMode, Call::DisableRawMode],
+            ),
             (
                 TerminalStep::AlternateScreen,
                 vec![
                     Call::Size,
                     Call::EnableRawMode,
                     Call::EnterAlternateScreen,
+                    Call::LeaveAlternateScreen,
                     Call::DisableRawMode,
                 ],
             ),
@@ -806,6 +810,7 @@ mod tests {
                     Call::EnableRawMode,
                     Call::EnterAlternateScreen,
                     Call::HideCursor,
+                    Call::ShowCursor,
                     Call::LeaveAlternateScreen,
                     Call::DisableRawMode,
                 ],
@@ -818,6 +823,7 @@ mod tests {
                     Call::EnterAlternateScreen,
                     Call::HideCursor,
                     Call::EnableMouseCapture,
+                    Call::DisableMouseCapture,
                     Call::ShowCursor,
                     Call::LeaveAlternateScreen,
                     Call::DisableRawMode,
@@ -832,6 +838,7 @@ mod tests {
                     Call::HideCursor,
                     Call::EnableMouseCapture,
                     Call::EnableFocusChange,
+                    Call::DisableFocusChange,
                     Call::DisableMouseCapture,
                     Call::ShowCursor,
                     Call::LeaveAlternateScreen,
@@ -848,6 +855,7 @@ mod tests {
                     Call::EnableMouseCapture,
                     Call::EnableFocusChange,
                     Call::EnableBracketedPaste,
+                    Call::DisableBracketedPaste,
                     Call::DisableFocusChange,
                     Call::DisableMouseCapture,
                     Call::ShowCursor,
@@ -900,6 +908,42 @@ mod tests {
             calls(&log).len(),
             call_count,
             "failed restore must not repeat on Drop"
+        );
+    }
+
+    #[test]
+    fn terminal_lifecycle_partial_entry_cleanup_failure_is_attached_and_later_steps_continue() {
+        let log = Rc::new(RefCell::new(FakeState {
+            fail_entry: Some(TerminalStep::FocusChange),
+            fail_restore: Some(TerminalStep::FocusChange),
+            ..FakeState::default()
+        }));
+        let backend = FakeBackend::usable(Rc::clone(&log));
+        let error = match TerminalGuard::enter(backend) {
+            Ok(_) => panic!("entry should fail"),
+            Err(error) => error,
+        };
+
+        let restoration = error
+            .restoration()
+            .expect("entry error should retain inverse cleanup failure");
+        assert_eq!(restoration.failures().len(), 1);
+        assert_eq!(restoration.failures()[0].step(), TerminalStep::FocusChange);
+        assert_eq!(
+            calls(&log),
+            [
+                Call::Size,
+                Call::EnableRawMode,
+                Call::EnterAlternateScreen,
+                Call::HideCursor,
+                Call::EnableMouseCapture,
+                Call::EnableFocusChange,
+                Call::DisableFocusChange,
+                Call::DisableMouseCapture,
+                Call::ShowCursor,
+                Call::LeaveAlternateScreen,
+                Call::DisableRawMode,
+            ]
         );
     }
 
