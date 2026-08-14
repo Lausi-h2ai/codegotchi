@@ -46,6 +46,11 @@ pub enum PtyCodexError {
         #[source]
         source: io::Error,
     },
+    #[error("could not terminate Codex child: {source}")]
+    Kill {
+        #[source]
+        source: io::Error,
+    },
 }
 
 /// A Codex process attached directly to a native PTY.
@@ -146,5 +151,28 @@ impl PtyCodexChild {
         self.child
             .wait()
             .map_err(|source| PtyCodexError::Wait { source })
+    }
+
+    /// Polls the child without blocking. A returned status has been reaped by
+    /// the underlying process implementation.
+    pub fn try_wait(&mut self) -> Result<Option<portable_pty::ExitStatus>, PtyCodexError> {
+        self.child
+            .try_wait()
+            .map_err(|source| PtyCodexError::Wait { source })
+    }
+
+    /// Requests cooperative child termination through portable-pty's native
+    /// process-control implementation.
+    pub fn kill(&mut self) -> Result<(), PtyCodexError> {
+        self.child
+            .kill()
+            .map_err(|source| PtyCodexError::Kill { source })
+    }
+
+    /// Returns the native child process identifier when the PTY backend has
+    /// one. This is metadata only; the session retains process ownership here.
+    #[must_use]
+    pub fn process_id(&self) -> Option<u32> {
+        self.child.process_id()
     }
 }

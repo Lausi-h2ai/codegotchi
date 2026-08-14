@@ -179,3 +179,50 @@ cyan, inverse styling, aligned wide/combining Unicode, and a correctly placed
 visible cursor with no obvious wide-cell seam. This passes the renderer fixture
 visual loop only; it remains pre-real-Codex and pre-room evidence and does not
 satisfy either later hard gate.
+
+## H6c interactive PTY session evidence
+
+The H6c session now composes the H6a `TerminalGuard`, managed
+`PtyCodexChild`, H4a `CodexScreen`/input encoders, and H6b `render_codex` over
+the whole physical terminal. `TerminalSessionCore` is the deterministic
+production seam: one bounded PTY output chunk updates the same VT screen that
+the real adapter renders, and every key, paste, focus, and mouse event reads
+the negotiated mode model at the moment it is encoded. The adapter does not
+install signals; it consumes an externally supplied bounded
+`TerminalSessionSignal` receiver with `Interrupt`, `Terminate`, and
+`WindowChange` values.
+
+The first-cycle RED run intentionally failed before the seam existed:
+
+```text
+$ cargo test -p codegotchi-cli --test terminal_session --no-fail-fast
+error[E0432]: unresolved imports `TerminalSessionError`,
+`initialize_terminal_and_spawn`
+```
+
+The focused GREEN suite now passes seven deterministic tests. It proves entry
+failure calls no spawn callback; successful entry calls exactly one callback
+with exact invocation and rows/columns; negotiated application cursor,
+bracketed paste, focus, and SGR mouse bytes are exact while disabled mouse is
+silent; resize is not transposed; VT state is bounded; and a closed signal
+receiver can be disabled without polling spin.
+
+The blocking PTY reader runs on one thread and sends at most 16 messages of at
+most 8 KiB each. EOF and reader errors are explicit; the reader is joined after
+child/master teardown. Child `try_wait`/`wait`, `resize`, `kill`, and process
+metadata are exposed narrowly by `PtyCodexChild`. The session restores the one
+physical guard on every success/error path and keeps Drop fallback.
+
+The real adapter proof ran with the existing direct fake PTY fixture inside an
+outer `script` PTY:
+
+```text
+$ script -q -c 'stty rows 24 cols 80; TERM=xterm-256color cargo test -p codegotchi-cli --test terminal_session -- --ignored --nocapture' /tmp/codegotchi-h6c-session.scriptlog
+test real_session_adapter_spawns_fixture_and_reaps_after_external_interrupt ... ok
+```
+
+The transcript visibly contains the fixture's ANSI output, one forwarded
+interrupt, and the H6a bracketed-paste/focus/mouse restoration sequences. It
+is pre-real-Codex and pre-room evidence only. No screenshot was captured in
+this worker because its available X display socket/lock was stale and could
+not be opened; no real-Codex fidelity or room-art gate is claimed.
