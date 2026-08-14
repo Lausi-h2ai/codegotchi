@@ -17,7 +17,7 @@ codex-cli 0.147.0
 | Crate | Direct requirement | Resolved version | Required API/mode support | Notes |
 |---|---|---|---|---|
 | `portable-pty` | `0.9.0` | `0.9.0` | Direct `CommandBuilder` args/env, native `openpty`, reader clone, writer take, resize, wait, numeric exit code | `PtyCodexChild` uses the native PTY pair and direct slave spawn; no shell wrapper. |
-| `vt100` | `0.16.2` | `0.16.2` | Application cursor, bracketed paste, mouse levels, Default/UTF-8/SGR encoding state | 1004 focus reporting is absent; URXVT and SGR-pixel/1016 are unsupported. H4 must add focus tracking and verify Codex's requested protocol. |
+| `vt100` | `0.16.2` | `0.16.2` | Application cursor, bracketed paste, mouse levels, Default/UTF-8/SGR encoding state | 1004 focus reporting is absent; URXVT and SGR-pixel/1016 are unsupported. H4a adds bounded protocol-side focus tracking for 1004. |
 | `ratatui` | `0.30.2`, `default-features = false`, feature `crossterm_0_29` | `0.30.2` | Crossterm 0.29 backend | Shares the direct crossterm 0.29.0 package through `ratatui-crossterm 0.1.2`. |
 | `crossterm` | `0.29.0`, feature `event-stream` | `0.29.0` | Async event stream for the later host | Cargo tree has one crossterm 0.29.0 stack, with no duplicate incompatible backend. |
 
@@ -49,36 +49,50 @@ code 23. Full RED/GREEN/check/fmt/clippy output and lifecycle review are in
 ## H4a virtual screen and input-mode evidence
 
 H4a was implemented on 2026-08-14 as the non-interactive terminal core. The
-focused RED run was performed before the production modules existed and failed
-with unresolved `CodexScreen`, mode-model, and encoder imports. After the
-minimal implementation, the focused GREEN fixture passed:
+fix round keeps the same non-interactive boundary and addresses the negotiated
+wire details found in review. The focused RED run added exact Home/End,
+mouse-release, isolated mode-toggle, split-RIS, and malformed-input assertions;
+it failed only on the missing application Home sequence, SGR button release
+code, and RIS focus reset. After the minimal implementation, the focused GREEN
+fixture passed:
 
 ```text
 $ cargo test -p codegotchi-cli --test terminal_screen -- --nocapture
-running 6 tests
+running 10 tests
 test input_modes_track_vt_controls_and_split_focus_without_visible_text ... ok
 test key_encoding_follows_application_mode_and_common_codex_keys ... ok
 test mouse_encoding_honors_protocol_and_tracking_level ... ok
+test mouse_wire_encodings_preserve_modifiers_wheels_and_release_forms ... ok
+test mode_fixtures_enable_and_disable_each_protocol_without_precedence_masking ... ok
 test malformed_and_split_control_input_never_panics_or_activates_focus ... ok
 test paste_and_focus_encoding_are_strictly_mode_driven ... ok
+test ris_clears_split_focus_reporting_and_still_resets_vt_screen ... ok
 test screen_handles_ansi_state_and_read_only_cell_access ... ok
-test result: ok. 6 passed; 0 failed
+test unknown_and_truncated_controls_leave_subsequent_screen_text_usable ... ok
+test result: ok. 10 passed; 0 failed
 ```
 
 `CodexScreen` wraps `vt100::Parser` with explicit dimensions and bounded
 scrollback, exposes read-only screen/cell/cursor helpers, and maps every
 public vt100 mouse mode and encoding into stable CodeGotchi enums. An
-incremental fixed-size CSI tracker recognizes split `ESC[?1004h/l` focus
-controls; visible text and malformed/unknown/truncated controls do not change
-the mode model. The same raw bytes are still always fed to vt100.
+incremental fixed-size tracker recognizes split `ESC[?1004h/l` focus controls
+and clears focus on split `ESC c` RIS; visible text and malformed/unknown/
+truncated controls do not change the mode model. The same raw bytes are still
+always fed to vt100, so RIS also resets screen contents and attributes. Mode
+fixtures explicitly cover enable/disable for `?1`, `?2004`, split `?1004`,
+isolated `?9`/`?1000`/`?1002`/`?1003`, and `?1005`/`?1006` encoding mappings.
 
 Pure encoders cover UTF-8 text, Enter/Tab/BackTab/Backspace/Escape, control and
 Alt chords, navigation/editing keys, common F1-F24 keys, bracketed paste,
 conditional focus-in/focus-out, and negotiated Default/X10-compatible,
-UTF-8, and SGR mouse bytes. Mouse tracking filters are explicit: Press,
-PressRelease, ButtonMotion, and AnyMotion progressively add release, drag, and
-unbuttoned movement events. Legacy and UTF-8 out-of-range coordinates degrade
-to empty output.
+UTF-8, and SGR mouse bytes. Home/End use CSI `H`/`F` normally and SS3 `H`/`F`
+in application-cursor mode; modified Home/End remain CSI `1;modifier H/F`.
+Mouse wire fixtures prove Shift/Alt/Control bits, horizontal wheel codes 66/67,
+legacy release code 3 plus modifiers, SGR left/middle/right release codes 0/1/2
+with lowercase `m`, and UTF-8 out-of-range coordinates degrading to empty
+output. Mouse tracking filters are explicit: Press, PressRelease,
+ButtonMotion, and AnyMotion progressively add release, drag, and unbuttoned
+movement events.
 
 The required checks passed:
 

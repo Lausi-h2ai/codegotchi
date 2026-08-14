@@ -92,8 +92,16 @@ impl FocusTracker {
                     self.length = 1;
                     self.state = TrackerState::Csi;
                 }
+                b'c' => {
+                    self.focus_reporting = false;
+                    self.length = 0;
+                    self.state = TrackerState::Ground;
+                }
                 0x1b => {}
-                _ => self.state = TrackerState::Ground,
+                _ => {
+                    self.length = 0;
+                    self.state = TrackerState::Ground;
+                }
             },
             TrackerState::Csi => {
                 if byte == 0x1b {

@@ -9,11 +9,20 @@ fn key(code: KeyCode) -> KeyEvent {
 }
 
 fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    mouse_with_modifiers(kind, column, row, KeyModifiers::NONE)
+}
+
+fn mouse_with_modifiers(
+    kind: MouseEventKind,
+    column: u16,
+    row: u16,
+    modifiers: KeyModifiers,
+) -> MouseEvent {
     MouseEvent {
         kind,
         column,
         row,
-        modifiers: KeyModifiers::NONE,
+        modifiers,
     }
 }
 
@@ -105,6 +114,99 @@ fn input_modes_track_vt_controls_and_split_focus_without_visible_text() {
 }
 
 #[test]
+fn mode_fixtures_enable_and_disable_each_protocol_without_precedence_masking() {
+    let mut screen = CodexScreen::new(8, 40);
+
+    screen.process(b"\x1b[?1h");
+    assert!(screen.input_modes().application_cursor_keys);
+    screen.process(b"\x1b[?1l");
+    assert!(!screen.input_modes().application_cursor_keys);
+
+    screen.process(b"\x1b[?2004h");
+    assert!(screen.input_modes().bracketed_paste);
+    screen.process(b"\x1b[?2004l");
+    assert!(!screen.input_modes().bracketed_paste);
+
+    screen.process(b"\x1b[?1004");
+    screen.process(b"h");
+    assert!(screen.input_modes().focus_reporting);
+    screen.process(b"\x1b[?1004");
+    screen.process(b"l");
+    assert!(!screen.input_modes().focus_reporting);
+
+    for (enable, disable, expected) in [
+        (
+            b"\x1b[?9h".as_slice(),
+            b"\x1b[?9l".as_slice(),
+            MouseTrackingMode::Press,
+        ),
+        (
+            b"\x1b[?1000h".as_slice(),
+            b"\x1b[?1000l".as_slice(),
+            MouseTrackingMode::PressRelease,
+        ),
+        (
+            b"\x1b[?1002h".as_slice(),
+            b"\x1b[?1002l".as_slice(),
+            MouseTrackingMode::ButtonMotion,
+        ),
+        (
+            b"\x1b[?1003h".as_slice(),
+            b"\x1b[?1003l".as_slice(),
+            MouseTrackingMode::AnyMotion,
+        ),
+    ] {
+        let mut isolated = CodexScreen::new(8, 40);
+        isolated.process(enable);
+        assert_eq!(isolated.input_modes().mouse_tracking, expected);
+        isolated.process(disable);
+        assert_eq!(
+            isolated.input_modes().mouse_tracking,
+            MouseTrackingMode::Disabled
+        );
+    }
+
+    let mut encoding = CodexScreen::new(8, 40);
+    encoding.process(b"\x1b[?1005h");
+    assert_eq!(encoding.input_modes().mouse_encoding, MouseEncoding::Utf8);
+    encoding.process(b"\x1b[?1005l");
+    assert_eq!(
+        encoding.input_modes().mouse_encoding,
+        MouseEncoding::Default
+    );
+    encoding.process(b"\x1b[?1006h");
+    assert_eq!(encoding.input_modes().mouse_encoding, MouseEncoding::Sgr);
+    encoding.process(b"\x1b[?1006l");
+    assert_eq!(
+        encoding.input_modes().mouse_encoding,
+        MouseEncoding::Default
+    );
+}
+
+#[test]
+fn ris_clears_split_focus_reporting_and_still_resets_vt_screen() {
+    let mut screen = CodexScreen::new(3, 10);
+    screen.process(b"\x1b[?1004h\x1b[31mX");
+    assert!(screen.input_modes().focus_reporting);
+    assert_eq!(
+        screen.cell(0, 0).expect("colored cell").fgcolor(),
+        vt100::Color::Idx(1)
+    );
+
+    screen.process(b"\x1b");
+    assert!(screen.input_modes().focus_reporting);
+    screen.process(b"c");
+    assert!(!screen.input_modes().focus_reporting);
+    screen.process(b"Y");
+
+    assert_eq!(screen.text_at(0, 0, 1), "Y");
+    assert_eq!(
+        screen.cell(0, 0).expect("reset cell").fgcolor(),
+        vt100::Color::Default
+    );
+}
+
+#[test]
 fn malformed_and_split_control_input_never_panics_or_activates_focus() {
     let mut screen = CodexScreen::new(3, 10);
     for chunk in [
@@ -121,8 +223,23 @@ fn malformed_and_split_control_input_never_panics_or_activates_focus() {
         screen.process(chunk);
     }
     assert!(!screen.input_modes().focus_reporting);
+    screen.process(b"z");
+    screen.process(b"ordinary");
+    assert!(screen.contents().contains("ordinary"));
     screen.process(b"\x1b[?1004h");
     assert!(screen.input_modes().focus_reporting);
+}
+
+#[test]
+fn unknown_and_truncated_controls_leave_subsequent_screen_text_usable() {
+    let mut screen = CodexScreen::new(3, 20);
+    screen.process(b"\x1b[?9999zordinary");
+    assert_eq!(screen.text_at(0, 0, 8), "ordinary");
+
+    screen.process(b"\x1b[");
+    screen.process(b"z");
+    screen.process(b"truncated");
+    assert!(screen.contents().contains("truncated"));
 }
 
 #[test]
@@ -145,6 +262,23 @@ fn key_encoding_follows_application_mode_and_common_codex_keys() {
     assert_eq!(encode_key_event(key(KeyCode::Up), application), b"\x1bOA");
     assert_eq!(encode_key_event(key(KeyCode::Down), application), b"\x1bOB");
     assert_eq!(encode_key_event(key(KeyCode::Home), normal), b"\x1b[H");
+    assert_eq!(encode_key_event(key(KeyCode::End), normal), b"\x1b[F");
+    assert_eq!(encode_key_event(key(KeyCode::Home), application), b"\x1bOH");
+    assert_eq!(encode_key_event(key(KeyCode::End), application), b"\x1bOF");
+    assert_eq!(
+        encode_key_event(
+            KeyEvent::new(KeyCode::Home, KeyModifiers::SHIFT),
+            application
+        ),
+        b"\x1b[1;2H"
+    );
+    assert_eq!(
+        encode_key_event(
+            KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL | KeyModifiers::ALT),
+            application
+        ),
+        b"\x1b[1;7F"
+    );
     assert_eq!(encode_key_event(key(KeyCode::Delete), normal), b"\x1b[3~");
     assert_eq!(encode_key_event(key(KeyCode::F(1)), normal), b"\x1bOP");
     assert_eq!(encode_key_event(key(KeyCode::F(5)), normal), b"\x1b[15~");
@@ -241,7 +375,7 @@ fn mouse_encoding_honors_protocol_and_tracking_level() {
             mouse(MouseEventKind::Up(MouseButton::Right), 4, 5),
             sgr_modes
         ),
-        b"\x1b[<3;5;6m"
+        b"\x1b[<2;5;6m"
     );
     assert_eq!(
         encode_mouse_event(mouse(MouseEventKind::Moved, 4, 5), sgr_modes),
@@ -282,5 +416,164 @@ fn mouse_encoding_honors_protocol_and_tracking_level() {
     assert_eq!(
         encode_mouse_event(mouse(MouseEventKind::Moved, 0, 0), any_motion),
         b"\x1b[<35;1;1M"
+    );
+}
+
+#[test]
+fn mouse_wire_encodings_preserve_modifiers_wheels_and_release_forms() {
+    let default_release = CodexInputModes {
+        mouse_tracking: MouseTrackingMode::PressRelease,
+        mouse_encoding: MouseEncoding::Default,
+        ..Default::default()
+    };
+    assert_eq!(
+        encode_mouse_event(
+            mouse_with_modifiers(
+                MouseEventKind::Down(MouseButton::Left),
+                0,
+                0,
+                KeyModifiers::SHIFT,
+            ),
+            default_release
+        ),
+        [27, b'[', b'M', 36, 33, 33]
+    );
+    assert_eq!(
+        encode_mouse_event(
+            mouse_with_modifiers(
+                MouseEventKind::Down(MouseButton::Left),
+                0,
+                0,
+                KeyModifiers::ALT,
+            ),
+            default_release
+        ),
+        [27, b'[', b'M', 40, 33, 33]
+    );
+    assert_eq!(
+        encode_mouse_event(
+            mouse_with_modifiers(
+                MouseEventKind::Down(MouseButton::Left),
+                0,
+                0,
+                KeyModifiers::CONTROL,
+            ),
+            default_release
+        ),
+        [27, b'[', b'M', 48, 33, 33]
+    );
+    assert_eq!(
+        encode_mouse_event(
+            mouse_with_modifiers(
+                MouseEventKind::Up(MouseButton::Right),
+                4,
+                5,
+                KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::CONTROL,
+            ),
+            default_release
+        ),
+        [27, b'[', b'M', 63, 37, 38]
+    );
+    assert_eq!(
+        encode_mouse_event(
+            mouse(MouseEventKind::Up(MouseButton::Left), 4, 5),
+            default_release
+        ),
+        [27, b'[', b'M', 35, 37, 38]
+    );
+    assert_eq!(
+        encode_mouse_event(mouse(MouseEventKind::ScrollLeft, 4, 5), default_release),
+        [27, b'[', b'M', 98, 37, 38]
+    );
+    assert_eq!(
+        encode_mouse_event(mouse(MouseEventKind::ScrollRight, 4, 5), default_release),
+        [27, b'[', b'M', 99, 37, 38]
+    );
+
+    let utf8_release = CodexInputModes {
+        mouse_tracking: MouseTrackingMode::PressRelease,
+        mouse_encoding: MouseEncoding::Utf8,
+        ..Default::default()
+    };
+    assert_eq!(
+        encode_mouse_event(
+            mouse(MouseEventKind::Up(MouseButton::Right), 4, 5),
+            utf8_release
+        ),
+        [27, b'[', b'M', 35, 37, 38]
+    );
+    assert_eq!(
+        encode_mouse_event(
+            mouse_with_modifiers(
+                MouseEventKind::Up(MouseButton::Middle),
+                4,
+                5,
+                KeyModifiers::ALT,
+            ),
+            utf8_release
+        ),
+        [27, b'[', b'M', 43, 37, 38]
+    );
+    assert_eq!(
+        encode_mouse_event(mouse(MouseEventKind::ScrollLeft, 4, 5), utf8_release),
+        [27, b'[', b'M', 98, 37, 38]
+    );
+    assert_eq!(
+        encode_mouse_event(mouse(MouseEventKind::ScrollRight, 4, 5), utf8_release),
+        [27, b'[', b'M', 99, 37, 38]
+    );
+    assert_eq!(
+        encode_mouse_event(
+            mouse(MouseEventKind::Down(MouseButton::Left), 2015, 0),
+            utf8_release
+        ),
+        b""
+    );
+
+    let sgr_release = CodexInputModes {
+        mouse_tracking: MouseTrackingMode::PressRelease,
+        mouse_encoding: MouseEncoding::Sgr,
+        ..Default::default()
+    };
+    assert_eq!(
+        encode_mouse_event(
+            mouse(MouseEventKind::Up(MouseButton::Left), 4, 5),
+            sgr_release
+        ),
+        b"\x1b[<0;5;6m"
+    );
+    assert_eq!(
+        encode_mouse_event(
+            mouse(MouseEventKind::Up(MouseButton::Middle), 4, 5),
+            sgr_release
+        ),
+        b"\x1b[<1;5;6m"
+    );
+    assert_eq!(
+        encode_mouse_event(
+            mouse(MouseEventKind::Up(MouseButton::Right), 4, 5),
+            sgr_release
+        ),
+        b"\x1b[<2;5;6m"
+    );
+    assert_eq!(
+        encode_mouse_event(
+            mouse_with_modifiers(
+                MouseEventKind::Up(MouseButton::Right),
+                4,
+                5,
+                KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::CONTROL,
+            ),
+            sgr_release
+        ),
+        b"\x1b[<30;5;6m"
+    );
+    assert_eq!(
+        encode_mouse_event(mouse(MouseEventKind::ScrollLeft, 4, 5), sgr_release),
+        b"\x1b[<66;5;6M"
+    );
+    assert_eq!(
+        encode_mouse_event(mouse(MouseEventKind::ScrollRight, 4, 5), sgr_release),
+        b"\x1b[<67;5;6M"
     );
 }

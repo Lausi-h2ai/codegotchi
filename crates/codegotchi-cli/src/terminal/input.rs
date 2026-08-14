@@ -97,7 +97,11 @@ pub fn encode_mouse_event(event: MouseEvent, modes: CodexInputModes) -> Vec<u8> 
     let Some(y) = event.row.checked_add(1) else {
         return Vec::new();
     };
-    let Some(code) = mouse_code(event.kind, event.modifiers) else {
+    let Some(code) = mouse_code(
+        event.kind,
+        event.modifiers,
+        matches!(modes.mouse_encoding, MouseEncoding::Sgr),
+    ) else {
         return Vec::new();
     };
 
@@ -182,7 +186,9 @@ fn encode_navigation(code: KeyCode, modifiers: KeyModifiers, modes: CodexInputMo
             } else {
                 b'F'
             };
-            if modifier == 1 {
+            if modifier == 1 && modes.application_cursor_keys {
+                vec![0x1b, b'O', final_byte]
+            } else if modifier == 1 {
                 vec![0x1b, b'[', final_byte]
             } else {
                 csi_with_modifier(modifier, final_byte)
@@ -306,11 +312,17 @@ fn tracking_allows(tracking: MouseTrackingMode, kind: MouseEventKind) -> bool {
     }
 }
 
-fn mouse_code(kind: MouseEventKind, modifiers: KeyModifiers) -> Option<u16> {
+fn mouse_code(kind: MouseEventKind, modifiers: KeyModifiers, sgr_release: bool) -> Option<u16> {
     let button = match kind {
         MouseEventKind::Down(button) => button_code(button),
         MouseEventKind::Drag(button) => 32 + button_code(button),
-        MouseEventKind::Up(_) => 3,
+        MouseEventKind::Up(button) => {
+            if sgr_release {
+                button_code(button)
+            } else {
+                3
+            }
+        }
         MouseEventKind::Moved => 35,
         MouseEventKind::ScrollUp => 64,
         MouseEventKind::ScrollDown => 65,
