@@ -182,6 +182,14 @@ satisfy either later hard gate.
 
 ## H6c interactive PTY session evidence
 
+Round 3 is based on commit `d08d277ded0166ba3f0626a944caad30dbce9d6e`
+(`fix: make pty session cleanup race-safe`). This pass is Linux/WSL-first.
+macOS terminal-session acceptance is explicitly deferred: nix 0.31 exposes
+the `WNOWAIT` flag on Apple targets but not its safe `waitid` wrapper, so the
+unsupported fallback disarms the cached PGID after portable-pty reaps and
+before any post-reap cleanup path can signal it; no macOS natural-leader
+descendant cleanup claim is made here.
+
 The H6c session now composes the H6a `TerminalGuard`, managed
 `PtyCodexChild`, H4a `CodexScreen`/input encoders, and H6b `render_codex` over
 the whole physical terminal. `TerminalSessionCore` is the deterministic
@@ -213,7 +221,7 @@ mouse is silent; resize is not transposed; VT state is bounded; a closed
 signal receiver can be disabled without polling spin; and queued ESRCH from
 Interrupt/Terminate is benign while the actual exit status remains available.
 The direct PTY suite now passes four tests, including exact signal statuses and
-cancellation cleanup. The production session module has eight unit tests for
+cancellation cleanup. The production session module has nine unit tests for
 reader ownership/backpressure, scheduler ordering, benign ESRCH handling, and
 restoration context.
 
@@ -224,17 +232,38 @@ but Interrupt followed by Terminate escalates. Unix uses the PTY's
 setsid/process-group leader metadata for explicit SIGINT/SIGTERM/SIGKILL
 delivery; non-Unix retains the portable-pty fallback.
 
-The blocking PTY reader runs on one thread and sends at most 16 messages of at
-most 8 KiB each. `SessionResources` enforces cancellation order: signal/kill
-the child group, drop the bounded output receiver, then cancel and join the
-reader. Normal cleanup terminates or kills the PTY group, polls the direct child
-to a deadline, and joins the reader. Waitid-capable Unix targets observe exit
-with `waitid(WEXITED | WNOHANG | WNOWAIT)`, consume the one-shot descendant group
-while the leader is still a zombie, and only then lets portable-pty reap it;
-unsupported Unix targets disarm the identity before post-reap cleanup. Drop
-uses bounded polling and transfers an unreaped child handle to a process-wide
+The dedicated PTY reader runs on one thread and sends at most 16 messages of at
+most 8 KiB each. On Unix native PTYs it clones the master descriptor and polls
+readiness with a 25 ms timeout, so cancellation reaches a checkpoint even when
+a slave holder survives. `SessionResources` enforces cancellation order:
+signal/kill the child group, drop the bounded output receiver, then cancel and
+boundedly join the reader. The guard waits at most 100 ms; if a non-native
+fallback violates cancellation it reports a cleanup failure or detaches on
+drop rather than hanging the session. Normal cleanup terminates or kills the
+PTY group, polls the direct child to a deadline, and joins the reader.
+Linux/other waitid-capable Unix targets observe exit with
+`waitid(WEXITED | WNOHANG | WNOWAIT)`, consume the one-shot descendant group
+while the leader is still a zombie, and only then let portable-pty reap it;
+unsupported targets disarm the identity before post-reap cleanup. Drop uses
+bounded polling and transfers an unreaped child handle to a process-wide
 reaper, never an unbounded wait. The bounded reader proof is scoped to the PTY
 child/process group and descendants, not escaped sessions.
+
+Round 3 focused RED/GREEN evidence:
+
+```text
+$ cargo test -p codegotchi-cli --lib session_resources_drop_is_bounded_when_reader_read_stays_blocked -- --nocapture
+FAILED: reader cleanup synchronously waited for a blocked read
+$ cargo test -p codegotchi-cli --lib direct_kill_disarms_cached_group_identity_before_reap -- --nocapture
+FAILED: no method named `mark_direct_kill`
+
+$ cargo test -p codegotchi-cli --lib session_resources_drop_is_bounded_when_reader_read_stays_blocked -- --nocapture
+ok
+$ cargo test -p codegotchi-cli --lib direct_kill_disarms_cached_group_identity_before_reap -- --nocapture
+ok
+$ cargo test -p codegotchi-cli --test terminal_pty -- --nocapture
+ok. 4 passed
+```
 
 The production-shared injected event source is used by the ignored outer-PTY
 integration tests; it is not a parallel test loop:

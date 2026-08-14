@@ -19,10 +19,61 @@ use nix::{
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use thiserror::Error;
 
+#[cfg(unix)]
+use filedescriptor::{FileDescriptor, POLLERR, POLLHUP, POLLIN, poll, pollfd};
+#[cfg(unix)]
+use std::os::unix::io::{AsRawFd, RawFd};
+
 use crate::CodexInvocation;
 
 pub type PtyReader = Box<dyn Read + Send>;
 pub type PtyWriter = Box<dyn Write + Send>;
+
+#[cfg(unix)]
+const PTY_READER_POLL_INTERVAL: Duration = Duration::from_millis(25);
+
+#[cfg(unix)]
+struct RawFdSource(RawFd);
+
+#[cfg(unix)]
+impl AsRawFd for RawFdSource {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0
+    }
+}
+
+/// A PTY reader that checks readiness with a bounded timeout before reading.
+///
+/// The portable-pty reader is deliberately a blocking `Read`, which means a
+/// cancellation flag alone cannot wake it if a descendant still holds the
+/// slave side open. Polling the cloned master descriptor gives the reader a
+/// bounded cancellation checkpoint without changing the master descriptor's
+/// file status flags (and therefore without making PTY writes nonblocking).
+#[cfg(unix)]
+struct InterruptiblePtyReader {
+    fd: FileDescriptor,
+}
+
+#[cfg(unix)]
+impl Read for InterruptiblePtyReader {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        let mut descriptor = [pollfd {
+            fd: self.fd.as_raw_fd(),
+            events: POLLIN | POLLHUP | POLLERR,
+            revents: 0,
+        }];
+        let ready = poll(&mut descriptor, Some(PTY_READER_POLL_INTERVAL))
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        if ready == 0 {
+            return Err(io::Error::from(io::ErrorKind::WouldBlock));
+        }
+
+        match self.fd.read(bytes) {
+            Err(error) if error.raw_os_error() == Some(nix::libc::EIO) => Ok(0),
+            result => result,
+        }
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum PtyCodexError {
@@ -167,6 +218,11 @@ impl ProcessGroupState {
         self.identity = None;
     }
 
+    fn mark_direct_kill(&mut self) {
+        self.cleanup_consumed = true;
+        self.identity = None;
+    }
+
     fn cleanup_consumed(&self) -> bool {
         self.cleanup_consumed
     }
@@ -269,13 +325,32 @@ impl PtyCodexChild {
         })
     }
 
-    /// Returns an owned reader that can be moved to a blocking reader thread.
+    /// Returns an owned blocking reader that can be moved to a reader thread.
     pub fn reader(&self) -> Result<PtyReader, PtyCodexError> {
         self.master
             .try_clone_reader()
             .map_err(|source| PtyCodexError::Reader {
                 source: io::Error::other(source),
             })
+    }
+
+    /// Returns the session-owned reader with bounded readiness checkpoints.
+    ///
+    /// The public [`Self::reader`] API retains portable-pty's blocking
+    /// semantics. The interactive session uses this narrower seam because its
+    /// cancellation flag must be able to wake a reader whose slave holder
+    /// survives group teardown.
+    pub(crate) fn interruptible_reader(&self) -> Result<PtyReader, PtyCodexError> {
+        #[cfg(unix)]
+        if let Some(raw_fd) = self.master.as_raw_fd() {
+            let source = RawFdSource(raw_fd);
+            let fd = FileDescriptor::dup(&source).map_err(|source| PtyCodexError::Reader {
+                source: io::Error::other(source.to_string()),
+            })?;
+            return Ok(Box::new(InterruptiblePtyReader { fd }));
+        }
+
+        self.reader()
     }
 
     /// Alias for [`Self::reader`] that mirrors portable-pty's API.
@@ -389,6 +464,11 @@ impl PtyCodexChild {
         all(target_os = "linux", not(target_env = "uclibc")),
     )))]
     fn observe_exit_before_reap(&mut self, _blocking: bool) -> Result<bool, PtyCodexError> {
+        // Keep this fallback deliberately disarmed. In particular, nix 0.31
+        // exposes the WNOWAIT flag on Apple targets but not its safe waitid
+        // wrapper there, so a post-reap PGID signal would be stale. Apple
+        // natural-leader descendant cleanup remains deferred until a pinned
+        // safe pre-reap observation API is selected.
         Ok(true)
     }
 
@@ -396,15 +476,23 @@ impl PtyCodexChild {
         self.cleanup_error.take()
     }
 
-    /// Requests cooperative child termination through portable-pty's native
-    /// process-control implementation.
-    pub fn kill(&mut self) -> Result<(), PtyCodexError> {
-        let child = self.child.as_mut().ok_or_else(|| PtyCodexError::Kill {
-            source: io::Error::new(io::ErrorKind::NotFound, "Codex child handle unavailable"),
-        })?;
-        child
-            .kill()
-            .map_err(|source| PtyCodexError::Kill { source })
+    /// Requests direct child termination for backends without a usable group
+    /// identity. This is intentionally private: callers must use the group
+    /// signal methods so a portable-pty kill cannot leave a cached PGID armed.
+    fn kill_direct(&mut self) -> Result<(), PtyCodexError> {
+        let result = {
+            let child = self.child.as_mut().ok_or_else(|| PtyCodexError::Kill {
+                source: io::Error::new(io::ErrorKind::NotFound, "Codex child handle unavailable"),
+            })?;
+            child
+                .kill()
+                .map_err(|source| PtyCodexError::Kill { source })
+        };
+        if result.is_ok() {
+            #[cfg(unix)]
+            self.process_group.mark_direct_kill();
+        }
+        result
     }
 
     /// Delivers SIGINT semantics to the complete PTY process group on Unix.
@@ -437,7 +525,7 @@ impl PtyCodexChild {
                 return Ok(());
             }
             let Some(process_group) = self.process_group.take_for_descendant_cleanup() else {
-                return self.kill();
+                return self.kill_direct();
             };
             killpg(Pid::from_raw(process_group), PtySignal::Kill.unix()).map_err(|error| {
                 PtyCodexError::Signal {
@@ -449,7 +537,7 @@ impl PtyCodexChild {
 
         #[cfg(not(unix))]
         {
-            self.kill()
+            self.kill_direct()
         }
     }
 
@@ -497,7 +585,7 @@ impl PtyCodexChild {
 
         #[cfg(not(unix))]
         {
-            self.kill().map_err(|source| PtyCodexError::Signal {
+            self.kill_direct().map_err(|source| PtyCodexError::Signal {
                 signal: signal.name(),
                 source: match source {
                     PtyCodexError::Kill { source } => source,
@@ -627,6 +715,16 @@ mod tests {
         assert!(!state.is_reaped());
 
         state.mark_reaped();
+        assert_eq!(state.identity(), None);
+    }
+
+    #[test]
+    fn direct_kill_disarms_cached_group_identity_before_reap() {
+        let mut state = ProcessGroupState::new(42);
+
+        state.mark_direct_kill();
+
+        assert!(state.cleanup_consumed());
         assert_eq!(state.identity(), None);
     }
 }

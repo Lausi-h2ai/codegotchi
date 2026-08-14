@@ -16,7 +16,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crossterm::event::{Event, EventStream};
@@ -327,6 +327,8 @@ where
 const OUTPUT_CHANNEL_CAPACITY: usize = 16;
 const OUTPUT_CHUNK_BYTES: usize = 8 * 1024;
 const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const READER_JOIN_GRACE: Duration = Duration::from_millis(100);
+const READER_JOIN_POLL_INTERVAL: Duration = Duration::from_millis(5);
 
 enum ReaderMessage {
     Data(Vec<u8>),
@@ -337,7 +339,8 @@ enum ReaderMessage {
 /// Owns every resource whose drop order matters while the session future is
 /// suspended or cancelled. In particular, a blocked reader can be waiting on
 /// either PTY EOF or a bounded-channel send. Kill/drop the child first, then
-/// disconnect the receiver, and only then cancel/join the reader thread.
+/// disconnect the receiver, and only then cancel/boundedly join the reader
+/// thread.
 struct SessionResources {
     child: Option<PtyCodexChild>,
     writer: Option<PtyWriter>,
@@ -457,7 +460,7 @@ async fn run_session_after_entry(
     // query above have already succeeded, preserving pre-spawn UI fallback.
     let mut child =
         PtyCodexChild::spawn(invocation, rows, columns).map_err(TerminalSessionError::Spawn)?;
-    let reader = match child.reader() {
+    let reader = match child.interruptible_reader() {
         Ok(reader) => reader,
         Err(error) => {
             let cleanup = terminate_after_setup_failure(&mut child).await;
@@ -775,22 +778,39 @@ impl ReaderThreadGuard {
 
     fn join(&mut self) -> Result<(), TerminalSessionError> {
         self.cancel();
-        self.thread
-            .take()
-            .map(|thread| {
-                thread.join().map_err(|_| {
-                    TerminalSessionError::ReaderTask("reader thread panicked".to_owned())
-                })
-            })
-            .transpose()
-            .map(|_| ())
+        let Some(thread) = self.thread.take() else {
+            return Ok(());
+        };
+        let deadline = Instant::now() + READER_JOIN_GRACE;
+        while !thread.is_finished() && Instant::now() < deadline {
+            thread::sleep(READER_JOIN_POLL_INTERVAL);
+        }
+        if !thread.is_finished() {
+            // Dropping a JoinHandle detaches it. The production PTY reader
+            // uses bounded fd readiness and therefore reaches this branch
+            // only when its underlying backend violated the cancellation
+            // contract; returning an error keeps session cleanup bounded.
+            return Err(TerminalSessionError::ReaderTask(
+                "reader thread did not stop before cleanup deadline".to_owned(),
+            ));
+        }
+        thread
+            .join()
+            .map_err(|_| TerminalSessionError::ReaderTask("reader thread panicked".to_owned()))
     }
 }
 
 impl Drop for ReaderThreadGuard {
     fn drop(&mut self) {
         self.cancel();
-        if let Some(thread) = self.thread.take() {
+        let Some(thread) = self.thread.take() else {
+            return;
+        };
+        let deadline = Instant::now() + READER_JOIN_GRACE;
+        while !thread.is_finished() && Instant::now() < deadline {
+            thread::sleep(READER_JOIN_POLL_INTERVAL);
+        }
+        if thread.is_finished() {
             let _ = thread.join();
         }
     }
@@ -841,7 +861,12 @@ where
                         break;
                     }
                 }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                    ) =>
+                {
                     thread::yield_now();
                 }
                 Err(error) => {
@@ -965,7 +990,12 @@ mod tests {
     use std::{
         collections::VecDeque,
         io::{self, Read, Write},
-        sync::{Arc, Mutex},
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        },
+        thread,
+        time::Duration,
     };
 
     use super::{
@@ -1000,6 +1030,19 @@ mod tests {
         fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
             bytes[0] = b'x';
             Ok(1)
+        }
+    }
+
+    struct BlockingReader {
+        released: Arc<AtomicBool>,
+    }
+
+    impl Read for BlockingReader {
+        fn read(&mut self, _bytes: &mut [u8]) -> io::Result<usize> {
+            while !self.released.load(Ordering::Acquire) {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Ok(0)
         }
     }
 
@@ -1074,6 +1117,40 @@ mod tests {
         })
         .await
         .expect("resource drop should disconnect output before joining reader");
+    }
+
+    #[test]
+    fn session_resources_drop_is_bounded_when_reader_read_stays_blocked() {
+        let released = Arc::new(AtomicBool::new(false));
+        let (receiver, reader_handle, cancellation) = spawn_reader(Box::new(BlockingReader {
+            released: Arc::clone(&released),
+        }));
+        let resources = SessionResources {
+            child: None,
+            writer: None,
+            output_receiver: Some(receiver),
+            reader_task: Some(ReaderThreadGuard::new(reader_handle, cancellation)),
+        };
+        let (done_sender, done_receiver) = std::sync::mpsc::channel();
+        let drop_thread = thread::spawn(move || {
+            drop(resources);
+            done_sender
+                .send(())
+                .expect("drop completion should be observable");
+        });
+
+        let completed_before_release = done_receiver
+            .recv_timeout(Duration::from_millis(150))
+            .is_ok();
+        released.store(true, Ordering::Release);
+        drop_thread
+            .join()
+            .expect("resource drop thread should join");
+
+        assert!(
+            completed_before_release,
+            "reader cleanup synchronously waited for a blocked read"
+        );
     }
 
     #[test]
