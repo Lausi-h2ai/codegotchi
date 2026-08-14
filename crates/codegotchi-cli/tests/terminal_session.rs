@@ -13,8 +13,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use codegotchi_cli::CodexInvocation;
 use codegotchi_cli::terminal::{
     TerminalBackend, TerminalSessionCore, TerminalSessionError, TerminalSessionEventSource,
-    TerminalSessionSignal, initialize_terminal_and_spawn, render_codex, run_terminal_session,
-    run_terminal_session_with_events, terminal_session_signal_channel,
+    TerminalSessionSignal, TerminalSessionStartError, initialize_terminal_and_spawn, render_codex,
+    run_terminal_session, run_terminal_session_with_events,
+    run_terminal_session_with_spawn_guard_and_initialization_recovery,
+    terminal_session_signal_channel,
 };
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -118,6 +120,35 @@ fn terminal_initialization_failure_never_invokes_spawn_callback() {
     ));
     assert_eq!(spawn_calls, 0);
     assert_eq!(state.borrow().calls, ["size"]);
+}
+
+#[tokio::test]
+async fn launcher_terminal_entry_retains_signals_when_initialization_fails() {
+    let (sender, mut receiver) = terminal_session_signal_channel(1);
+    let mut before_spawn_calls = 0;
+    let result = run_terminal_session_with_spawn_guard_and_initialization_recovery(
+        &invocation(),
+        receiver,
+        || {
+            before_spawn_calls += 1;
+            Ok(())
+        },
+    )
+    .await;
+
+    let Err(TerminalSessionStartError::Initialization {
+        error,
+        signals: returned,
+    }) = result
+    else {
+        panic!("the test process must not expose a physical terminal");
+    };
+    receiver = returned;
+    assert!(matches!(error, TerminalSessionError::Initialization(_)));
+    assert_eq!(before_spawn_calls, 0);
+    assert!(receiver.try_recv().is_err());
+    drop(sender);
+    assert!(receiver.recv().await.is_none());
 }
 
 #[test]

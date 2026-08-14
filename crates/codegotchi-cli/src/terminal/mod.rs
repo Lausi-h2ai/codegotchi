@@ -21,6 +21,8 @@ pub use screen::{CodexInputModes, CodexScreen, MouseEncoding, MouseTrackingMode}
 pub use session::{
     TerminalSessionCore, TerminalSessionError, TerminalSessionEventFuture,
     TerminalSessionEventSource, TerminalSessionSignal, TerminalSessionSignalReceiver,
-    TerminalSessionSignalSender, initialize_terminal_and_spawn, run_terminal_session,
-    run_terminal_session_with_events, terminal_session_signal_channel,
+    TerminalSessionSignalSender, TerminalSessionStartError, initialize_terminal_and_spawn,
+    run_terminal_session, run_terminal_session_with_events,
+    run_terminal_session_with_spawn_guard_and_initialization_recovery,
+    terminal_session_signal_channel,
 };

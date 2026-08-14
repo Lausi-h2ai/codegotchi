@@ -413,6 +413,97 @@ fn browser_helper_nonzero_exit_warns_without_delaying_codex() {
 }
 
 #[test]
+fn explicit_ui_modes_route_the_production_launcher_once() {
+    let cases = [
+        ("browser", true, true),
+        ("terminal", false, false),
+        ("both", true, false),
+        ("auto", true, true),
+    ];
+
+    for (mode, expect_browser, expect_codex) in cases {
+        let temp = TempDir::new(&format!("ui-{mode}"));
+        let cwd = temp.join("cwd");
+        fs::create_dir_all(&cwd).expect("working directory creates");
+        let browser = temp.join("browser-helper");
+        let browser_url = temp.join("browser-url");
+        write_executable(
+            &browser,
+            "#!/bin/sh\nset -eu\nprintf '%s' \"$1\" >\"$FAKE_BROWSER_URL\"\n",
+        );
+        let log = temp.join("codex.log");
+        let input = temp.join("stdin");
+        let mut command = setup_command(&temp, &cwd);
+        command
+            .env("CODEGOTCHI_BROWSER", &browser)
+            .env("FAKE_BROWSER_URL", &browser_url)
+            .env("FAKE_CODEX_LOG", &log)
+            .env("FAKE_STDIN_FILE", &input)
+            .env("FAKE_EXIT", "17")
+            .args(["run", "--ui", mode, "--", "codex"]);
+        let output = command.output().expect("launcher starts");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        if expect_codex {
+            assert_eq!(output.status.code(), Some(17), "{mode}: {output:?}");
+        } else {
+            assert!(!output.status.success(), "{mode}: {stderr}");
+        }
+        assert_eq!(
+            browser_url.exists(),
+            expect_browser,
+            "{mode}: browser route"
+        );
+        assert_eq!(log.exists(), expect_codex, "{mode}: Codex route");
+        if expect_browser {
+            assert!(
+                stdout.contains("CodeGotchi UI: http://127.0.0.1:"),
+                "{mode}: {stdout}"
+            );
+            let browser_url = fs::read_to_string(&browser_url).expect("browser URL capture");
+            assert!(
+                browser_url.starts_with("http://127.0.0.1:"),
+                "{mode}: {browser_url}"
+            );
+        } else {
+            assert!(!stdout.contains("CodeGotchi UI:"), "{mode}: {stdout}");
+            assert!(
+                !stdout.contains("#token="),
+                "{mode}: bearer token leaked to stdout"
+            );
+            assert!(
+                !stderr.contains("#token="),
+                "{mode}: bearer token leaked to stderr"
+            );
+        }
+        if expect_codex {
+            assert_eq!(
+                log_fields(&log, "PID").len(),
+                1,
+                "{mode}: exact one Codex spawn"
+            );
+        }
+
+        let runtime = temp.join("runtime/codegotchi");
+        assert!(
+            !runtime.exists()
+                || !runtime
+                    .read_dir()
+                    .expect("runtime directory reads")
+                    .any(|entry| {
+                        entry
+                            .expect("runtime entry reads")
+                            .file_name()
+                            .to_string_lossy()
+                            .starts_with("session-")
+                    }),
+            "{mode}: owned metadata survives cleanup"
+        );
+    }
+}
+
+#[test]
 fn spawn_failure_cleans_metadata_but_persists_profile_and_keeps_database() {
     let temp = TempDir::new("spawn-failure");
     let cwd = temp.join("cwd");

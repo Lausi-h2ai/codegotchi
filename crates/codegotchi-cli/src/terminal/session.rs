@@ -79,6 +79,20 @@ pub fn terminal_session_signal_channel(
     mpsc::channel(capacity.max(1))
 }
 
+/// Error returned by the launcher-aware terminal entry point.
+///
+/// Initialization is reported together with the still-unused bounded signal
+/// receiver so `--ui auto` can continue through the inherited stdio path
+/// without reinstalling signal handlers. Once terminal entry succeeds, every
+/// error is terminal-session-owned and cannot trigger fallback.
+pub enum TerminalSessionStartError {
+    Initialization {
+        error: TerminalSessionError,
+        signals: TerminalSessionSignalReceiver,
+    },
+    Session(TerminalSessionError),
+}
+
 /// Errors raised by terminal entry, PTY setup, event processing, or cleanup.
 #[derive(Debug)]
 pub enum TerminalSessionError {
@@ -301,8 +315,49 @@ where
 {
     let mut guard = TerminalGuard::enter(CrosstermTerminal::new())
         .map_err(TerminalSessionError::Initialization)?;
-    let body = run_session_after_entry(&mut guard, invocation, signals, &mut events).await;
+    let body =
+        run_session_after_entry(&mut guard, invocation, signals, &mut events, || Ok(())).await;
     finish_guard(&mut guard, body)
+}
+
+/// Runs the production terminal session while invoking `before_spawn` at the
+/// exact PTY spawn boundary.
+///
+/// Unlike [`run_terminal_session`], this launcher seam preserves the bounded
+/// signal receiver when physical-terminal initialization fails. The caller may
+/// then perform the only permitted `--ui auto` inherited fallback.
+pub async fn run_terminal_session_with_spawn_guard_and_initialization_recovery<F>(
+    invocation: &CodexInvocation,
+    signals: TerminalSessionSignalReceiver,
+    before_spawn: F,
+) -> Result<portable_pty::ExitStatus, TerminalSessionStartError>
+where
+    F: FnOnce() -> Result<(), TerminalSessionError>,
+{
+    let mut signals = Some(signals);
+    let mut guard = match TerminalGuard::enter(CrosstermTerminal::new()) {
+        Ok(guard) => guard,
+        Err(error) => {
+            return Err(TerminalSessionStartError::Initialization {
+                error: TerminalSessionError::Initialization(error),
+                signals: signals
+                    .take()
+                    .expect("terminal signal receiver is retained on initialization failure"),
+            });
+        }
+    };
+    let mut events = EventStream::new();
+    let body = run_session_after_entry(
+        &mut guard,
+        invocation,
+        signals
+            .take()
+            .expect("terminal signal receiver is moved after successful entry"),
+        &mut events,
+        before_spawn,
+    )
+    .await;
+    finish_guard(&mut guard, body).map_err(TerminalSessionStartError::Session)
 }
 
 fn finish_guard<B, T>(
@@ -444,12 +499,16 @@ async fn next_session_work(
     }
 }
 
-async fn run_session_after_entry(
+async fn run_session_after_entry<F>(
     guard: &mut TerminalGuard<CrosstermTerminal>,
     invocation: &CodexInvocation,
     signals: TerminalSessionSignalReceiver,
     events: &mut impl TerminalSessionEventSource,
-) -> Result<portable_pty::ExitStatus, TerminalSessionError> {
+    before_spawn: F,
+) -> Result<portable_pty::ExitStatus, TerminalSessionError>
+where
+    F: FnOnce() -> Result<(), TerminalSessionError>,
+{
     let (columns, rows) = guard
         .backend_mut()
         .size()
@@ -458,6 +517,7 @@ async fn run_session_after_entry(
 
     // This is the sole production spawn call. Entry and the physical size
     // query above have already succeeded, preserving pre-spawn UI fallback.
+    before_spawn()?;
     let mut child =
         PtyCodexChild::spawn(invocation, rows, columns).map_err(TerminalSessionError::Spawn)?;
     let reader = match child.interruptible_reader() {

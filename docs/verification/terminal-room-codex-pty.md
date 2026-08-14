@@ -313,3 +313,59 @@ layout, or room-art gate is claimed. The earlier H6b renderer screenshot
 remains renderer-fixture evidence only. The composed resize regression uses an
 RAII outer-PTY size guard, so an assertion panic restores the original size;
 explicit success restoration is marked complete and is not repeated by Drop.
+
+## H6d production launcher routing evidence
+
+H6d routes the existing launch lifecycle into the H6c terminal session at the
+final Codex handoff. Shared repository state, runtime, metadata, server, hook
+profile, and profile guard setup remain in `run_async`. The authoritative
+`Arc<AuthoritativeRuntime>` remains owned by the launcher while a clone is
+passed to the server. `SignalController` is installed once; Browser/inherited
+waits consume it directly, while terminal attempts forward the same controller
+to one bounded `TerminalSessionSignal` channel. No disconnected signal channel
+is allocated before a terminal attempt.
+
+The four routes are production callbacks, not a test-only duplicate:
+
+| mode | browser URL/helper | Codex handoff | Auto fallback |
+|---|---|---|---|
+| Browser | yes | inherited stdio, one child | n/a |
+| Terminal | no | H6c PTY session, one invocation | none |
+| Both | yes | H6c PTY session, one invocation | none |
+| Auto | only after terminal initialization failure | PTY on success, otherwise inherited stdio | only `Initialization` before PTY spawn |
+
+Terminal mode never emits the bearer-token URL. Browser and Auto fallback retain
+the existing URL/browser helper behavior. Terminal session errors after the
+initialization boundary are surfaced and never retried through inherited stdio.
+Portable-pty signal descriptions are normalized (`Interrupt`, `Terminated`,
+and standard aliases) so terminal exits preserve conventional 128+signal
+status codes.
+
+Focused RED/GREEN evidence:
+
+```text
+$ cargo test -p codegotchi-cli launcher::tests::terminal_exit_status_preserves_portable_pty_signal_codes -- --nocapture
+FAILED: left 1, right 130
+
+$ cargo test -p codegotchi-cli launcher -- --nocapture
+test result: ok. 18 passed; 0 failed
+
+$ cargo test -p codegotchi-cli --test process_wrapper explicit_ui_modes_route_the_production_launcher_once -- --nocapture
+test result: ok. 1 passed; 0 failed
+
+$ cargo test -p codegotchi-cli --test terminal_session launcher_terminal_entry_retains_signals_when_initialization_fails -- --nocapture
+test result: ok. 1 passed; 0 failed
+```
+
+The process-wrapper integration invokes the compiled binary in Browser,
+Terminal, Both, and Auto modes. It records one fake-Codex PID for Browser and
+Auto, no child for terminal-only initialization failure or Both without a
+physical terminal, conditional browser-helper execution, metadata cleanup, and
+absence of `#token=` output in terminal mode. The session integration proves
+the launcher-aware entry seam returns its bounded signal receiver when physical
+terminal initialization fails and does not invoke the profile-before-spawn
+callback.
+
+This is Linux/WSL production-routing evidence with a fake Codex and no real
+Codex fidelity claim. macOS terminal lifecycle remains deferred, and the real
+Codex/first-room/screenshot gates remain later orchestrator work.

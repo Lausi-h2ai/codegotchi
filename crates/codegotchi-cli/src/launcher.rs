@@ -1,6 +1,7 @@
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -27,6 +28,11 @@ use crate::protocol::RuntimeMetadataV1;
 use crate::runtime::AuthoritativeRuntime;
 use crate::runtime_metadata::{read_metadata, remove_metadata, write_metadata};
 use crate::server::RunningServer;
+use crate::terminal::{
+    TerminalSessionError, TerminalSessionSignal, TerminalSessionSignalReceiver,
+    TerminalSessionSignalSender, run_terminal_session_with_spawn_guard_and_initialization_recovery,
+    terminal_session_signal_channel,
+};
 
 const CODEGOTCHI_STATE_DIRECTORY: &str = "codegotchi";
 const DATABASE_FILE_NAME: &str = "state.sqlite";
@@ -35,7 +41,7 @@ const SESSION_FILE_PREFIX: &str = "session-";
 const SESSION_FILE_SUFFIX: &str = ".json";
 const REPOSITORY_ID_NAMESPACE: &str = "codegotchi-repository-v1";
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LauncherSignal {
     Interrupt,
     Terminate,
@@ -172,6 +178,87 @@ pub struct LaunchRequest {
     pub trailing_codex_arguments: Vec<OsString>,
 }
 
+/// The inherited child wait path can consume either the installed launcher
+/// signal controller or the bounded stream used by the terminal session.
+/// Auto fallback uses the latter so initialization never installs or loses a
+/// second set of handlers.
+enum InheritedSignalSource {
+    Controller(SignalController),
+    Terminal(TerminalSessionSignalReceiver),
+    /// No inherited wait path is available for a terminal-only attempt. This
+    /// avoids allocating a disconnected fallback channel before Auto needs
+    /// one for a real initialization recovery.
+    Unavailable,
+}
+
+enum TerminalAttemptError {
+    /// Physical-terminal initialization failed before the PTY child spawn.
+    /// The receiver remains available for Auto's inherited fallback.
+    Initialization {
+        error: TerminalSessionError,
+        signals: TerminalSessionSignalReceiver,
+    },
+    /// Every other terminal failure occurs after the no-fallback boundary.
+    Session(TerminalSessionError),
+}
+
+#[derive(Debug)]
+enum RouteError {
+    Inherited(LauncherError),
+    Terminal(TerminalSessionError),
+}
+
+/// Executes the shared mode routing used by production launch.
+///
+/// The callbacks are the production spawn/browser seams, so deterministic
+/// tests exercise this exact route coordinator rather than a parallel test
+/// implementation. `Auto` retries inherited stdio only when the terminal
+/// session explicitly reports pre-spawn initialization failure.
+async fn execute_ui_route<Browser, Inherited, InheritedFuture, Terminal, TerminalFuture>(
+    mode: UiMode,
+    inherited_signals: InheritedSignalSource,
+    launch_browser: Browser,
+    inherited: Inherited,
+    terminal: Terminal,
+) -> Result<i32, RouteError>
+where
+    Browser: FnOnce(),
+    Inherited: FnOnce(InheritedSignalSource) -> InheritedFuture,
+    InheritedFuture: Future<Output = Result<i32, LauncherError>>,
+    Terminal: FnOnce() -> TerminalFuture,
+    TerminalFuture: Future<Output = Result<i32, TerminalAttemptError>>,
+{
+    match mode {
+        UiMode::Browser => {
+            launch_browser();
+            inherited(inherited_signals)
+                .await
+                .map_err(RouteError::Inherited)
+        }
+        UiMode::Terminal => terminal().await.map_err(|error| match error {
+            TerminalAttemptError::Initialization { error, .. }
+            | TerminalAttemptError::Session(error) => RouteError::Terminal(error),
+        }),
+        UiMode::Both => {
+            launch_browser();
+            terminal().await.map_err(|error| match error {
+                TerminalAttemptError::Initialization { error, .. }
+                | TerminalAttemptError::Session(error) => RouteError::Terminal(error),
+            })
+        }
+        UiMode::Auto => match terminal().await {
+            Ok(status) => Ok(status),
+            Err(TerminalAttemptError::Initialization { error: _, signals }) => {
+                launch_browser();
+                inherited(InheritedSignalSource::Terminal(signals))
+                    .await
+                    .map_err(RouteError::Inherited)
+            }
+            Err(TerminalAttemptError::Session(error)) => Err(RouteError::Terminal(error)),
+        },
+    }
+}
+
 /// Validates the exact launcher shape and resolves both executables without
 /// creating a state, runtime, metadata, or profile file.
 pub fn validate(
@@ -252,9 +339,9 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
     let token = launch_token();
     let debug_enabled = std::env::var(CODEGOTCHI_ENABLE_DEBUG).ok().as_deref() == Some("1");
     let server = if debug_enabled {
-        RunningServer::start_with_debug(runtime, token.clone()).await
+        RunningServer::start_with_debug(std::sync::Arc::clone(&runtime), token.clone()).await
     } else {
-        RunningServer::start(runtime, token.clone()).await
+        RunningServer::start(std::sync::Arc::clone(&runtime), token.clone()).await
     }
     .map_err(|error| {
         LauncherError::message(format!("could not start CodeGotchi server: {error}"))
@@ -312,21 +399,9 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
         return Ok(signal.exit_status());
     }
 
-    let ui_url = format!("{}/#token={}", server.base_url(), metadata.bearer_token);
-    println!("CodeGotchi UI: {ui_url}");
-    let _ = io::Write::flush(&mut io::stdout());
-    let browser_wait = launch_browser(&ui_url);
-    if let Some(signal) = signals.try_setup_termination().await {
-        wait_for_browser(browser_wait).await;
-        let _ = owned_metadata.cleanup();
-        let _ = server.shutdown().await;
-        return Ok(signal.exit_status());
-    }
-
     let profile_guard = match profile.acquire_spawn_guard() {
         Ok(guard) => guard,
         Err(error) => {
-            wait_for_browser(browser_wait).await;
             let _ = owned_metadata.cleanup();
             let _ = server.shutdown().await;
             return Err(LauncherError::message(format!(
@@ -335,45 +410,85 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
         }
     };
     let invocation = profile_guard.invocation(&validated.codex_path, &validated.trailing_arguments);
-    let mut child_command = invocation.std_command();
-    child_command
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-    #[cfg(unix)]
-    let terminal_handoff = TerminalHandoff::detect();
-    #[cfg(unix)]
-    if terminal_handoff.is_some() {
-        child_command.process_group(0);
-    }
-    if let Err(error) = profile_guard.verify_before_spawn() {
-        wait_for_browser(browser_wait).await;
+    if let Some(signal) = signals.try_setup_termination().await {
+        drop(profile_guard);
+        drop(profile);
         let _ = owned_metadata.cleanup();
         let _ = server.shutdown().await;
-        return Err(LauncherError::message(format!(
-            "could not verify the persistent Codex profile before spawn: {error}"
-        )));
+        return Ok(signal.exit_status());
     }
-    let child_result = profile_guard.spawn(&mut child_command);
+
+    let ui_url = format!("{}/#token={}", server.base_url(), metadata.bearer_token);
+    let mut browser_wait = None;
+    let mut terminal_forwarder = None;
+    let mut installed_signals = Some(signals);
+    let inherited_signals = if validated.ui_mode == UiMode::Browser {
+        InheritedSignalSource::Controller(
+            installed_signals
+                .take()
+                .expect("browser route retains the installed signal controller"),
+        )
+    } else {
+        InheritedSignalSource::Unavailable
+    };
+    let route_result = execute_ui_route(
+        validated.ui_mode,
+        inherited_signals,
+        || {
+            println!("CodeGotchi UI: {ui_url}");
+            let _ = io::Write::flush(&mut io::stdout());
+            browser_wait = launch_browser(&ui_url);
+        },
+        |source| {
+            run_inherited_session(
+                &profile_guard,
+                &invocation,
+                &validated.codex_path,
+                source,
+            )
+        },
+        || {
+            let controller = installed_signals
+                .take()
+                .expect("terminal route retains the installed signal controller");
+            let (sender, receiver) = terminal_session_signal_channel(16);
+            terminal_forwarder = Some(tokio::spawn(forward_terminal_signals(controller, sender)));
+            async {
+                let result =
+                    run_terminal_session_with_spawn_guard_and_initialization_recovery(
+                        &invocation,
+                        receiver,
+                        || {
+                            profile_guard
+                                .verify_before_spawn()
+                                .map_err(|error| {
+                                    TerminalSessionError::Input(io::Error::other(format!(
+                                        "could not verify the persistent Codex profile before spawn: {error}"
+                                    )))
+                                })
+                        },
+                    )
+                    .await;
+                match result {
+                    Ok(status) => Ok(numeric_terminal_exit_status(status)),
+                    Err(crate::terminal::TerminalSessionStartError::Initialization {
+                        error,
+                        signals,
+                    }) => Err(TerminalAttemptError::Initialization { error, signals }),
+                    Err(crate::terminal::TerminalSessionStartError::Session(error)) => {
+                        Err(TerminalAttemptError::Session(error))
+                    }
+                }
+            }
+        },
+    )
+    .await;
+    if let Some(task) = terminal_forwarder.take() {
+        task.abort();
+        let _ = task.await;
+    }
     drop(profile_guard);
     drop(profile);
-    let child = match child_result {
-        Ok(child) => child,
-        Err(error) => {
-            wait_for_browser(browser_wait).await;
-            let _ = owned_metadata.cleanup();
-            let _ = server.shutdown().await;
-            return Err(LauncherError::message(format!(
-                "could not spawn Codex at {}: {error}",
-                validated.codex_path.display()
-            )));
-        }
-    };
-
-    #[cfg(unix)]
-    let wait_result = wait_with_terminal_handoff(child, signals, terminal_handoff).await;
-    #[cfg(not(unix))]
-    let wait_result = wait_for_child(child, signals).await;
     let metadata_cleanup = owned_metadata.cleanup();
     let server_cleanup = server.shutdown().await;
     wait_for_browser(browser_wait).await;
@@ -388,8 +503,144 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
             "Codex exited, but CodeGotchi server shutdown failed: {error}"
         )));
     }
-    let status = wait_result?;
+    route_result.map_err(|error| match error {
+        RouteError::Inherited(error) => error,
+        RouteError::Terminal(error) => {
+            LauncherError::message(format!("Codex terminal session failed: {error}"))
+        }
+    })
+}
+
+async fn run_inherited_session(
+    profile_guard: &crate::PersistentCodexProfileGuard<'_>,
+    invocation: &crate::CodexInvocation,
+    codex_path: &Path,
+    signals: InheritedSignalSource,
+) -> Result<i32, LauncherError> {
+    let mut child_command = invocation.std_command();
+    child_command
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    #[cfg(unix)]
+    let terminal_handoff = TerminalHandoff::detect();
+    #[cfg(unix)]
+    if terminal_handoff.is_some() {
+        child_command.process_group(0);
+    }
+
+    // Keep the profile guard alive through this exact inherited spawn.
+    profile_guard.verify_before_spawn().map_err(|error| {
+        LauncherError::message(format!(
+            "could not verify the persistent Codex profile before spawn: {error}"
+        ))
+    })?;
+    let child = profile_guard.spawn(&mut child_command).map_err(|error| {
+        LauncherError::message(format!(
+            "could not spawn Codex at {}: {error}",
+            codex_path.display()
+        ))
+    })?;
+
+    #[cfg(unix)]
+    let status = wait_with_terminal_handoff(child, signals, terminal_handoff).await?;
+    #[cfg(not(unix))]
+    let status = wait_for_child(child, signals).await?;
     Ok(numeric_exit_status(status))
+}
+
+async fn forward_terminal_signals(
+    mut signals: SignalController,
+    sender: TerminalSessionSignalSender,
+) {
+    while let Some(signal) = signals.next().await {
+        let signal = match signal {
+            LauncherSignal::Interrupt => TerminalSessionSignal::Interrupt,
+            LauncherSignal::Terminate => TerminalSessionSignal::Terminate,
+            LauncherSignal::WindowChange => TerminalSessionSignal::WindowChange,
+        };
+        if sender.send(signal).await.is_err() {
+            break;
+        }
+    }
+}
+
+impl InheritedSignalSource {
+    async fn next(&mut self) -> Option<LauncherSignal> {
+        match self {
+            Self::Controller(signals) => signals.next().await,
+            Self::Terminal(signals) => signals.recv().await.map(|signal| match signal {
+                TerminalSessionSignal::Interrupt => LauncherSignal::Interrupt,
+                TerminalSessionSignal::Terminate => LauncherSignal::Terminate,
+                TerminalSessionSignal::WindowChange => LauncherSignal::WindowChange,
+            }),
+            Self::Unavailable => std::future::pending().await,
+        }
+    }
+}
+
+fn numeric_terminal_exit_status(status: portable_pty::ExitStatus) -> i32 {
+    if let Some(signal) = status.signal() {
+        if let Some(number) = portable_signal_number(signal) {
+            return 128 + number;
+        }
+        return 1;
+    }
+    i32::try_from(status.exit_code()).unwrap_or(1)
+}
+
+/// Converts portable-pty's platform-specific signal description to the Unix
+/// signal number used by the inherited launcher path. On Unix portable-pty
+/// obtains this text from `strsignal`, so Linux reports names such as
+/// `Interrupt` and `Terminated` rather than `SIGINT` and `SIGTERM`.
+fn portable_signal_number(signal: &str) -> Option<i32> {
+    let normalized = signal
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_uppercase();
+    if let Some(number) = normalized
+        .strip_prefix("SIGNAL ")
+        .and_then(|number| number.parse::<i32>().ok())
+    {
+        return (1..=64).contains(&number).then_some(number);
+    }
+
+    let signal = normalized.strip_prefix("SIG").unwrap_or(&normalized);
+    match signal {
+        "HUP" | "HANGUP" => Some(1),
+        "INT" | "INTERRUPT" => Some(2),
+        "QUIT" => Some(3),
+        "ILL" | "ILLEGAL INSTRUCTION" => Some(4),
+        "TRAP" => Some(5),
+        "ABRT" | "IOT" | "ABORT" | "ABORTED" => Some(6),
+        "BUS" | "BUS ERROR" => Some(7),
+        "FPE" | "FLOATING POINT EXCEPTION" => Some(8),
+        "KILL" | "KILLED" => Some(9),
+        "USR1" | "USER DEFINED SIGNAL 1" => Some(10),
+        "SEGV" | "SEGMENTATION FAULT" => Some(11),
+        "USR2" | "USER DEFINED SIGNAL 2" => Some(12),
+        "PIPE" | "BROKEN PIPE" => Some(13),
+        "ALRM" | "ALARM CLOCK" => Some(14),
+        "TERM" | "TERMINATED" => Some(15),
+        "STKFLT" | "STACK FAULT" => Some(16),
+        "CHLD" | "CHILD EXITED" => Some(17),
+        "CONT" | "CONTINUED" => Some(18),
+        "STOP" | "STOPPED" => Some(19),
+        "TSTP" => Some(20),
+        "TTIN" | "BACKGROUND READ" => Some(21),
+        "TTOU" | "BACKGROUND WRITE" => Some(22),
+        "URG" | "URGENT I/O" => Some(23),
+        "XCPU" | "CPU TIME LIMIT EXCEEDED" => Some(24),
+        "XFSZ" | "FILE SIZE LIMIT EXCEEDED" => Some(25),
+        "VTALRM" | "VIRTUAL TIMER EXPIRED" => Some(26),
+        "PROF" | "PROFILING TIMER EXPIRED" => Some(27),
+        "WINCH" | "WINDOW CHANGED" => Some(28),
+        "IO" | "I/O POSSIBLE" => Some(29),
+        "PWR" | "POWER FAILURE" => Some(30),
+        "SYS" | "BAD SYSTEM CALL" => Some(31),
+        _ => None,
+    }
 }
 
 pub fn parse_launch_request<I, A>(arguments: I) -> Result<LaunchRequest, LauncherError>
@@ -1042,7 +1293,7 @@ impl TerminalHandoff {
 #[cfg(unix)]
 async fn wait_with_terminal_handoff(
     mut child: Child,
-    signals: SignalController,
+    signals: InheritedSignalSource,
     mut handoff: Option<TerminalHandoff>,
 ) -> Result<ExitStatus, LauncherError> {
     if let Some(handoff) = handoff.as_mut()
@@ -1066,7 +1317,7 @@ async fn wait_with_terminal_handoff(
 
 async fn wait_for_child(
     child: Child,
-    mut signals: SignalController,
+    mut signals: InheritedSignalSource,
 ) -> Result<ExitStatus, LauncherError> {
     #[cfg(unix)]
     {
@@ -1180,8 +1431,15 @@ fn numeric_exit_status(status: ExitStatus) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{LaunchRequest, UiMode, parse_launch_request};
+    use super::{
+        InheritedSignalSource, LaunchRequest, LauncherError, TerminalAttemptError, UiMode,
+        execute_ui_route, parse_launch_request,
+    };
     use std::ffi::OsString;
+
+    use crate::terminal::{
+        TerminalSessionError, TerminalSessionSignal, terminal_session_signal_channel,
+    };
 
     fn os(arguments: &[&str]) -> Vec<OsString> {
         arguments.iter().map(OsString::from).collect()
@@ -1337,5 +1595,153 @@ mod tests {
         let _ = parse_launch_request(arguments.clone()).unwrap();
 
         assert_eq!(arguments, before);
+    }
+
+    #[tokio::test]
+    async fn ui_routes_launch_browser_and_spawn_exactly_once_per_mode() {
+        for (mode, browser_calls, inherited_calls, terminal_calls) in [
+            (UiMode::Browser, 1, 1, 0),
+            (UiMode::Terminal, 0, 0, 1),
+            (UiMode::Both, 1, 0, 1),
+            (UiMode::Auto, 1, 1, 1),
+        ] {
+            let mut browser_calls_seen = 0;
+            let mut inherited_calls_seen = 0;
+            let mut terminal_calls_seen = 0;
+            let (sender, receiver) = terminal_session_signal_channel(1);
+            drop(sender);
+
+            let result = execute_ui_route(
+                mode,
+                InheritedSignalSource::Unavailable,
+                || browser_calls_seen += 1,
+                |_signals: InheritedSignalSource| {
+                    inherited_calls_seen += 1;
+                    async { Ok::<_, LauncherError>(17) }
+                },
+                || {
+                    terminal_calls_seen += 1;
+                    async move {
+                        if mode == UiMode::Auto {
+                            Err::<i32, _>(TerminalAttemptError::Initialization {
+                                error: TerminalSessionError::SpawnUnavailable,
+                                signals: receiver,
+                            })
+                        } else {
+                            Ok::<i32, TerminalAttemptError>(29)
+                        }
+                    }
+                },
+            )
+            .await
+            .expect("route completes");
+
+            assert_eq!(
+                result,
+                if matches!(mode, UiMode::Browser | UiMode::Auto) {
+                    17
+                } else {
+                    29
+                },
+                "{mode:?}"
+            );
+            assert_eq!(browser_calls_seen, browser_calls, "{mode:?}");
+            assert_eq!(inherited_calls_seen, inherited_calls, "{mode:?}");
+            assert_eq!(terminal_calls_seen, terminal_calls, "{mode:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn auto_falls_back_only_from_pre_spawn_initialization() {
+        let (sender, receiver) = terminal_session_signal_channel(1);
+        drop(sender);
+        let mut inherited_calls = 0;
+        let mut terminal_calls = 0;
+        let result = execute_ui_route(
+            UiMode::Auto,
+            InheritedSignalSource::Unavailable,
+            || {},
+            |_signals: InheritedSignalSource| {
+                inherited_calls += 1;
+                async { Ok::<_, LauncherError>(23) }
+            },
+            || {
+                terminal_calls += 1;
+                async {
+                    Err::<i32, _>(TerminalAttemptError::Initialization {
+                        error: TerminalSessionError::SpawnUnavailable,
+                        signals: receiver,
+                    })
+                }
+            },
+        )
+        .await
+        .expect("initialization fallback succeeds");
+
+        assert_eq!(result, 23);
+        assert_eq!(terminal_calls, 1);
+        assert_eq!(inherited_calls, 1);
+    }
+
+    #[tokio::test]
+    async fn auto_does_not_fall_back_after_terminal_session_error() {
+        let mut inherited_calls = 0;
+        let mut terminal_calls = 0;
+        let result = execute_ui_route(
+            UiMode::Auto,
+            InheritedSignalSource::Unavailable,
+            || {},
+            |_signals: InheritedSignalSource| {
+                inherited_calls += 1;
+                async { Ok::<_, LauncherError>(23) }
+            },
+            || {
+                terminal_calls += 1;
+                async {
+                    Err::<i32, _>(TerminalAttemptError::Session(
+                        TerminalSessionError::SpawnUnavailable,
+                    ))
+                }
+            },
+        )
+        .await
+        .expect_err("post-spawn session errors surface");
+
+        assert!(matches!(result, super::RouteError::Terminal(_)));
+        assert_eq!(terminal_calls, 1);
+        assert_eq!(inherited_calls, 0);
+    }
+
+    #[tokio::test]
+    async fn terminal_signal_source_maps_each_bounded_session_signal() {
+        let (sender, receiver) = terminal_session_signal_channel(3);
+        sender.send(TerminalSessionSignal::Interrupt).await.unwrap();
+        sender.send(TerminalSessionSignal::Terminate).await.unwrap();
+        sender
+            .send(TerminalSessionSignal::WindowChange)
+            .await
+            .unwrap();
+        let mut source = InheritedSignalSource::Terminal(receiver);
+
+        assert_eq!(source.next().await, Some(super::LauncherSignal::Interrupt));
+        assert_eq!(source.next().await, Some(super::LauncherSignal::Terminate));
+        assert_eq!(
+            source.next().await,
+            Some(super::LauncherSignal::WindowChange)
+        );
+    }
+
+    #[test]
+    fn terminal_exit_status_preserves_portable_pty_signal_codes() {
+        assert_eq!(
+            super::numeric_terminal_exit_status(portable_pty::ExitStatus::with_signal("Interrupt")),
+            130
+        );
+        assert_eq!(
+            super::numeric_terminal_exit_status(portable_pty::ExitStatus::with_signal(
+                "Terminated"
+            )),
+            143
+        );
     }
 }
