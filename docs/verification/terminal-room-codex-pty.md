@@ -369,9 +369,15 @@ absence of `#token=` output in terminal mode. The ignored outer-PTY proof also
 runs the production binary in Terminal, Both, and Auto modes under a nested
 `setsid script` PTY, verifies one Codex invocation and a usable PTY size, and
 checks the rendered marker, browser-helper count, token isolation, and metadata
-cleanup. The test shell establishes `stty rows 24 cols 80` before `exec` because
-the nested `script` PTY starts at 0×0 in this Linux environment; this is test
-harness setup, not a production fallback. The session integration proves
+cleanup. Its dedicated launcher fixture appends one `pid=` record per
+invocation to a separate spawn ledger, capturing the exact `size=24 80`, the
+child's `tty`, and the `outer_tty` exported by the nested script command. The
+test asserts one positive PID record and that the two TTY paths differ, so the
+rendered marker is attributable to a hosted PTY child rather than inherited
+outer stdio. The test shell establishes `CODEGOTCHI_OUTER_TTY=$(tty)` and
+`stty rows 24 cols 80` before `exec` because the nested `script` PTY starts at
+0×0 in this Linux environment; this is test harness setup, not a production
+fallback. The session integration proves
 the launcher-aware entry seam returns its bounded signal receiver when physical
 terminal initialization fails and does not invoke the profile-before-spawn
 callback.

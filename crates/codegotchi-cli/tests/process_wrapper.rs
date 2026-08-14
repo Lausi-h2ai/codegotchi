@@ -827,7 +827,7 @@ fn run_outer_pty_route(
     mode: &str,
     codex: &Path,
     browser: &Path,
-    codex_log: &Path,
+    spawn_ledger: &Path,
     browser_log: &Path,
 ) -> Output {
     let home = temp.join("home");
@@ -839,7 +839,7 @@ fn run_outer_pty_route(
     }
 
     let command_line = format!(
-        "stty rows 24 cols 80; exec {} run --ui {mode} -- codex",
+        "CODEGOTCHI_OUTER_TTY=$(tty); export CODEGOTCHI_OUTER_TTY; stty rows 24 cols 80; exec {} run --ui {mode} -- codex",
         shell_quote_path(&binary())
     );
     Command::new("setsid")
@@ -854,7 +854,7 @@ fn run_outer_pty_route(
         .env("TERM", "xterm-256color")
         .env("CODEGOTCHI_REAL_CODEX", codex)
         .env("CODEGOTCHI_BROWSER", browser)
-        .env("FAKE_COMPOSED_LOG", codex_log)
+        .env("FAKE_LAUNCHER_SPAWN_LEDGER", spawn_ledger)
         .env("FAKE_BROWSER_URL", browser_log)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -887,7 +887,7 @@ fn assert_no_owned_metadata(temp: &TempDir, mode: &str) {
 #[ignore = "requires a real outer PTY; run with script and --ignored --test-threads=1"]
 fn production_binary_successful_terminal_routes_use_one_pty_child_without_fallback() {
     let codex =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake-codex-composed-pty.sh");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake-codex-launcher-pty.sh");
 
     for mode in ["terminal", "both", "auto"] {
         let temp = TempDir::new(&format!("outer-pty-{mode}"));
@@ -898,7 +898,7 @@ fn production_binary_successful_terminal_routes_use_one_pty_child_without_fallba
             &browser_fixture,
             "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$1\" >>\"$FAKE_BROWSER_URL\"\n",
         );
-        let codex_log = temp.join("codex.log");
+        let spawn_ledger = temp.join("codex-spawn-ledger.log");
         let browser_log = temp.join("browser.log");
         let output = run_outer_pty_route(
             &temp,
@@ -906,7 +906,7 @@ fn production_binary_successful_terminal_routes_use_one_pty_child_without_fallba
             mode,
             &codex,
             &browser_fixture,
-            &codex_log,
+            &spawn_ledger,
             &browser_log,
         );
         let transcript = format!(
@@ -919,19 +919,47 @@ fn production_binary_successful_terminal_routes_use_one_pty_child_without_fallba
             Some(0),
             "{mode}: production launcher failed: {transcript}"
         );
-        let codex_log_contents = fs::read_to_string(&codex_log)
-            .unwrap_or_else(|error| panic!("{mode}: Codex log missing: {error}; {transcript}"));
+        let spawn_ledger_contents = fs::read_to_string(&spawn_ledger)
+            .unwrap_or_else(|error| panic!("{mode}: spawn ledger missing: {error}; {transcript}"));
+        let spawn_records: Vec<&str> = spawn_ledger_contents.lines().collect();
         assert_eq!(
-            codex_log_contents.matches("argc=").count(),
+            spawn_records.len(),
             1,
-            "{mode}: Codex was spawned more than once: {codex_log_contents}"
+            "{mode}: expected one Codex spawn ledger record: {spawn_ledger_contents}"
+        );
+        let spawn_record = spawn_records[0];
+        let field = |name: &str| {
+            spawn_record
+                .split('|')
+                .find_map(|entry| entry.strip_prefix(name))
+                .and_then(|value| value.strip_prefix('='))
+                .unwrap_or_else(|| panic!("{mode}: spawn record missing {name}: {spawn_record}"))
+        };
+        assert!(
+            field("pid").parse::<u32>().is_ok_and(|pid| pid > 0),
+            "{mode}: spawn record PID is not positive: {spawn_record}"
+        );
+        assert_eq!(
+            field("size"),
+            "24 80",
+            "{mode}: Codex PTY size was not the expected usable geometry: {spawn_record}"
+        );
+        let inner_tty = field("tty");
+        let outer_tty = field("outer_tty");
+        assert!(
+            inner_tty.starts_with("/dev/"),
+            "{mode}: Codex fixture did not report a concrete inner TTY: {spawn_record}"
         );
         assert!(
-            codex_log_contents.contains("size="),
-            "{mode}: Codex did not receive a PTY size: {codex_log_contents}"
+            outer_tty.starts_with("/dev/"),
+            "{mode}: PTY harness did not export a concrete outer TTY: {spawn_record}"
+        );
+        assert_ne!(
+            inner_tty, outer_tty,
+            "{mode}: Codex fixture inherited the outer PTY instead of receiving a hosted PTY"
         );
         assert!(
-            transcript.contains("FAKE_COMPOSED_READY"),
+            transcript.contains("FAKE_LAUNCHER_PTY_READY"),
             "{mode}: terminal host did not render the PTY child marker: {transcript}"
         );
         assert_eq!(
