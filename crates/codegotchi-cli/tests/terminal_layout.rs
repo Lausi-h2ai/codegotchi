@@ -2,6 +2,39 @@ use codegotchi_cli::terminal::{RoomLayoutMode, TerminalLayout, choose_layout};
 use ratatui::layout::Rect;
 
 #[test]
+fn pins_task_five_acceptance_anchors() {
+    let cases = [
+        (45, None, RoomLayoutMode::Full, 31, 14),
+        (30, None, RoomLayoutMode::Compact, 23, 7),
+        (21, None, RoomLayoutMode::Minimal, 18, 3),
+        (
+            25,
+            Some(RoomLayoutMode::Compact),
+            RoomLayoutMode::Compact,
+            18,
+            7,
+        ),
+    ];
+
+    for (height, previous, mode, codex_height, room_height) in cases {
+        let layout = choose_layout(Rect::new(0, 0, 120, height), previous);
+
+        assert_eq!(
+            layout.room_mode, mode,
+            "height={height}, previous={previous:?}"
+        );
+        assert_eq!(
+            layout.codex.height, codex_height,
+            "height={height}, previous={previous:?}"
+        );
+        assert_eq!(
+            layout.room.height, room_height,
+            "height={height}, previous={previous:?}"
+        );
+    }
+}
+
+#[test]
 fn selects_modes_and_codex_priority_sizes_at_thresholds() {
     let cases = [
         (60, None, RoomLayoutMode::Full, 46, 14),
