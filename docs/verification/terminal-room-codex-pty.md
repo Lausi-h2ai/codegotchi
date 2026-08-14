@@ -355,13 +355,23 @@ test result: ok. 1 passed; 0 failed
 
 $ cargo test -p codegotchi-cli --test terminal_session launcher_terminal_entry_retains_signals_when_initialization_fails -- --nocapture
 test result: ok. 1 passed; 0 failed
+
+$ cargo test -p codegotchi-cli --test process_wrapper production_binary_successful_terminal_routes_use_one_pty_child_without_fallback -- --ignored --test-threads=1 --nocapture
+test production_binary_successful_terminal_routes_use_one_pty_child_without_fallback ... ok
+test result: ok. 1 passed; 0 failed; 17 filtered out
 ```
 
 The process-wrapper integration invokes the compiled binary in Browser,
 Terminal, Both, and Auto modes. It records one fake-Codex PID for Browser and
 Auto, no child for terminal-only initialization failure or Both without a
 physical terminal, conditional browser-helper execution, metadata cleanup, and
-absence of `#token=` output in terminal mode. The session integration proves
+absence of `#token=` output in terminal mode. The ignored outer-PTY proof also
+runs the production binary in Terminal, Both, and Auto modes under a nested
+`setsid script` PTY, verifies one Codex invocation and a usable PTY size, and
+checks the rendered marker, browser-helper count, token isolation, and metadata
+cleanup. The test shell establishes `stty rows 24 cols 80` before `exec` because
+the nested `script` PTY starts at 0×0 in this Linux environment; this is test
+harness setup, not a production fallback. The session integration proves
 the launcher-aware entry seam returns its bounded signal receiver when physical
 terminal initialization fails and does not invoke the profile-before-spawn
 callback.

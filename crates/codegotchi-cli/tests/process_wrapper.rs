@@ -821,6 +821,137 @@ fn shell_quote_path(path: &Path) -> String {
 }
 
 #[cfg(unix)]
+fn run_outer_pty_route(
+    temp: &TempDir,
+    cwd: &Path,
+    mode: &str,
+    codex: &Path,
+    browser: &Path,
+    codex_log: &Path,
+    browser_log: &Path,
+) -> Output {
+    let home = temp.join("home");
+    let codex_home = temp.join("codex-home");
+    let state = temp.join("state");
+    let runtime = temp.join("runtime");
+    for path in [&home, &codex_home, &state, &runtime] {
+        fs::create_dir_all(path).expect("PTY route test directory creates");
+    }
+
+    let command_line = format!(
+        "stty rows 24 cols 80; exec {} run --ui {mode} -- codex",
+        shell_quote_path(&binary())
+    );
+    Command::new("setsid")
+        .args(["script", "-q", "-e", "-f", "-c", &command_line, "/dev/null"])
+        .current_dir(cwd)
+        .env_clear()
+        .env("HOME", home)
+        .env("CODEX_HOME", codex_home)
+        .env("XDG_STATE_HOME", state)
+        .env("XDG_RUNTIME_DIR", runtime)
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("TERM", "xterm-256color")
+        .env("CODEGOTCHI_REAL_CODEX", codex)
+        .env("CODEGOTCHI_BROWSER", browser)
+        .env("FAKE_COMPOSED_LOG", codex_log)
+        .env("FAKE_BROWSER_URL", browser_log)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("script creates a real outer PTY")
+}
+
+#[cfg(unix)]
+fn assert_no_owned_metadata(temp: &TempDir, mode: &str) {
+    let runtime = temp.join("runtime/codegotchi");
+    assert!(
+        !runtime.exists()
+            || !runtime
+                .read_dir()
+                .expect("runtime directory reads")
+                .any(|entry| {
+                    entry
+                        .expect("runtime entry reads")
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("session-")
+                }),
+        "{mode}: owned metadata survives cleanup"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "requires a real outer PTY; run with script and --ignored --test-threads=1"]
+fn production_binary_successful_terminal_routes_use_one_pty_child_without_fallback() {
+    let codex =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake-codex-composed-pty.sh");
+
+    for mode in ["terminal", "both", "auto"] {
+        let temp = TempDir::new(&format!("outer-pty-{mode}"));
+        let cwd = temp.join("cwd");
+        fs::create_dir_all(&cwd).expect("PTY route working directory creates");
+        let browser_fixture = temp.join("browser-helper");
+        write_executable(
+            &browser_fixture,
+            "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$1\" >>\"$FAKE_BROWSER_URL\"\n",
+        );
+        let codex_log = temp.join("codex.log");
+        let browser_log = temp.join("browser.log");
+        let output = run_outer_pty_route(
+            &temp,
+            &cwd,
+            mode,
+            &codex,
+            &browser_fixture,
+            &codex_log,
+            &browser_log,
+        );
+        let transcript = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{mode}: production launcher failed: {transcript}"
+        );
+        let codex_log_contents = fs::read_to_string(&codex_log)
+            .unwrap_or_else(|error| panic!("{mode}: Codex log missing: {error}; {transcript}"));
+        assert_eq!(
+            codex_log_contents.matches("argc=").count(),
+            1,
+            "{mode}: Codex was spawned more than once: {codex_log_contents}"
+        );
+        assert!(
+            codex_log_contents.contains("size="),
+            "{mode}: Codex did not receive a PTY size: {codex_log_contents}"
+        );
+        assert!(
+            transcript.contains("FAKE_COMPOSED_READY"),
+            "{mode}: terminal host did not render the PTY child marker: {transcript}"
+        );
+        assert_eq!(
+            fs::read_to_string(&browser_log)
+                .ok()
+                .map(|contents| contents.lines().count()),
+            (mode == "both").then_some(1),
+            "{mode}: browser launch count"
+        );
+        if mode != "both" {
+            assert!(
+                !transcript.contains("#token="),
+                "{mode}: bearer token leaked into terminal-only output: {transcript}"
+            );
+        }
+        assert_no_owned_metadata(&temp, mode);
+    }
+}
+
+#[cfg(unix)]
 #[test]
 fn foreground_terminal_group_signal_is_not_forwarded_a_second_time() {
     let temp = TempDir::new("pty-signal");
