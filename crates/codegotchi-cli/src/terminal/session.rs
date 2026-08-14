@@ -717,6 +717,7 @@ fn is_process_gone(error: &PtyCodexError) -> bool {
     {
         let source = match error {
             PtyCodexError::Open { source, .. }
+            | PtyCodexError::CurrentDirectory { source }
             | PtyCodexError::Reaper { source }
             | PtyCodexError::Spawn { source, .. }
             | PtyCodexError::Reader { source }

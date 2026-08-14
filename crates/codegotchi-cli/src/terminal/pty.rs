@@ -97,6 +97,11 @@ pub enum PtyCodexError {
         #[source]
         source: io::Error,
     },
+    #[error("could not determine Codex working directory: {source}")]
+    CurrentDirectory {
+        #[source]
+        source: io::Error,
+    },
     #[error("could not spawn Codex program {program}: {source}")]
     Spawn {
         program: PathBuf,
@@ -286,8 +291,11 @@ impl PtyCodexChild {
         rows: u16,
         cols: u16,
     ) -> Result<Self, PtyCodexError> {
+        let current_directory =
+            std::env::current_dir().map_err(|source| PtyCodexError::CurrentDirectory { source })?;
         let reaper = pty_reaper_sender().map_err(|source| PtyCodexError::Reaper { source })?;
         let mut command = CommandBuilder::new(&invocation.program);
+        command.cwd(current_directory);
         command.args(&invocation.arguments);
         for (key, value) in &invocation.environment {
             command.env(key, value);

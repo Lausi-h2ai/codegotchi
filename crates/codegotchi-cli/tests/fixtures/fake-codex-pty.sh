@@ -10,6 +10,7 @@ for argument in "$@"; do
 done
 printf 'FAKE_CODEX_CODEX_HOME=<%s>\r\n' "${CODEX_HOME-}"
 printf 'FAKE_CODEX_SESSION_FILE=<%s>\r\n' "${CODEGOTCHI_SESSION_FILE-}"
+printf 'FAKE_CODEX_CWD=<%s>\r\n' "$(pwd)"
 
 trap 'exit 130' INT
 IFS= read -r input

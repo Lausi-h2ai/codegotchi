@@ -49,6 +49,7 @@ fn managed_pty_preserves_direct_invocation_input_resize_ansi_and_exit_code() {
     let temporary = TemporaryDirectory::new();
     let codex_home = temporary.path().join("codex home");
     let session_file = temporary.path().join("session metadata.json");
+    let current_directory = std::env::current_dir().expect("read launcher working directory");
     fs::create_dir(&codex_home).expect("create CODEX_HOME");
 
     let invocation = CodexInvocation {
@@ -106,6 +107,10 @@ fn managed_pty_preserves_direct_invocation_input_resize_ansi_and_exit_code() {
         "FAKE_CODEX_SESSION_FILE=<{}>",
         session_file.display()
     )));
+    assert!(
+        output.contains(&format!("FAKE_CODEX_CWD=<{}>", current_directory.display())),
+        "fixture output: {output:?}"
+    );
     assert!(output.contains("FAKE_CODEX_INPUT=<input delivered through pty>"));
     assert!(output.contains("FAKE_CODEX_SIZE=<31 120>"));
     assert_eq!(status.exit_code(), 23);
