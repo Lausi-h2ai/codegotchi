@@ -111,3 +111,53 @@ This is a pure screen/read-model and encoding proof only. It does not include
 the terminal host/event loop, raw mode, Ratatui compositor, room routing,
 pane coordinate ownership/transforms, care interactions, or the real installed
 Codex fidelity gate; those remain later task scope.
+
+## H6b production renderer evidence
+
+The Codex VT state now has a production `render_codex` path that paints an
+immutable `CodexScreen` into a clipped Ratatui `Buffer`. The renderer maps
+`Default` to `Color::Reset`, ANSI indexes 0–15 to Ratatui's named palette,
+indexes 16–255 to `Color::Indexed`, and RGB values to `Color::Rgb`. It resets
+each destination cell before applying foreground/background and bold, dim,
+italic, underline, and inverse (`REVERSED`) modifiers. Combining text and
+wide-cell continuation geometry are retained without emitting a duplicate
+continuation glyph; a wide lead is blanked when its continuation would be
+clipped. The VT cursor is returned only when visible and inside the clipped
+area, translated by the area origin. Zero-sized, overflowing, and partially
+clipped areas are covered without panics or writes outside the supplied area.
+
+The focused RED run was written before the renderer and failed on the missing
+`render_codex` export. The GREEN suite uses hand-derived `Buffer` assertions
+plus a Ratatui `TestBackend` composition and covers non-zero origins, clipping,
+zero-size areas, default/ANSI/indexed/truecolor mapping, all required
+modifiers, blank-cell style, combining/wide geometry, cursor visibility and
+translation, and screen immutability:
+
+```text
+$ cargo test -p codegotchi-cli --test terminal_render -- --nocapture
+running 11 tests
+... all 11 tests ... ok
+test result: ok. 11 passed; 0 failed
+```
+
+The deterministic fixture is
+`crates/codegotchi-cli/examples/terminal_codex_fixture.rs`. It feeds
+hand-authored ANSI/VT bytes covering cursor placement, erase/background,
+ANSI/indexed/truecolor colors, all renderer modifiers, Unicode combining and
+wide glyphs, and hidden/visible cursor transitions through this exact
+production renderer. It uses the H6a `TerminalGuard` lifecycle and Ratatui
+Crossterm backend, holds the rendered frame for
+`CODEGOTCHI_TERMINAL_FIXTURE_MS` (default 3 seconds), and restores the
+terminal on normal and error exits.
+
+PTY execution evidence (this is pre-real-Codex and pre-room, and is not a
+real-Codex fidelity or first-room gate) was captured with:
+
+```text
+$ script -q -c 'stty rows 24 cols 80; TERM=xterm-256color CODEGOTCHI_TERMINAL_FIXTURE_MS=500 cargo run -p codegotchi-cli --example terminal_codex_fixture' /tmp/codegotchi-terminal-fixture.scriptlog
+```
+
+The resulting ANSI transcript is at
+`/tmp/codegotchi-terminal-fixture.scriptlog`. A PNG screenshot was not
+recorded in this worker run because the environment has no reachable X display
+or terminal-window capture target; no image is claimed as screenshot evidence.

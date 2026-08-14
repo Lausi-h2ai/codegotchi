@@ -2,6 +2,7 @@ mod host;
 mod input;
 mod layout;
 mod pty;
+mod render;
 mod screen;
 
 pub use host::{
@@ -14,4 +15,5 @@ pub use input::{
 };
 pub use layout::{RoomLayoutMode, TerminalLayout, choose_layout};
 pub use pty::{PtyCodexChild, PtyCodexError};
+pub use render::render_codex;
 pub use screen::{CodexInputModes, CodexScreen, MouseEncoding, MouseTrackingMode};
