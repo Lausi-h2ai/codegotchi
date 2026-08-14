@@ -21,7 +21,11 @@ use std::{
 
 use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;
-use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::{
+    Terminal,
+    backend::{Backend as RatatuiBackend, CrosstermBackend},
+    layout::Rect,
+};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::CodexInvocation;
@@ -548,6 +552,17 @@ where
         output_receiver: Some(output_receiver),
         reader_task: Some(ReaderThreadGuard::new(reader_thread, reader_cancellation)),
     };
+    // Keep exactly one Ratatui compositor for the hosted session. Its backend
+    // borrows the stdout retained by `TerminalGuard`; dropping this local at
+    // function return releases that borrow before the guard is restored.
+    let mut body_error = None;
+    let mut compositor = match Terminal::new(CrosstermBackend::new(guard.writer_mut())) {
+        Ok(compositor) => Some(compositor),
+        Err(error) => {
+            body_error = Some(TerminalSessionError::Render(error));
+            None
+        }
+    };
     let mut child_status = None;
     let mut reader_done = false;
     let mut signal_receiver = Some(signals);
@@ -555,10 +570,16 @@ where
     let mut terminate_sent = false;
     let mut poll = tokio::time::interval(CHILD_POLL_INTERVAL);
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut body_error = None;
     let mut fairness_turn = 0;
 
-    if let Err(error) = draw_frame(guard, &core) {
+    if body_error.is_none()
+        && let Err(error) = draw_frame(
+            compositor
+                .as_mut()
+                .expect("compositor exists when initial draw starts"),
+            &core,
+        )
+    {
         body_error = Some(error);
     }
 
@@ -581,7 +602,12 @@ where
             SessionWork::Output(message) => match message {
                 Some(ReaderMessage::Data(bytes)) => {
                     core.process_output(&bytes);
-                    if let Err(error) = draw_frame(guard, &core) {
+                    if let Err(error) = draw_frame(
+                        compositor
+                            .as_mut()
+                            .expect("compositor exists while session is rendering"),
+                        &core,
+                    ) {
                         body_error = Some(error);
                     }
                 }
@@ -593,7 +619,9 @@ where
             SessionWork::Event(event) => match event {
                 Some(Ok(event)) => {
                     if let Err(error) = handle_event(
-                        guard,
+                        compositor
+                            .as_mut()
+                            .expect("compositor exists while session handles events"),
                         &mut core,
                         &mut resources.child,
                         &mut resources.writer,
@@ -629,8 +657,14 @@ where
                         }
                     };
                     if should_handle
-                        && let Err(error) =
-                            handle_signal(guard, &mut core, &mut resources.child, signal)
+                        && let Err(error) = handle_signal(
+                            compositor
+                                .as_mut()
+                                .expect("compositor exists while session handles signals"),
+                            &mut core,
+                            &mut resources.child,
+                            signal,
+                        )
                     {
                         body_error = Some(error);
                     }
@@ -958,15 +992,18 @@ fn poll_child(
     child.try_wait().map_err(TerminalSessionError::Child)
 }
 
-fn handle_event(
-    guard: &mut TerminalGuard<CrosstermTerminal>,
+fn handle_event<B>(
+    compositor: &mut Terminal<B>,
     core: &mut TerminalSessionCore,
     child: &mut Option<PtyCodexChild>,
     writer: &mut Option<PtyWriter>,
     event: Event,
-) -> Result<(), TerminalSessionError> {
+) -> Result<(), TerminalSessionError>
+where
+    B: RatatuiBackend<Error = io::Error>,
+{
     if let Event::Resize(_, _) = event {
-        return resize_session(guard, core, child.as_ref());
+        return resize_session(compositor, core, child.as_ref());
     }
     let bytes = core.encode_event(&event);
     if bytes.is_empty() {
@@ -975,12 +1012,15 @@ fn handle_event(
     write_input(writer, &bytes)
 }
 
-fn handle_signal(
-    guard: &mut TerminalGuard<CrosstermTerminal>,
+fn handle_signal<B>(
+    compositor: &mut Terminal<B>,
     core: &mut TerminalSessionCore,
     child: &mut Option<PtyCodexChild>,
     signal: TerminalSessionSignal,
-) -> Result<(), TerminalSessionError> {
+) -> Result<(), TerminalSessionError>
+where
+    B: RatatuiBackend<Error = io::Error>,
+{
     match signal {
         TerminalSessionSignal::Interrupt => {
             let Some(child) = child.as_mut() else {
@@ -995,28 +1035,48 @@ fn handle_signal(
             finish_signal_delivery(child.terminate())?;
         }
         TerminalSessionSignal::WindowChange => {
-            resize_session(guard, core, child.as_ref())?;
+            resize_session(compositor, core, child.as_ref())?;
         }
     }
     Ok(())
 }
 
-fn resize_session(
-    guard: &mut TerminalGuard<CrosstermTerminal>,
+fn resize_session<B>(
+    compositor: &mut Terminal<B>,
     core: &mut TerminalSessionCore,
     child: Option<&PtyCodexChild>,
-) -> Result<(), TerminalSessionError> {
-    let (columns, rows) = guard
+) -> Result<(), TerminalSessionError>
+where
+    B: RatatuiBackend<Error = io::Error>,
+{
+    let size = compositor
         .backend_mut()
         .size()
         .map_err(TerminalSessionError::Input)?;
+    let (columns, rows) = (size.width, size.height);
+    resize_compositor(compositor, core, rows, columns, child)
+}
+
+fn resize_compositor<B>(
+    compositor: &mut Terminal<B>,
+    core: &mut TerminalSessionCore,
+    rows: u16,
+    columns: u16,
+    child: Option<&PtyCodexChild>,
+) -> Result<(), TerminalSessionError>
+where
+    B: RatatuiBackend<Error = io::Error>,
+{
     if let Some(child) = child {
         child
             .resize(rows, columns)
             .map_err(TerminalSessionError::Resize)?;
     }
     core.resize(rows, columns);
-    draw_frame(guard, core)
+    compositor
+        .resize(Rect::new(0, 0, columns, rows))
+        .map_err(TerminalSessionError::Render)?;
+    draw_frame(compositor, core)
 }
 
 fn write_input(writer: &mut Option<PtyWriter>, bytes: &[u8]) -> Result<(), TerminalSessionError> {
@@ -1029,13 +1089,14 @@ fn write_input(writer: &mut Option<PtyWriter>, bytes: &[u8]) -> Result<(), Termi
     writer.flush().map_err(TerminalSessionError::Input)
 }
 
-fn draw_frame(
-    guard: &mut TerminalGuard<CrosstermTerminal>,
+fn draw_frame<B>(
+    compositor: &mut Terminal<B>,
     core: &TerminalSessionCore,
-) -> Result<(), TerminalSessionError> {
-    let backend = CrosstermBackend::new(guard.writer_mut());
-    let mut terminal = Terminal::new(backend).map_err(TerminalSessionError::Render)?;
-    terminal
+) -> Result<(), TerminalSessionError>
+where
+    B: RatatuiBackend<Error = io::Error>,
+{
+    compositor
         .draw(|frame| {
             let cursor = render_codex(core.screen(), frame.area(), frame.buffer_mut());
             if let Some(cursor) = cursor {
@@ -1059,9 +1120,13 @@ mod tests {
         time::Duration,
     };
 
+    use crossterm::style::{Colored, force_color_output};
+    use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect};
+
     use super::{
-        ReaderMessage, ReaderThreadGuard, SessionResources, TerminalSessionError, finish_guard,
-        finish_signal_delivery, session_work_order, spawn_reader, write_input,
+        ReaderMessage, ReaderThreadGuard, SessionResources, TerminalSessionCore,
+        TerminalSessionError, draw_frame, finish_guard, finish_signal_delivery, resize_compositor,
+        session_work_order, spawn_reader, write_input,
     };
     use crate::terminal::{TerminalBackend, TerminalGuard, TerminalStep};
 
@@ -1257,6 +1322,16 @@ mod tests {
         }
     }
 
+    struct ColorOutputRestore {
+        was_disabled: bool,
+    }
+
+    impl Drop for ColorOutputRestore {
+        fn drop(&mut self) {
+            force_color_output(!self.was_disabled);
+        }
+    }
+
     #[test]
     fn writer_seam_delivers_exact_encoded_bytes() {
         let bytes = Arc::new(Mutex::new(Vec::new()));
@@ -1269,6 +1344,90 @@ mod tests {
             bytes.lock().expect("recording writer lock").as_slice(),
             b"\x1b[200~paste\x1b[201~"
         );
+    }
+
+    fn fixed_compositor(
+        bytes: Arc<Mutex<Vec<u8>>>,
+        columns: u16,
+        rows: u16,
+    ) -> Terminal<CrosstermBackend<RecordingWriter>> {
+        Terminal::with_options(
+            CrosstermBackend::new(RecordingWriter { bytes }),
+            TerminalOptions {
+                viewport: Viewport::Fixed(Rect::new(0, 0, columns, rows)),
+            },
+        )
+        .expect("fixed compositor should initialize")
+    }
+
+    fn apply_new_output(
+        bytes: &Arc<Mutex<Vec<u8>>>,
+        offset: &mut usize,
+        parser: &mut vt100::Parser,
+    ) {
+        let output = bytes.lock().expect("recording writer lock");
+        parser.process(&output[*offset..]);
+        *offset = output.len();
+    }
+
+    #[test]
+    fn persistent_compositor_clears_removed_text_from_physical_screen() {
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut compositor = fixed_compositor(Arc::clone(&bytes), 6, 2);
+        let mut parser = vt100::Parser::new(2, 6, 0);
+        let mut offset = 0;
+        let mut core = TerminalSessionCore::new(2, 6);
+        core.process_output(b"HELLO");
+
+        draw_frame(&mut compositor, &core).expect("first frame should render");
+        apply_new_output(&bytes, &mut offset, &mut parser);
+        assert_eq!(
+            parser.screen().cell(0, 0).expect("cell exists").contents(),
+            "H"
+        );
+
+        core.process_output(b"\x1b[2J\x1b[H");
+        draw_frame(&mut compositor, &core).expect("blank frame should render");
+        apply_new_output(&bytes, &mut offset, &mut parser);
+
+        let cell = parser.screen().cell(0, 0).expect("cell exists");
+        assert_eq!(
+            cell.contents(),
+            " ",
+            "removed text must be physically erased"
+        );
+    }
+
+    #[test]
+    fn persistent_compositor_resize_clears_stale_style_from_default_cells() {
+        let was_disabled = Colored::ansi_color_disabled_memoized();
+        force_color_output(true);
+        let _restore = ColorOutputRestore { was_disabled };
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut compositor = fixed_compositor(Arc::clone(&bytes), 6, 2);
+        let mut parser = vt100::Parser::new(2, 6, 0);
+        let mut offset = 0;
+        let mut core = TerminalSessionCore::new(2, 6);
+        core.process_output(b"\x1b[31;44;1mSTALE");
+
+        draw_frame(&mut compositor, &core).expect("styled frame should render");
+        apply_new_output(&bytes, &mut offset, &mut parser);
+        let styled = parser.screen().cell(0, 0).expect("cell exists");
+        assert_eq!(styled.fgcolor(), vt100::Color::Idx(1));
+        assert_eq!(styled.bgcolor(), vt100::Color::Idx(4));
+        assert!(styled.bold());
+
+        core.process_output(b"\x1b[0m\x1b[2J\x1b[H");
+        resize_compositor(&mut compositor, &mut core, 1, 3, None)
+            .expect("resize/default frame should render");
+        parser.screen_mut().set_size(1, 3);
+        apply_new_output(&bytes, &mut offset, &mut parser);
+
+        let cleared = parser.screen().cell(0, 0).expect("cell exists");
+        assert_eq!(cleared.contents(), " ");
+        assert_eq!(cleared.fgcolor(), vt100::Color::Default);
+        assert_eq!(cleared.bgcolor(), vt100::Color::Default);
+        assert!(!cleared.bold(), "default cell must not retain stale style");
     }
 
     struct RestorationBackend {
