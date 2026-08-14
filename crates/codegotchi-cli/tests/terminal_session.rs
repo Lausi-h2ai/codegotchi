@@ -268,6 +268,96 @@ fn outer_pty_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+struct OuterPtySizeGuard {
+    rows: u16,
+    columns: u16,
+    restored: bool,
+}
+
+impl OuterPtySizeGuard {
+    fn capture() -> Self {
+        let output = std::process::Command::new("stty")
+            .args(["-F", "/dev/tty", "size"])
+            .output()
+            .expect("read outer PTY size");
+        assert!(output.status.success(), "stty size should succeed");
+        let values = String::from_utf8(output.stdout).expect("stty size is UTF-8");
+        let mut values = values.split_whitespace();
+        let rows = values
+            .next()
+            .expect("stty should report rows")
+            .parse()
+            .expect("rows should be numeric");
+        let columns = values
+            .next()
+            .expect("stty should report columns")
+            .parse()
+            .expect("columns should be numeric");
+        Self {
+            rows,
+            columns,
+            restored: false,
+        }
+    }
+
+    fn restore(&mut self) {
+        let status = std::process::Command::new("stty")
+            .args([
+                "-F",
+                "/dev/tty",
+                "rows",
+                &self.rows.to_string(),
+                "cols",
+                &self.columns.to_string(),
+            ])
+            .status()
+            .expect("restore outer PTY size");
+        assert!(status.success(), "stty should restore outer PTY size");
+        self.restored = true;
+    }
+}
+
+impl Drop for OuterPtySizeGuard {
+    fn drop(&mut self) {
+        if !self.restored {
+            let _ = std::process::Command::new("stty")
+                .args([
+                    "-F",
+                    "/dev/tty",
+                    "rows",
+                    &self.rows.to_string(),
+                    "cols",
+                    &self.columns.to_string(),
+                ])
+                .status();
+        }
+    }
+}
+
+struct OuterPtyResizeTask(Option<tokio::task::JoinHandle<bool>>);
+
+impl OuterPtyResizeTask {
+    fn new(handle: tokio::task::JoinHandle<bool>) -> Self {
+        Self(Some(handle))
+    }
+
+    async fn finish(mut self) -> bool {
+        self.0
+            .take()
+            .expect("resize task handle is owned")
+            .await
+            .expect("resize task should not panic")
+    }
+}
+
+impl Drop for OuterPtyResizeTask {
+    fn drop(&mut self) {
+        if let Some(handle) = self.0.take() {
+            handle.abort();
+        }
+    }
+}
+
 #[tokio::test]
 #[ignore = "requires running the test process inside a real outer PTY"]
 async fn composed_session_adapter_fairly_handles_signals_during_continuous_output() {
@@ -317,8 +407,97 @@ async fn composed_session_adapter_fairly_handles_signals_during_continuous_outpu
 
 #[tokio::test]
 #[ignore = "requires running the test process inside a real outer PTY"]
+async fn composed_session_adapter_cancellation_under_output_flood_completes() {
+    let _outer_pty = outer_pty_lock().lock().await;
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake-codex-flood-pty.sh");
+    let invocation = CodexInvocation {
+        program: fixture,
+        arguments: vec!["--ignore-interrupt".into()],
+        environment: Vec::new(),
+    };
+    let (_sender, receiver) = terminal_session_signal_channel(1);
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async move {
+            let task = tokio::task::spawn_local(async move {
+                run_terminal_session_with_events(&invocation, receiver, PendingEvents).await
+            });
+
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            task.abort();
+            let result = tokio::time::timeout(Duration::from_secs(3), task)
+                .await
+                .expect("cancellation under PTY output flood should complete")
+                .expect_err("aborted session should report cancellation");
+            assert!(result.is_cancelled());
+        })
+        .await;
+}
+
+#[tokio::test]
+#[ignore = "requires running the test process inside a real outer PTY"]
+async fn composed_session_adapter_closed_signal_receiver_completes_without_spin() {
+    let _outer_pty = outer_pty_lock().lock().await;
+    let invocation = CodexInvocation {
+        program: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/fake-codex-close-pty.sh"),
+        arguments: Vec::new(),
+        environment: Vec::new(),
+    };
+    let (sender, receiver) = terminal_session_signal_channel(1);
+    drop(sender);
+
+    let status = tokio::time::timeout(
+        Duration::from_secs(3),
+        run_terminal_session_with_events(&invocation, receiver, PendingEvents),
+    )
+    .await
+    .expect("closed signal input should not spin or hang")
+    .expect("composed child should exit normally");
+    assert_eq!(status.exit_code(), 0);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires running the test process inside a real outer PTY"]
+async fn composed_session_adapter_cleans_descendant_after_natural_leader_exit() {
+    let _outer_pty = outer_pty_lock().lock().await;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is before Unix epoch")
+        .as_nanos();
+    let pid_file = std::env::temp_dir().join(format!(
+        "codegotchi-natural-leader-{}-{timestamp}.pid",
+        std::process::id()
+    ));
+    let invocation = CodexInvocation {
+        program: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/fake-codex-natural-leader-pty.sh"),
+        arguments: vec![pid_file.as_os_str().into()],
+        environment: Vec::new(),
+    };
+    let (sender, receiver) = terminal_session_signal_channel(1);
+    drop(sender);
+
+    let status = tokio::time::timeout(
+        Duration::from_secs(2),
+        run_terminal_session_with_events(&invocation, receiver, PendingEvents),
+    )
+    .await
+    .expect("natural leader exit should not leave the PTY reader blocked")
+    .expect("natural leader session should exit cleanly");
+    assert_eq!(status.exit_code(), 0);
+    let descendant_pid = wait_for_pid(&pid_file);
+    assert_eventually(Duration::from_secs(2), || !process_exists(descendant_pid));
+    fs::remove_file(pid_file).expect("remove natural-leader PID file");
+}
+
+#[tokio::test]
+#[ignore = "requires running the test process inside a real outer PTY"]
 async fn composed_session_adapter_delivers_exact_invocation_modes_input_and_status() {
     let _outer_pty = outer_pty_lock().lock().await;
+    let mut outer_size = OuterPtySizeGuard::capture();
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock is before Unix epoch")
@@ -351,22 +530,22 @@ async fn composed_session_adapter_delivers_exact_invocation_modes_input_and_stat
         Event::Resize(120, 31),
     ]);
     let (sender, receiver) = terminal_session_signal_channel(2);
-    let resize_task = tokio::spawn(async move {
+    let resize_task = OuterPtyResizeTask::new(tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(450)).await;
         let result = std::process::Command::new("stty")
-            .args(["rows", "31", "cols", "120"])
+            .args(["-F", "/dev/tty", "rows", "31", "cols", "120"])
             .status();
         sender
             .send(TerminalSessionSignal::WindowChange)
             .await
             .expect("session should still receive a resize signal");
         result.expect("resize the outer test PTY").success()
-    });
+    }));
 
     let status = run_terminal_session_with_events(&invocation, receiver, events)
         .await
         .expect("composed fixture should exit and restore");
-    assert!(resize_task.await.expect("resize task should not panic"));
+    assert!(resize_task.finish().await);
     assert_eq!(status.exit_code(), 0);
     let output = fs::read_to_string(&log).expect("fixture should record direct adapter inputs");
     assert!(output.starts_with(
@@ -376,11 +555,9 @@ async fn composed_session_adapter_delivers_exact_invocation_modes_input_and_stat
     assert!(output.ends_with("resized-size=31 120\n"));
     fs::remove_file(log).expect("remove composed adapter log");
 
-    // Do not leave the outer PTY resized for a later test in the same script.
-    std::process::Command::new("stty")
-        .args(["rows", "24", "cols", "80"])
-        .status()
-        .expect("restore the outer test PTY");
+    // Keep explicit restoration in the success path, with Drop covering
+    // assertion failures and unwinding in the outer PTY test.
+    outer_size.restore();
 }
 
 #[tokio::test]
@@ -410,4 +587,35 @@ async fn real_session_adapter_spawns_fixture_and_reaps_after_external_interrupt(
         .await
         .expect("fixture session should restore and return its child status");
     assert_eq!(status.exit_code(), 130);
+}
+
+#[cfg(unix)]
+fn wait_for_pid(path: &std::path::Path) -> u32 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Ok(value) = fs::read_to_string(path)
+            && let Ok(pid) = value.trim().parse()
+        {
+            return pid;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "fixture did not publish descendant PID"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(unix)]
+fn process_exists(pid: u32) -> bool {
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok()
+}
+
+#[cfg(unix)]
+fn assert_eventually(timeout: Duration, mut predicate: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + timeout;
+    while !predicate() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(predicate(), "condition did not become true before timeout");
 }

@@ -334,6 +334,35 @@ enum ReaderMessage {
     Error(io::Error),
 }
 
+/// Owns every resource whose drop order matters while the session future is
+/// suspended or cancelled. In particular, a blocked reader can be waiting on
+/// either PTY EOF or a bounded-channel send. Kill/drop the child first, then
+/// disconnect the receiver, and only then cancel/join the reader thread.
+struct SessionResources {
+    child: Option<PtyCodexChild>,
+    writer: Option<PtyWriter>,
+    output_receiver: Option<Receiver<ReaderMessage>>,
+    reader_task: Option<ReaderThreadGuard>,
+}
+
+impl Drop for SessionResources {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            // Explicitly consume the process-group identity before the child
+            // handle is dropped. PtyCodexChild then performs bounded reaping.
+            if !child.is_reaped() {
+                let _ = child.kill_group();
+            }
+            drop(child);
+        }
+        self.writer.take();
+        // Receiver closure must happen before ReaderThreadGuard's Drop joins;
+        // blocking_send then returns instead of deadlocking cancellation.
+        self.output_receiver.take();
+        self.reader_task.take();
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SessionWorkKind {
     Signal,
@@ -449,12 +478,13 @@ async fn run_session_after_entry(
         }
     };
 
-    let (mut output_receiver, reader_thread, reader_cancellation) = spawn_reader(reader);
-    // Keep this guard declared before writer/child so cancellation drops the
-    // child first, unblocking the cloned PTY reader before the guard joins it.
-    let mut reader_task = Some(ReaderThreadGuard::new(reader_thread, reader_cancellation));
-    let mut writer = Some(writer);
-    let mut child = Some(child);
+    let (output_receiver, reader_thread, reader_cancellation) = spawn_reader(reader);
+    let mut resources = SessionResources {
+        child: Some(child),
+        writer: Some(writer),
+        output_receiver: Some(output_receiver),
+        reader_task: Some(ReaderThreadGuard::new(reader_thread, reader_cancellation)),
+    };
     let mut child_status = None;
     let mut reader_done = false;
     let mut signal_receiver = Some(signals);
@@ -471,7 +501,10 @@ async fn run_session_after_entry(
 
     while body_error.is_none() && (child_status.is_none() || !reader_done) {
         let work = next_session_work(
-            &mut output_receiver,
+            resources
+                .output_receiver
+                .as_mut()
+                .expect("session owns output receiver until cleanup"),
             reader_done,
             events,
             child_status.is_none(),
@@ -496,9 +529,13 @@ async fn run_session_after_entry(
             },
             SessionWork::Event(event) => match event {
                 Some(Ok(event)) => {
-                    if let Err(error) =
-                        handle_event(guard, &mut core, &mut child, &mut writer, event)
-                    {
+                    if let Err(error) = handle_event(
+                        guard,
+                        &mut core,
+                        &mut resources.child,
+                        &mut resources.writer,
+                        event,
+                    ) {
                         body_error = Some(error);
                     }
                 }
@@ -529,25 +566,35 @@ async fn run_session_after_entry(
                         }
                     };
                     if should_handle
-                        && let Err(error) = handle_signal(guard, &mut core, &mut child, signal)
+                        && let Err(error) =
+                            handle_signal(guard, &mut core, &mut resources.child, signal)
                     {
                         body_error = Some(error);
                     }
                 }
                 None => signal_receiver = None,
             },
-            SessionWork::Poll => match poll_child(&mut child) {
+            SessionWork::Poll => match poll_child(&mut resources.child) {
                 Ok(Some(status)) => {
                     child_status = Some(status);
-                    let cleanup = child
+                    let mut cleanup = resources
+                        .child
                         .as_mut()
                         .map(cleanup_process_group)
                         .unwrap_or_default();
+                    if let Some(child) = resources.child.as_mut()
+                        && let Some(error) = child.take_cleanup_error()
+                        && !is_process_gone(&error)
+                    {
+                        cleanup.push(format!("process-group cleanup: {error}"));
+                    }
                     if !cleanup.is_empty() {
                         body_error = Some(TerminalSessionError::cleanup_only(cleanup));
                     }
-                    writer.take();
-                    child.take();
+                    resources.writer.take();
+                    // try_wait marked this child reaped; the one-shot explicit
+                    // descendant cleanup above consumed the PGID if needed.
+                    resources.child.take();
                 }
                 Ok(None) => {}
                 Err(error) => body_error = Some(error),
@@ -559,17 +606,17 @@ async fn run_session_after_entry(
     // before releasing the master so no process survives restoration. The
     // bounded poll also gives cancellation-free cleanup a liveness deadline.
     let mut cleanup_failures = Vec::new();
-    if let Some(mut running) = child.take() {
+    if let Some(mut running) = resources.child.take() {
         let (status, failures) = shutdown_child(&mut running).await;
         cleanup_failures.extend(failures);
         if child_status.is_none() {
             child_status = status;
         }
     }
-    writer.take();
-    drop(output_receiver);
+    resources.writer.take();
+    resources.output_receiver.take();
 
-    if let Some(reader_task) = reader_task.as_mut()
+    if let Some(reader_task) = resources.reader_task.as_mut()
         && let Err(error) = reader_task.join()
     {
         cleanup_failures.push(error.to_string());
@@ -607,6 +654,7 @@ fn is_process_gone(error: &PtyCodexError) -> bool {
     {
         let source = match error {
             PtyCodexError::Open { source, .. }
+            | PtyCodexError::Reaper { source }
             | PtyCodexError::Spawn { source, .. }
             | PtyCodexError::Reader { source }
             | PtyCodexError::Writer { source }
@@ -621,6 +669,14 @@ fn is_process_gone(error: &PtyCodexError) -> bool {
     {
         let _ = error;
         false
+    }
+}
+
+fn finish_signal_delivery(result: Result<(), PtyCodexError>) -> Result<(), TerminalSessionError> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) if is_process_gone(&error) => Ok(()),
+        Err(error) => Err(TerminalSessionError::Child(error)),
     }
 }
 
@@ -640,8 +696,12 @@ async fn shutdown_child(
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                let mut descendants = cleanup_process_group(child);
-                failures.append(&mut descendants);
+                failures.extend(cleanup_process_group(child));
+                if let Some(error) = child.take_cleanup_error()
+                    && !is_process_gone(&error)
+                {
+                    failures.push(format!("process-group cleanup: {error}"));
+                }
                 return (Some(status), failures);
             }
             Ok(None) if std::time::Instant::now() < term_deadline => {
@@ -655,15 +715,23 @@ async fn shutdown_child(
         }
     }
 
-    if let Err(error) = child.kill_group()
+    failures.extend(cleanup_process_group(child));
+    if let Some(error) = child.take_cleanup_error()
         && !is_process_gone(&error)
     {
-        failures.push(format!("SIGKILL delivery: {error}"));
+        failures.push(format!("process-group cleanup: {error}"));
     }
     let kill_deadline = std::time::Instant::now() + KILL_GRACE;
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => return (Some(status), failures),
+            Ok(Some(status)) => {
+                if let Some(error) = child.take_cleanup_error()
+                    && !is_process_gone(&error)
+                {
+                    failures.push(format!("process-group cleanup: {error}"));
+                }
+                return (Some(status), failures);
+            }
             Ok(None) if std::time::Instant::now() < kill_deadline => {
                 tokio::time::sleep(CHILD_POLL_INTERVAL).await;
             }
@@ -673,6 +741,11 @@ async fn shutdown_child(
             }
             Err(error) => {
                 failures.push(format!("child poll after SIGKILL: {error}"));
+                if let Some(cleanup_error) = child.take_cleanup_error()
+                    && !is_process_gone(&cleanup_error)
+                {
+                    failures.push(format!("process-group cleanup: {cleanup_error}"));
+                }
                 return (None, failures);
             }
         }
@@ -827,13 +900,13 @@ fn handle_signal(
             let Some(child) = child.as_mut() else {
                 return Ok(());
             };
-            child.interrupt().map_err(TerminalSessionError::Child)?;
+            finish_signal_delivery(child.interrupt())?;
         }
         TerminalSessionSignal::Terminate => {
             let Some(child) = child.as_mut() else {
                 return Ok(());
             };
-            child.terminate().map_err(TerminalSessionError::Child)?;
+            finish_signal_delivery(child.terminate())?;
         }
         TerminalSessionSignal::WindowChange => {
             resize_session(guard, core, child.as_ref())?;
@@ -896,8 +969,8 @@ mod tests {
     };
 
     use super::{
-        ReaderMessage, TerminalSessionError, finish_guard, session_work_order, spawn_reader,
-        write_input,
+        ReaderMessage, ReaderThreadGuard, SessionResources, TerminalSessionError, finish_guard,
+        finish_signal_delivery, session_work_order, spawn_reader, write_input,
     };
     use crate::terminal::{TerminalBackend, TerminalGuard, TerminalStep};
 
@@ -983,6 +1056,26 @@ mod tests {
             .expect("reader should stop after receiver closes");
     }
 
+    #[tokio::test]
+    async fn session_resources_disconnect_backpressure_before_joining_reader() {
+        let (receiver, thread, cancellation) = spawn_reader(Box::new(RepeatingReader));
+        let resources = SessionResources {
+            child: None,
+            writer: None,
+            output_receiver: Some(receiver),
+            reader_task: Some(ReaderThreadGuard::new(thread, cancellation)),
+        };
+
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        tokio::time::timeout(std::time::Duration::from_secs(1), async move {
+            tokio::task::spawn_blocking(move || drop(resources))
+                .await
+                .expect("resource drop should not panic");
+        })
+        .await
+        .expect("resource drop should disconnect output before joining reader");
+    }
+
     #[test]
     fn session_work_order_rotates_output_behind_every_control_branch() {
         use super::SessionWorkKind::{Event, Output, Poll, Signal};
@@ -991,6 +1084,21 @@ mod tests {
         assert_eq!(session_work_order(1), [Event, Poll, Output, Signal]);
         assert_eq!(session_work_order(2), [Poll, Output, Signal, Event]);
         assert_eq!(session_work_order(3), [Output, Signal, Event, Poll]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn queued_signal_esrch_is_benign_and_does_not_replace_exit_status() {
+        for signal in ["SIGINT", "SIGTERM"] {
+            let error = super::PtyCodexError::Signal {
+                signal,
+                source: io::Error::from_raw_os_error(nix::errno::Errno::ESRCH as i32),
+            };
+            assert!(finish_signal_delivery(Err(error)).is_ok());
+        }
+
+        let status = portable_pty::ExitStatus::with_exit_code(0);
+        assert_eq!(status.exit_code(), 0);
     }
 
     struct RecordingWriter {

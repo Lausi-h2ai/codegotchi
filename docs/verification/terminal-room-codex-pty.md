@@ -205,14 +205,17 @@ error[E0432]: unresolved imports `TerminalSessionError`,
 `initialize_terminal_and_spawn`
 ```
 
-The focused GREEN suite passes seven deterministic session tests. It proves
+The focused GREEN integration suite passes seven deterministic session tests. It proves
 entry failure calls no spawn callback; successful entry calls exactly one
 callback with exact invocation and rows/columns; negotiated application
 cursor, bracketed paste, focus, and SGR mouse bytes are exact while disabled
-mouse is silent; resize is not transposed; VT state is bounded; and a closed
-signal receiver can be disabled without polling spin. The direct PTY suite
-now passes four tests, including exact signal statuses and cancellation
-cleanup.
+mouse is silent; resize is not transposed; VT state is bounded; a closed
+signal receiver can be disabled without polling spin; and queued ESRCH from
+Interrupt/Terminate is benign while the actual exit status remains available.
+The direct PTY suite now passes four tests, including exact signal statuses and
+cancellation cleanup. The production session module has eight unit tests for
+reader ownership/backpressure, scheduler ordering, benign ESRCH handling, and
+restoration context.
 
 The scheduler rotates signal, event, child-poll, and output branches on each
 turn. At most one bounded output chunk is handled per turn, so continuous PTY
@@ -222,13 +225,16 @@ setsid/process-group leader metadata for explicit SIGINT/SIGTERM/SIGKILL
 delivery; non-Unix retains the portable-pty fallback.
 
 The blocking PTY reader runs on one thread and sends at most 16 messages of at
-most 8 KiB each. Normal cleanup terminates or kills the PTY group, polls the
-direct child to a deadline, and joins the reader. Future-drop cleanup kills the
-retained group and reaps the direct child in PtyCodexChild Drop; it never
-detaches the reader. Expected ESRCH after a normally reaped child is ignored,
-while kill, poll, and join failures are attached to the session error. The
-bounded reader proof is scoped to the PTY child/process group and descendants,
-not escaped sessions.
+most 8 KiB each. `SessionResources` enforces cancellation order: signal/kill
+the child group, drop the bounded output receiver, then cancel and join the
+reader. Normal cleanup terminates or kills the PTY group, polls the direct child
+to a deadline, and joins the reader. Waitid-capable Unix targets observe exit
+with `waitid(WEXITED | WNOHANG | WNOWAIT)`, consume the one-shot descendant group
+while the leader is still a zombie, and only then lets portable-pty reap it;
+unsupported Unix targets disarm the identity before post-reap cleanup. Drop
+uses bounded polling and transfers an unreaped child handle to a process-wide
+reaper, never an unbounded wait. The bounded reader proof is scoped to the PTY
+child/process group and descendants, not escaped sessions.
 
 The production-shared injected event source is used by the ignored outer-PTY
 integration tests; it is not a parallel test loop:
@@ -241,6 +247,18 @@ test result: ok. 1 passed; 0 failed; finished in 1.63s
 $ script -q -c 'stty rows 24 cols 80; TERM=xterm-256color cargo test -p codegotchi-cli --test terminal_session composed_session_adapter_fairly_handles_signals_during_continuous_output -- --ignored --nocapture' /tmp/codegotchi-h6c-fairness-1.scriptlog
 test composed_session_adapter_fairly_handles_signals_during_continuous_output ... ok
 test result: ok. 1 passed; 0 failed; finished in 1.12s
+
+$ script -q -c 'stty rows 24 cols 80; TERM=xterm-256color cargo test -p codegotchi-cli --test terminal_session composed_session_adapter_cancellation_under_output_flood_completes -- --ignored --nocapture' /tmp/codegotchi-h6c-cancel.scriptlog
+test composed_session_adapter_cancellation_under_output_flood_completes ... ok
+test result: ok. 1 passed; 0 failed
+
+$ script -q -c 'stty rows 24 cols 80; TERM=xterm-256color cargo test -p codegotchi-cli --test terminal_session composed_session_adapter_closed_signal_receiver_completes_without_spin -- --ignored --nocapture' /tmp/codegotchi-h6c-closed.scriptlog
+test composed_session_adapter_closed_signal_receiver_completes_without_spin ... ok
+test result: ok. 1 passed; 0 failed
+
+$ script -q -c 'stty rows 24 cols 80; TERM=xterm-256color cargo test -p codegotchi-cli --test terminal_session composed_session_adapter_cleans_descendant_after_natural_leader_exit -- --ignored --nocapture' /tmp/codegotchi-h6c-natural-leader.scriptlog
+test composed_session_adapter_cleans_descendant_after_natural_leader_exit ... ok
+test result: ok. 1 passed; 0 failed
 ```
 
 The composed adapter records exact direct argv/env and exact negotiated wire
@@ -263,4 +281,6 @@ test real_session_adapter_spawns_fixture_and_reaps_after_external_interrupt ... 
 All of this is fake-PTY evidence, not a real Codex run. No H6c screenshot was
 captured in this worker, and no real-Codex fidelity, first-room, launcher,
 layout, or room-art gate is claimed. The earlier H6b renderer screenshot
-remains renderer-fixture evidence only.
+remains renderer-fixture evidence only. The composed resize regression uses an
+RAII outer-PTY size guard, so an assertion panic restores the original size;
+explicit success restoration is marked complete and is not repeated by Drop.
