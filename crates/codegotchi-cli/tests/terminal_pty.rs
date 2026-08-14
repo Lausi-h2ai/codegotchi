@@ -92,6 +92,12 @@ fn managed_pty_preserves_direct_invocation_input_resize_ansi_and_exit_code() {
             .windows(5)
             .any(|window| window == b"\x1b[31m")
     );
+    assert!(
+        output
+            .as_bytes()
+            .windows(3)
+            .any(|window| window == b"\x1b[H")
+    );
     assert!(output.contains("FAKE_CODEX_ARG[1]=<--literal>"));
     assert!(output.contains("FAKE_CODEX_ARG[2]=<argument with spaces>"));
     assert!(output.contains("FAKE_CODEX_ARG[3]=<semi;colon>"));

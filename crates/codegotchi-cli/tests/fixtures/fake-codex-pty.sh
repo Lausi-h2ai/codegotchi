@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-printf 'FAKE_CODEX_READY\033[31mANSI_RED\033[0m\r\n'
+printf 'FAKE_CODEX_READY\033[H\033[31mANSI_RED\033[0m\r\n'
 printf 'FAKE_CODEX_ARG_COUNT=%s\r\n' "$#"
 argument_index=1
 for argument in "$@"; do
