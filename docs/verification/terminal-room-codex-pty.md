@@ -34,9 +34,9 @@ managed implementation:
 
 ```text
 $ cargo test -p codegotchi-cli --test terminal_pty -- --nocapture
-running 1 test
+running 4 tests
 test managed_pty_preserves_direct_invocation_input_resize_ansi_and_exit_code ... ok
-test result: ok. 1 passed; 0 failed
+test result: ok. 4 passed; 0 failed
 ```
 
 That test directly executes the fixture (never `sh -c`), verifies literal
@@ -192,7 +192,12 @@ install signals; it consumes an externally supplied bounded
 `TerminalSessionSignal` receiver with `Interrupt`, `Terminate`, and
 `WindowChange` values.
 
-The first-cycle RED run intentionally failed before the seam existed:
+The adjudicated review RED runs were intentional. Before the process-control
+methods and scheduler existed, the PTY tests failed with unresolved
+PtyCodexChild interrupt/terminate methods. Before the fairness implementation,
+the scheduler regression failed with unresolved SessionWorkKind/session_work_order
+symbols. Before the composed adapter seam, the integration test could not
+import TerminalSessionEventSource/run_terminal_session_with_events.
 
 ```text
 $ cargo test -p codegotchi-cli --test terminal_session --no-fail-fast
@@ -200,29 +205,62 @@ error[E0432]: unresolved imports `TerminalSessionError`,
 `initialize_terminal_and_spawn`
 ```
 
-The focused GREEN suite now passes seven deterministic tests. It proves entry
-failure calls no spawn callback; successful entry calls exactly one callback
-with exact invocation and rows/columns; negotiated application cursor,
-bracketed paste, focus, and SGR mouse bytes are exact while disabled mouse is
-silent; resize is not transposed; VT state is bounded; and a closed signal
-receiver can be disabled without polling spin.
+The focused GREEN suite passes seven deterministic session tests. It proves
+entry failure calls no spawn callback; successful entry calls exactly one
+callback with exact invocation and rows/columns; negotiated application
+cursor, bracketed paste, focus, and SGR mouse bytes are exact while disabled
+mouse is silent; resize is not transposed; VT state is bounded; and a closed
+signal receiver can be disabled without polling spin. The direct PTY suite
+now passes four tests, including exact signal statuses and cancellation
+cleanup.
+
+The scheduler rotates signal, event, child-poll, and output branches on each
+turn. At most one bounded output chunk is handled per turn, so continuous PTY
+output cannot starve control work. Duplicate same-signal values are ignored,
+but Interrupt followed by Terminate escalates. Unix uses the PTY's
+setsid/process-group leader metadata for explicit SIGINT/SIGTERM/SIGKILL
+delivery; non-Unix retains the portable-pty fallback.
 
 The blocking PTY reader runs on one thread and sends at most 16 messages of at
-most 8 KiB each. EOF and reader errors are explicit; the reader is joined after
-child/master teardown. Child `try_wait`/`wait`, `resize`, `kill`, and process
-metadata are exposed narrowly by `PtyCodexChild`. The session restores the one
-physical guard on every success/error path and keeps Drop fallback.
+most 8 KiB each. Normal cleanup terminates or kills the PTY group, polls the
+direct child to a deadline, and joins the reader. Future-drop cleanup kills the
+retained group and reaps the direct child in PtyCodexChild Drop; it never
+detaches the reader. Expected ESRCH after a normally reaped child is ignored,
+while kill, poll, and join failures are attached to the session error. The
+bounded reader proof is scoped to the PTY child/process group and descendants,
+not escaped sessions.
 
-The real adapter proof ran with the existing direct fake PTY fixture inside an
-outer `script` PTY:
+The production-shared injected event source is used by the ignored outer-PTY
+integration tests; it is not a parallel test loop:
 
 ```text
-$ script -q -c 'stty rows 24 cols 80; TERM=xterm-256color cargo test -p codegotchi-cli --test terminal_session -- --ignored --nocapture' /tmp/codegotchi-h6c-session.scriptlog
+$ script -q -c 'stty rows 24 cols 80; TERM=xterm-256color cargo test -p codegotchi-cli --test terminal_session composed_session_adapter_delivers_exact_invocation_modes_input_and_status -- --ignored --nocapture' /tmp/codegotchi-h6c-resize.scriptlog
+test composed_session_adapter_delivers_exact_invocation_modes_input_and_status ... ok
+test result: ok. 1 passed; 0 failed; finished in 1.63s
+
+$ script -q -c 'stty rows 24 cols 80; TERM=xterm-256color cargo test -p codegotchi-cli --test terminal_session composed_session_adapter_fairly_handles_signals_during_continuous_output -- --ignored --nocapture' /tmp/codegotchi-h6c-fairness-1.scriptlog
+test composed_session_adapter_fairly_handles_signals_during_continuous_output ... ok
+test result: ok. 1 passed; 0 failed; finished in 1.12s
+```
+
+The composed adapter records exact direct argv/env and exact negotiated wire
+bytes for application cursor, bracketed paste, focus, and SGR mouse. It
+changes the outer physical PTY from 24 x 80 to 31 x 120, sends a production
+resize event/signal, and the fake child reports size=24 80 and
+resized-size=31 120, proving rows and columns are not transposed. Its child
+status is exactly 0. The continuous-output test runs the same production loop
+with a closed signal branch and asserts exact 130 for Interrupt and exact 143
+for Interrupt-to-Terminate escalation. It passed three consecutive runs
+(1.14s, 1.17s, and 1.14s).
+
+The older direct real-adapter fixture also asserts exact status 130 after the
+externally supplied Interrupt:
+
+```text
 test real_session_adapter_spawns_fixture_and_reaps_after_external_interrupt ... ok
 ```
 
-The transcript visibly contains the fixture's ANSI output, one forwarded
-interrupt, and the H6a bracketed-paste/focus/mouse restoration sequences. It
-is pre-real-Codex and pre-room evidence only. No screenshot was captured in
-this worker because its available X display socket/lock was stale and could
-not be opened; no real-Codex fidelity or room-art gate is claimed.
+All of this is fake-PTY evidence, not a real Codex run. No H6c screenshot was
+captured in this worker, and no real-Codex fidelity, first-room, launcher,
+layout, or room-art gate is claimed. The earlier H6b renderer screenshot
+remains renderer-fixture evidence only.

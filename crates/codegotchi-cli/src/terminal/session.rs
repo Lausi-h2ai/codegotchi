@@ -8,7 +8,13 @@
 
 use std::{
     fmt,
+    future::Future,
     io::{self, Read, Write},
+    pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::Duration,
 };
@@ -20,7 +26,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::CodexInvocation;
 
-use super::pty::{PtyReader, PtyWriter};
+use super::pty::PtyWriter;
 use super::{
     CodexScreen, CrosstermTerminal, PtyCodexChild, PtyCodexError, TerminalBackend,
     TerminalEntryError, TerminalGuard, TerminalRestoreError, encode_focus_event, encode_key_event,
@@ -33,9 +39,11 @@ use super::{
 /// launcher (or a later host) remains the sole owner of signal installation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TerminalSessionSignal {
-    /// Forward an interrupt byte to the Codex PTY and await child reaping.
+    /// Deliver SIGINT semantics to the Codex PTY process group and await child
+    /// reaping.
     Interrupt,
-    /// Terminate the Codex child through portable-pty and await reaping.
+    /// Deliver SIGTERM semantics to the Codex PTY process group and await
+    /// reaping.
     Terminate,
     /// Re-query the physical terminal and resize both PTY and virtual screen.
     WindowChange,
@@ -46,6 +54,22 @@ pub type TerminalSessionSignalSender = Sender<TerminalSessionSignal>;
 
 /// Receiver half of the externally-owned session signal channel.
 pub type TerminalSessionSignalReceiver = Receiver<TerminalSessionSignal>;
+
+/// Production event-source seam used by the real Crossterm adapter and
+/// composed PTY integration tests. Implementations yield the same events the
+/// session would receive from the physical terminal.
+pub type TerminalSessionEventFuture<'a> =
+    Pin<Box<dyn Future<Output = Option<Result<Event, io::Error>>> + 'a>>;
+
+pub trait TerminalSessionEventSource {
+    fn next(&mut self) -> TerminalSessionEventFuture<'_>;
+}
+
+impl TerminalSessionEventSource for EventStream {
+    fn next(&mut self) -> TerminalSessionEventFuture<'_> {
+        Box::pin(StreamExt::next(self))
+    }
+}
 
 /// Creates the bounded signal seam consumed by [`run_terminal_session`].
 #[must_use]
@@ -76,6 +100,11 @@ pub enum TerminalSessionError {
     Child(PtyCodexError),
     /// A reader thread could not be joined after the PTY was closed.
     ReaderTask(String),
+    /// Process/reader cleanup failed while unwinding a session body.
+    Cleanup {
+        error: Option<Box<Self>>,
+        failures: Vec<String>,
+    },
     /// Restoration failed after an otherwise successful body.
     Restoration(TerminalRestoreError),
     /// Both the session body and terminal restoration failed.
@@ -92,6 +121,7 @@ impl TerminalSessionError {
         match self {
             Self::Initialization(error) => error.restoration(),
             Self::Body { restoration, .. } | Self::Restoration(restoration) => Some(restoration),
+            Self::Cleanup { error, .. } => error.as_deref().and_then(Self::restoration),
             Self::SpawnUnavailable
             | Self::Spawn(_)
             | Self::Reader(_)
@@ -116,6 +146,16 @@ impl fmt::Display for TerminalSessionError {
             Self::Resize(error) => error.fmt(f),
             Self::Child(error) => error.fmt(f),
             Self::ReaderTask(error) => write!(f, "Codex PTY reader task failed: {error}"),
+            Self::Cleanup { error, failures } => {
+                if let Some(error) = error {
+                    write!(f, "{error}; ")?;
+                }
+                write!(f, "session cleanup failed")?;
+                for failure in failures {
+                    write!(f, "; {failure}")?;
+                }
+                Ok(())
+            }
             Self::Restoration(error) => write!(f, "terminal restoration failed: {error}"),
             Self::Body { error, restoration } => write!(
                 f,
@@ -133,7 +173,28 @@ impl std::error::Error for TerminalSessionError {
             Self::Reader(error) | Self::Input(error) | Self::Render(error) => Some(error),
             Self::Restoration(error) => Some(error),
             Self::Body { error, .. } => Some(error.as_ref()),
+            Self::Cleanup { error, .. } => error.as_deref().and_then(|error| error.source()),
             Self::SpawnUnavailable | Self::ReaderTask(_) => None,
+        }
+    }
+}
+
+impl TerminalSessionError {
+    fn with_cleanup(self, failures: Vec<String>) -> Self {
+        if failures.is_empty() {
+            self
+        } else {
+            Self::Cleanup {
+                error: Some(Box::new(self)),
+                failures,
+            }
+        }
+    }
+
+    fn cleanup_only(failures: Vec<String>) -> Self {
+        Self::Cleanup {
+            error: None,
+            failures,
         }
     }
 }
@@ -221,9 +282,26 @@ pub async fn run_terminal_session(
     invocation: &CodexInvocation,
     signals: TerminalSessionSignalReceiver,
 ) -> Result<portable_pty::ExitStatus, TerminalSessionError> {
+    run_terminal_session_with_events(invocation, signals, EventStream::new()).await
+}
+
+/// Runs the real terminal session with an injected event source.
+///
+/// The PTY, terminal guard, renderer, input encoder, signal handling, and
+/// cleanup path are identical to [`run_terminal_session`]. The seam exists so
+/// an integration test or a later host can provide a scripted event stream
+/// without creating a second session implementation.
+pub async fn run_terminal_session_with_events<E>(
+    invocation: &CodexInvocation,
+    signals: TerminalSessionSignalReceiver,
+    mut events: E,
+) -> Result<portable_pty::ExitStatus, TerminalSessionError>
+where
+    E: TerminalSessionEventSource,
+{
     let mut guard = TerminalGuard::enter(CrosstermTerminal::new())
         .map_err(TerminalSessionError::Initialization)?;
-    let body = run_session_after_entry(&mut guard, invocation, signals).await;
+    let body = run_session_after_entry(&mut guard, invocation, signals, &mut events).await;
     finish_guard(&mut guard, body)
 }
 
@@ -256,10 +334,89 @@ enum ReaderMessage {
     Error(io::Error),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SessionWorkKind {
+    Signal,
+    Event,
+    Poll,
+    Output,
+}
+
+/// Returns the deterministic branch order for one scheduler turn.
+///
+/// Output is intentionally rotated through the order rather than put first
+/// in a biased `select!`: if all branches are ready, each control branch wins
+/// at least once every four turns, while output remains continuously bounded
+/// to one chunk per turn.
+fn session_work_order(turn: usize) -> [SessionWorkKind; 4] {
+    const BASE: [SessionWorkKind; 4] = [
+        SessionWorkKind::Signal,
+        SessionWorkKind::Event,
+        SessionWorkKind::Poll,
+        SessionWorkKind::Output,
+    ];
+    let offset = turn % BASE.len();
+    [
+        BASE[offset],
+        BASE[(offset + 1) % BASE.len()],
+        BASE[(offset + 2) % BASE.len()],
+        BASE[(offset + 3) % BASE.len()],
+    ]
+}
+
+enum SessionWork {
+    Signal(Option<TerminalSessionSignal>),
+    Event(Option<Result<Event, io::Error>>),
+    Poll,
+    Output(Option<ReaderMessage>),
+}
+
+async fn next_session_work(
+    output_receiver: &mut Receiver<ReaderMessage>,
+    reader_done: bool,
+    event_stream: &mut impl TerminalSessionEventSource,
+    child_alive: bool,
+    signal_receiver: &mut Option<TerminalSessionSignalReceiver>,
+    poll: &mut tokio::time::Interval,
+    turn: usize,
+) -> SessionWork {
+    match session_work_order(turn)[0] {
+        SessionWorkKind::Signal => tokio::select! {
+            biased;
+            signal = receive_signal(signal_receiver), if child_alive => SessionWork::Signal(signal),
+            event = event_stream.next(), if child_alive => SessionWork::Event(event),
+            _ = poll.tick(), if child_alive => SessionWork::Poll,
+            output = output_receiver.recv(), if !reader_done => SessionWork::Output(output),
+        },
+        SessionWorkKind::Event => tokio::select! {
+            biased;
+            event = event_stream.next(), if child_alive => SessionWork::Event(event),
+            _ = poll.tick(), if child_alive => SessionWork::Poll,
+            output = output_receiver.recv(), if !reader_done => SessionWork::Output(output),
+            signal = receive_signal(signal_receiver), if child_alive => SessionWork::Signal(signal),
+        },
+        SessionWorkKind::Poll => tokio::select! {
+            biased;
+            _ = poll.tick(), if child_alive => SessionWork::Poll,
+            output = output_receiver.recv(), if !reader_done => SessionWork::Output(output),
+            signal = receive_signal(signal_receiver), if child_alive => SessionWork::Signal(signal),
+            event = event_stream.next(), if child_alive => SessionWork::Event(event),
+        },
+        SessionWorkKind::Output => tokio::select! {
+            biased;
+            output = output_receiver.recv(), if !reader_done => SessionWork::Output(output),
+            signal = receive_signal(signal_receiver), if child_alive => SessionWork::Signal(signal),
+            event = event_stream.next(), if child_alive => SessionWork::Event(event),
+            _ = poll.tick(), if child_alive => SessionWork::Poll,
+        },
+    }
+}
+
 async fn run_session_after_entry(
     guard: &mut TerminalGuard<CrosstermTerminal>,
     invocation: &CodexInvocation,
     signals: TerminalSessionSignalReceiver,
+    events: &mut impl TerminalSessionEventSource,
 ) -> Result<portable_pty::ExitStatus, TerminalSessionError> {
     let (columns, rows) = guard
         .backend_mut()
@@ -274,136 +431,155 @@ async fn run_session_after_entry(
     let reader = match child.reader() {
         Ok(reader) => reader,
         Err(error) => {
-            terminate_after_setup_failure(&mut child);
-            return Err(TerminalSessionError::Reader(io::Error::other(
-                error.to_string(),
-            )));
+            let cleanup = terminate_after_setup_failure(&mut child).await;
+            return Err(
+                TerminalSessionError::Reader(io::Error::other(error.to_string()))
+                    .with_cleanup(cleanup),
+            );
         }
     };
     let writer = match child.writer() {
         Ok(writer) => writer,
         Err(error) => {
-            terminate_after_setup_failure(&mut child);
-            return Err(TerminalSessionError::Input(io::Error::other(
-                error.to_string(),
-            )));
+            let cleanup = terminate_after_setup_failure(&mut child).await;
+            return Err(
+                TerminalSessionError::Input(io::Error::other(error.to_string()))
+                    .with_cleanup(cleanup),
+            );
         }
     };
 
-    let (mut output_receiver, reader_thread) = spawn_reader(reader);
-    let mut reader_thread = Some(reader_thread);
+    let (mut output_receiver, reader_thread, reader_cancellation) = spawn_reader(reader);
+    // Keep this guard declared before writer/child so cancellation drops the
+    // child first, unblocking the cloned PTY reader before the guard joins it.
+    let mut reader_task = Some(ReaderThreadGuard::new(reader_thread, reader_cancellation));
     let mut writer = Some(writer);
     let mut child = Some(child);
     let mut child_status = None;
     let mut reader_done = false;
     let mut signal_receiver = Some(signals);
-    let mut termination_requested = false;
-    let mut event_stream = EventStream::new();
+    let mut interrupt_sent = false;
+    let mut terminate_sent = false;
     let mut poll = tokio::time::interval(CHILD_POLL_INTERVAL);
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut body_error = None;
+    let mut fairness_turn = 0;
 
     if let Err(error) = draw_frame(guard, &core) {
         body_error = Some(error);
     }
 
     while body_error.is_none() && (child_status.is_none() || !reader_done) {
-        tokio::select! {
-            biased;
-            message = output_receiver.recv(), if !reader_done => {
-                match message {
-                    Some(ReaderMessage::Data(bytes)) => {
-                        core.process_output(&bytes);
-                        if let Err(error) = draw_frame(guard, &core) {
-                            body_error = Some(error);
-                        }
-                    }
-                    Some(ReaderMessage::Eof) | None => reader_done = true,
-                    Some(ReaderMessage::Error(error)) => {
-                        body_error = Some(TerminalSessionError::Reader(error));
+        let work = next_session_work(
+            &mut output_receiver,
+            reader_done,
+            events,
+            child_status.is_none(),
+            &mut signal_receiver,
+            &mut poll,
+            fairness_turn,
+        )
+        .await;
+        fairness_turn = (fairness_turn + 1) % 4;
+        match work {
+            SessionWork::Output(message) => match message {
+                Some(ReaderMessage::Data(bytes)) => {
+                    core.process_output(&bytes);
+                    if let Err(error) = draw_frame(guard, &core) {
+                        body_error = Some(error);
                     }
                 }
-            }
-            event = event_stream.next(), if child_status.is_none() => {
-                match event {
-                    Some(Ok(event)) => {
-                        if let Err(error) = handle_event(
-                            guard,
-                            &mut core,
-                            &mut child,
-                            &mut writer,
-                            event,
-                        ) {
-                            body_error = Some(error);
-                        }
+                Some(ReaderMessage::Eof) | None => reader_done = true,
+                Some(ReaderMessage::Error(error)) => {
+                    body_error = Some(TerminalSessionError::Reader(error));
+                }
+            },
+            SessionWork::Event(event) => match event {
+                Some(Ok(event)) => {
+                    if let Err(error) =
+                        handle_event(guard, &mut core, &mut child, &mut writer, event)
+                    {
+                        body_error = Some(error);
                     }
-                    Some(Err(error)) => body_error = Some(TerminalSessionError::Input(error)),
-                    None => body_error = Some(TerminalSessionError::Input(io::Error::new(
+                }
+                Some(Err(error)) => body_error = Some(TerminalSessionError::Input(error)),
+                None => {
+                    body_error = Some(TerminalSessionError::Input(io::Error::new(
                         io::ErrorKind::UnexpectedEof,
                         "Crossterm event stream closed",
-                    ))),
+                    )))
                 }
-            }
-            signal = receive_signal(&mut signal_receiver), if child_status.is_none() => {
-                match signal {
-                    Some(signal) => {
-                        let should_handle = matches!(
-                            signal,
-                            TerminalSessionSignal::WindowChange
-                        ) || !termination_requested;
-                        if should_handle {
-                            if let Err(error) = handle_signal(
-                                guard,
-                                &mut core,
-                                &mut child,
-                                &mut writer,
-                                signal,
-                            ) {
-                                body_error = Some(error);
-                            }
-                            if matches!(
-                                signal,
-                                TerminalSessionSignal::Interrupt
-                                    | TerminalSessionSignal::Terminate
-                            ) {
-                                termination_requested = true;
+            },
+            SessionWork::Signal(signal) => match signal {
+                Some(signal) => {
+                    let should_handle = match signal {
+                        TerminalSessionSignal::WindowChange => true,
+                        TerminalSessionSignal::Interrupt | TerminalSessionSignal::Terminate => {
+                            match signal {
+                                TerminalSessionSignal::Interrupt if !interrupt_sent => {
+                                    interrupt_sent = true;
+                                    true
+                                }
+                                TerminalSessionSignal::Terminate if !terminate_sent => {
+                                    terminate_sent = true;
+                                    true
+                                }
+                                _ => false,
                             }
                         }
+                    };
+                    if should_handle
+                        && let Err(error) = handle_signal(guard, &mut core, &mut child, signal)
+                    {
+                        body_error = Some(error);
                     }
-                    None => signal_receiver = None,
                 }
-            }
-            _ = poll.tick(), if child_status.is_none() => {
-                match poll_child(&mut child) {
-                    Ok(Some(status)) => {
-                        child_status = Some(status);
-                        writer.take();
-                        child.take();
+                None => signal_receiver = None,
+            },
+            SessionWork::Poll => match poll_child(&mut child) {
+                Ok(Some(status)) => {
+                    child_status = Some(status);
+                    let cleanup = child
+                        .as_mut()
+                        .map(cleanup_process_group)
+                        .unwrap_or_default();
+                    if !cleanup.is_empty() {
+                        body_error = Some(TerminalSessionError::cleanup_only(cleanup));
                     }
-                    Ok(None) => {}
-                    Err(error) => body_error = Some(error),
+                    writer.take();
+                    child.take();
                 }
-            }
+                Ok(None) => {}
+                Err(error) => body_error = Some(error),
+            },
         }
     }
 
     // An operational error still owns a live process. Terminate and reap it
-    // before releasing the master so no process survives restoration.
-    if body_error.is_some()
-        && let Some(mut running) = child.take()
-    {
-        let _ = running.kill();
-        let _ = running.wait();
+    // before releasing the master so no process survives restoration. The
+    // bounded poll also gives cancellation-free cleanup a liveness deadline.
+    let mut cleanup_failures = Vec::new();
+    if let Some(mut running) = child.take() {
+        let (status, failures) = shutdown_child(&mut running).await;
+        cleanup_failures.extend(failures);
+        if child_status.is_none() {
+            child_status = status;
+        }
     }
     writer.take();
     drop(output_receiver);
 
-    if let Some(reader_thread) = reader_thread.take() {
-        join_reader(reader_thread).await?;
+    if let Some(reader_task) = reader_task.as_mut()
+        && let Err(error) = reader_task.join()
+    {
+        cleanup_failures.push(error.to_string());
     }
 
     if let Some(error) = body_error {
-        return Err(error);
+        return Err(error.with_cleanup(cleanup_failures));
+    }
+    if !cleanup_failures.is_empty() {
+        return Err(TerminalSessionError::cleanup_only(cleanup_failures));
     }
     child_status.ok_or_else(|| {
         TerminalSessionError::Child(PtyCodexError::Wait {
@@ -412,17 +588,173 @@ async fn run_session_after_entry(
     })
 }
 
-fn terminate_after_setup_failure(child: &mut PtyCodexChild) {
-    let _ = child.kill();
-    let _ = child.wait();
+async fn terminate_after_setup_failure(child: &mut PtyCodexChild) -> Vec<String> {
+    shutdown_child(child).await.1
 }
 
-fn spawn_reader(reader: PtyReader) -> (Receiver<ReaderMessage>, thread::JoinHandle<()>) {
+fn cleanup_process_group(child: &mut PtyCodexChild) -> Vec<String> {
+    let mut failures = Vec::new();
+    if let Err(error) = child.kill_group()
+        && !is_process_gone(&error)
+    {
+        failures.push(format!("process-group cleanup: {error}"));
+    }
+    failures
+}
+
+fn is_process_gone(error: &PtyCodexError) -> bool {
+    #[cfg(unix)]
+    {
+        let source = match error {
+            PtyCodexError::Open { source, .. }
+            | PtyCodexError::Spawn { source, .. }
+            | PtyCodexError::Reader { source }
+            | PtyCodexError::Writer { source }
+            | PtyCodexError::Resize { source, .. }
+            | PtyCodexError::Wait { source }
+            | PtyCodexError::Kill { source }
+            | PtyCodexError::Signal { source, .. } => source,
+        };
+        source.raw_os_error() == Some(nix::errno::Errno::ESRCH as i32)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = error;
+        false
+    }
+}
+
+async fn shutdown_child(
+    child: &mut PtyCodexChild,
+) -> (Option<portable_pty::ExitStatus>, Vec<String>) {
+    const TERM_GRACE: Duration = Duration::from_millis(250);
+    const KILL_GRACE: Duration = Duration::from_millis(500);
+
+    let mut failures = Vec::new();
+    if let Err(error) = child.terminate()
+        && !is_process_gone(&error)
+    {
+        failures.push(format!("SIGTERM delivery: {error}"));
+    }
+    let term_deadline = std::time::Instant::now() + TERM_GRACE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut descendants = cleanup_process_group(child);
+                failures.append(&mut descendants);
+                return (Some(status), failures);
+            }
+            Ok(None) if std::time::Instant::now() < term_deadline => {
+                tokio::time::sleep(CHILD_POLL_INTERVAL).await;
+            }
+            Ok(None) => break,
+            Err(error) => {
+                failures.push(format!("child poll during cleanup: {error}"));
+                break;
+            }
+        }
+    }
+
+    if let Err(error) = child.kill_group()
+        && !is_process_gone(&error)
+    {
+        failures.push(format!("SIGKILL delivery: {error}"));
+    }
+    let kill_deadline = std::time::Instant::now() + KILL_GRACE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return (Some(status), failures),
+            Ok(None) if std::time::Instant::now() < kill_deadline => {
+                tokio::time::sleep(CHILD_POLL_INTERVAL).await;
+            }
+            Ok(None) => {
+                failures.push("child did not exit before cleanup deadline".to_owned());
+                return (None, failures);
+            }
+            Err(error) => {
+                failures.push(format!("child poll after SIGKILL: {error}"));
+                return (None, failures);
+            }
+        }
+    }
+}
+
+struct ReaderCancellation {
+    cancelled: Arc<AtomicBool>,
+}
+
+struct ReaderThreadGuard {
+    thread: Option<thread::JoinHandle<()>>,
+    cancellation: ReaderCancellation,
+}
+
+impl ReaderThreadGuard {
+    fn new(thread: thread::JoinHandle<()>, cancellation: ReaderCancellation) -> Self {
+        Self {
+            thread: Some(thread),
+            cancellation,
+        }
+    }
+
+    fn cancel(&self) {
+        self.cancellation.cancel();
+    }
+
+    fn join(&mut self) -> Result<(), TerminalSessionError> {
+        self.cancel();
+        self.thread
+            .take()
+            .map(|thread| {
+                thread.join().map_err(|_| {
+                    TerminalSessionError::ReaderTask("reader thread panicked".to_owned())
+                })
+            })
+            .transpose()
+            .map(|_| ())
+    }
+}
+
+impl Drop for ReaderThreadGuard {
+    fn drop(&mut self) {
+        self.cancel();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl ReaderCancellation {
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+}
+
+impl Drop for ReaderCancellation {
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}
+
+fn spawn_reader<R>(
+    reader: R,
+) -> (
+    Receiver<ReaderMessage>,
+    thread::JoinHandle<()>,
+    ReaderCancellation,
+)
+where
+    R: Read + Send + 'static,
+{
     let (sender, receiver) = mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let thread_cancelled = Arc::clone(&cancelled);
     let thread = thread::spawn(move || {
         let mut reader = reader;
         let mut chunk = vec![0; OUTPUT_CHUNK_BYTES];
         loop {
+            if thread_cancelled.load(Ordering::Acquire) {
+                break;
+            }
             match reader.read(&mut chunk) {
                 Ok(0) => {
                     let _ = sender.blocking_send(ReaderMessage::Eof);
@@ -436,6 +768,9 @@ fn spawn_reader(reader: PtyReader) -> (Receiver<ReaderMessage>, thread::JoinHand
                         break;
                     }
                 }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    thread::yield_now();
+                }
                 Err(error) => {
                     let _ = sender.blocking_send(ReaderMessage::Error(error));
                     break;
@@ -443,14 +778,7 @@ fn spawn_reader(reader: PtyReader) -> (Receiver<ReaderMessage>, thread::JoinHand
             }
         }
     });
-    (receiver, thread)
-}
-
-async fn join_reader(thread: thread::JoinHandle<()>) -> Result<(), TerminalSessionError> {
-    tokio::task::spawn_blocking(move || thread.join())
-        .await
-        .map_err(|error| TerminalSessionError::ReaderTask(error.to_string()))?
-        .map_err(|_| TerminalSessionError::ReaderTask("reader thread panicked".to_owned()))
+    (receiver, thread, ReaderCancellation { cancelled })
 }
 
 async fn receive_signal(
@@ -492,18 +820,20 @@ fn handle_signal(
     guard: &mut TerminalGuard<CrosstermTerminal>,
     core: &mut TerminalSessionCore,
     child: &mut Option<PtyCodexChild>,
-    writer: &mut Option<PtyWriter>,
     signal: TerminalSessionSignal,
 ) -> Result<(), TerminalSessionError> {
     match signal {
         TerminalSessionSignal::Interrupt => {
-            write_input(writer, b"\x03")?;
+            let Some(child) = child.as_mut() else {
+                return Ok(());
+            };
+            child.interrupt().map_err(TerminalSessionError::Child)?;
         }
         TerminalSessionSignal::Terminate => {
             let Some(child) = child.as_mut() else {
                 return Ok(());
             };
-            child.kill().map_err(TerminalSessionError::Child)?;
+            child.terminate().map_err(TerminalSessionError::Child)?;
         }
         TerminalSessionSignal::WindowChange => {
             resize_session(guard, core, child.as_ref())?;
@@ -565,7 +895,10 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use super::{ReaderMessage, TerminalSessionError, finish_guard, spawn_reader, write_input};
+    use super::{
+        ReaderMessage, TerminalSessionError, finish_guard, session_work_order, spawn_reader,
+        write_input,
+    };
     use crate::terminal::{TerminalBackend, TerminalGuard, TerminalStep};
 
     struct ScriptedReader {
@@ -599,7 +932,7 @@ mod tests {
 
     #[tokio::test]
     async fn reader_forwards_output_and_eof_then_joins_without_hanging() {
-        let (mut receiver, thread) = spawn_reader(Box::new(ScriptedReader::new([
+        let (mut receiver, thread, cancellation) = spawn_reader(Box::new(ScriptedReader::new([
             Ok(b"ansi".to_vec()),
             Ok(Vec::new()),
         ])));
@@ -610,14 +943,17 @@ mod tests {
         ));
         assert!(matches!(receiver.recv().await, Some(ReaderMessage::Eof)));
         drop(receiver);
+        drop(cancellation);
         thread.join().expect("reader thread should terminate");
     }
 
     #[tokio::test]
     async fn reader_forwards_errors_and_does_not_spin_after_failure() {
-        let (mut receiver, thread) = spawn_reader(Box::new(ScriptedReader::new([Err(
-            io::Error::new(io::ErrorKind::BrokenPipe, "reader failed"),
-        )])));
+        let (mut receiver, thread, cancellation) =
+            spawn_reader(Box::new(ScriptedReader::new([Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "reader failed",
+            ))])));
 
         let message = tokio::time::timeout(std::time::Duration::from_secs(1), receiver.recv())
             .await
@@ -628,21 +964,33 @@ mod tests {
             ReaderMessage::Error(error) if error.kind() == io::ErrorKind::BrokenPipe
         ));
         drop(receiver);
+        drop(cancellation);
         thread.join().expect("reader thread should terminate");
     }
 
     #[tokio::test]
     async fn reader_backpressure_stops_the_producer_at_the_bounded_channel() {
-        let (receiver, thread) = spawn_reader(Box::new(RepeatingReader));
+        let (receiver, thread, cancellation) = spawn_reader(Box::new(RepeatingReader));
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         assert!(
             !thread.is_finished(),
             "producer should block instead of accumulating unbounded output"
         );
         drop(receiver);
+        drop(cancellation);
         thread
             .join()
             .expect("reader should stop after receiver closes");
+    }
+
+    #[test]
+    fn session_work_order_rotates_output_behind_every_control_branch() {
+        use super::SessionWorkKind::{Event, Output, Poll, Signal};
+
+        assert_eq!(session_work_order(0), [Signal, Event, Poll, Output]);
+        assert_eq!(session_work_order(1), [Event, Poll, Output, Signal]);
+        assert_eq!(session_work_order(2), [Poll, Output, Signal, Event]);
+        assert_eq!(session_work_order(3), [Output, Signal, Event, Poll]);
     }
 
     struct RecordingWriter {

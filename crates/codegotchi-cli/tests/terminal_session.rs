@@ -1,19 +1,26 @@
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::ffi::OsString;
+use std::fs;
+use std::future::Future;
 use std::io;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::OnceLock;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use codegotchi_cli::CodexInvocation;
 use codegotchi_cli::terminal::{
-    TerminalBackend, TerminalSessionCore, TerminalSessionError, TerminalSessionSignal,
-    initialize_terminal_and_spawn, render_codex, run_terminal_session,
-    terminal_session_signal_channel,
+    TerminalBackend, TerminalSessionCore, TerminalSessionError, TerminalSessionEventSource,
+    TerminalSessionSignal, initialize_terminal_and_spawn, render_codex, run_terminal_session,
+    run_terminal_session_with_events, terminal_session_signal_channel,
 };
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::{buffer::Buffer, layout::Rect, style::Color};
+use tokio::sync::Mutex;
 
 #[derive(Default)]
 struct BackendState {
@@ -216,9 +223,170 @@ fn mouse_disabled_mode_emits_no_bytes_even_through_core_seam() {
     assert_eq!(receiver.try_recv(), Ok(TerminalSessionSignal::WindowChange));
 }
 
+struct ScriptedEvents {
+    events: VecDeque<Event>,
+    ready_at: Option<tokio::time::Instant>,
+}
+
+impl ScriptedEvents {
+    fn new(events: impl IntoIterator<Item = Event>) -> Self {
+        Self {
+            events: events.into_iter().collect(),
+            ready_at: None,
+        }
+    }
+}
+
+impl TerminalSessionEventSource for ScriptedEvents {
+    fn next(&mut self) -> Pin<Box<dyn Future<Output = Option<Result<Event, io::Error>>> + '_>> {
+        let this = self;
+        Box::pin(async move {
+            let ready_at = *this
+                .ready_at
+                .get_or_insert_with(|| tokio::time::Instant::now() + Duration::from_millis(150));
+            tokio::time::sleep_until(ready_at).await;
+            let event = this.events.pop_front();
+            this.ready_at = None;
+            match event {
+                Some(event) => Some(Ok(event)),
+                None => std::future::pending().await,
+            }
+        })
+    }
+}
+
+struct PendingEvents;
+
+impl TerminalSessionEventSource for PendingEvents {
+    fn next(&mut self) -> Pin<Box<dyn Future<Output = Option<Result<Event, io::Error>>> + '_>> {
+        Box::pin(std::future::pending())
+    }
+}
+
+fn outer_pty_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+#[tokio::test]
+#[ignore = "requires running the test process inside a real outer PTY"]
+async fn composed_session_adapter_fairly_handles_signals_during_continuous_output() {
+    let _outer_pty = outer_pty_lock().lock().await;
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake-codex-flood-pty.sh");
+    for (mode, first, second, expected) in [
+        ("--interrupt", TerminalSessionSignal::Interrupt, None, 130),
+        (
+            "--ignore-interrupt",
+            TerminalSessionSignal::Interrupt,
+            Some(TerminalSessionSignal::Terminate),
+            143,
+        ),
+    ] {
+        let invocation = CodexInvocation {
+            program: fixture.clone(),
+            arguments: vec![mode.into()],
+            environment: Vec::new(),
+        };
+        let (sender, receiver) = terminal_session_signal_channel(4);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            sender
+                .send(first)
+                .await
+                .expect("session receives first signal");
+            if let Some(second) = second {
+                tokio::time::sleep(Duration::from_millis(30)).await;
+                sender
+                    .send(second)
+                    .await
+                    .expect("session receives escalation signal");
+            }
+        });
+
+        let status = tokio::time::timeout(
+            Duration::from_secs(3),
+            run_terminal_session_with_events(&invocation, receiver, PendingEvents),
+        )
+        .await
+        .expect("signal should not starve behind PTY output")
+        .expect("flood fixture should restore and return its status");
+        assert_eq!(status.exit_code(), expected);
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires running the test process inside a real outer PTY"]
+async fn composed_session_adapter_delivers_exact_invocation_modes_input_and_status() {
+    let _outer_pty = outer_pty_lock().lock().await;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is before Unix epoch")
+        .as_nanos();
+    let log = std::env::temp_dir().join(format!(
+        "codegotchi-composed-session-{}-{timestamp}.log",
+        std::process::id()
+    ));
+    let invocation = CodexInvocation {
+        program: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/fake-codex-composed-pty.sh"),
+        arguments: vec!["--literal".into(), "argument with spaces".into()],
+        environment: vec![
+            ("FAKE_COMPOSED_LOG".into(), log.as_os_str().into()),
+            ("FAKE_COMPOSED_ENV".into(), "exact-value".into()),
+        ],
+    };
+    let events = ScriptedEvents::new([
+        Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)),
+        Event::Paste("a\nb".to_owned()),
+        Event::FocusGained,
+        Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 4,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        }),
+        // Crossterm reports columns, rows. The production adapter re-queries
+        // the changed outer PTY and forwards rows, columns to the child.
+        Event::Resize(120, 31),
+    ]);
+    let (sender, receiver) = terminal_session_signal_channel(2);
+    let resize_task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(450)).await;
+        let result = std::process::Command::new("stty")
+            .args(["rows", "31", "cols", "120"])
+            .status();
+        sender
+            .send(TerminalSessionSignal::WindowChange)
+            .await
+            .expect("session should still receive a resize signal");
+        result.expect("resize the outer test PTY").success()
+    });
+
+    let status = run_terminal_session_with_events(&invocation, receiver, events)
+        .await
+        .expect("composed fixture should exit and restore");
+    assert!(resize_task.await.expect("resize task should not panic"));
+    assert_eq!(status.exit_code(), 0);
+    let output = fs::read_to_string(&log).expect("fixture should record direct adapter inputs");
+    assert!(output.starts_with(
+        "argc=2\narg[1]=--literal\narg[2]=argument with spaces\nenv=exact-value\nsize=24 80\n"
+    ));
+    assert!(output.contains("1b4f411b5b3230307e610a621b5b3230317e1b5b491b5b3c303b353b364d\n"));
+    assert!(output.ends_with("resized-size=31 120\n"));
+    fs::remove_file(log).expect("remove composed adapter log");
+
+    // Do not leave the outer PTY resized for a later test in the same script.
+    std::process::Command::new("stty")
+        .args(["rows", "24", "cols", "80"])
+        .status()
+        .expect("restore the outer test PTY");
+}
+
 #[tokio::test]
 #[ignore = "requires running the test process inside a real outer PTY"]
 async fn real_session_adapter_spawns_fixture_and_reaps_after_external_interrupt() {
+    let _outer_pty = outer_pty_lock().lock().await;
     let invocation = CodexInvocation {
         program: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake-codex-pty.sh"),
         arguments: vec!["--session-adapter".into()],
@@ -241,5 +409,5 @@ async fn real_session_adapter_spawns_fixture_and_reaps_after_external_interrupt(
     let status = run_terminal_session(&invocation, receiver)
         .await
         .expect("fixture session should restore and return its child status");
-    assert!(!status.success());
+    assert_eq!(status.exit_code(), 130);
 }

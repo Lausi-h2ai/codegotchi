@@ -1,6 +1,11 @@
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
+#[cfg(unix)]
+use nix::{
+    sys::signal::{Signal, kill, killpg},
+    unistd::Pid,
+};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use thiserror::Error;
 
@@ -51,6 +56,39 @@ pub enum PtyCodexError {
         #[source]
         source: io::Error,
     },
+    #[error("could not send {signal} to Codex process group: {source}")]
+    Signal {
+        signal: &'static str,
+        #[source]
+        source: io::Error,
+    },
+}
+
+/// A signal understood by the narrow PTY process-control seam.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PtySignal {
+    Interrupt,
+    Terminate,
+    Kill,
+}
+
+impl PtySignal {
+    #[cfg(unix)]
+    const fn unix(self) -> Signal {
+        match self {
+            Self::Interrupt => Signal::SIGINT,
+            Self::Terminate => Signal::SIGTERM,
+            Self::Kill => Signal::SIGKILL,
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Interrupt => "SIGINT",
+            Self::Terminate => "SIGTERM",
+            Self::Kill => "SIGKILL",
+        }
+    }
 }
 
 /// A Codex process attached directly to a native PTY.
@@ -61,6 +99,8 @@ pub enum PtyCodexError {
 pub struct PtyCodexChild {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
+    #[cfg(unix)]
+    process_group: Option<i32>,
 }
 
 impl PtyCodexChild {
@@ -99,7 +139,17 @@ impl PtyCodexChild {
             })?;
         drop(slave);
 
-        Ok(Self { master, child })
+        #[cfg(unix)]
+        let process_group = master
+            .process_group_leader()
+            .or_else(|| child.process_id().map(|pid| pid as i32));
+
+        Ok(Self {
+            master,
+            child,
+            #[cfg(unix)]
+            process_group,
+        })
     }
 
     /// Returns an owned reader that can be moved to a blocking reader thread.
@@ -169,10 +219,75 @@ impl PtyCodexChild {
             .map_err(|source| PtyCodexError::Kill { source })
     }
 
+    /// Delivers SIGINT semantics to the complete PTY process group on Unix.
+    /// Other platforms fall back to portable-pty's child termination API.
+    pub fn interrupt(&mut self) -> Result<(), PtyCodexError> {
+        self.signal(PtySignal::Interrupt)
+    }
+
+    /// Delivers SIGTERM semantics to the complete PTY process group on Unix.
+    /// Other platforms fall back to portable-pty's child termination API.
+    pub fn terminate(&mut self) -> Result<(), PtyCodexError> {
+        self.signal(PtySignal::Terminate)
+    }
+
+    /// Delivers SIGKILL semantics to the complete PTY process group on Unix.
+    /// Other platforms fall back to portable-pty's child termination API.
+    pub(crate) fn kill_group(&mut self) -> Result<(), PtyCodexError> {
+        self.signal(PtySignal::Kill)
+    }
+
+    fn signal(&mut self, signal: PtySignal) -> Result<(), PtyCodexError> {
+        #[cfg(unix)]
+        {
+            let Some(process_group) = self.process_group else {
+                let Some(pid) = self.child.process_id() else {
+                    return Err(PtyCodexError::Signal {
+                        signal: signal.name(),
+                        source: io::Error::new(
+                            io::ErrorKind::NotFound,
+                            "Codex child has no process identifier",
+                        ),
+                    });
+                };
+                return kill(Pid::from_raw(pid as i32), Some(signal.unix())).map_err(|error| {
+                    PtyCodexError::Signal {
+                        signal: signal.name(),
+                        source: io::Error::from_raw_os_error(error as i32),
+                    }
+                });
+            };
+            let process_group = Pid::from_raw(process_group);
+            killpg(process_group, signal.unix()).map_err(|error| PtyCodexError::Signal {
+                signal: signal.name(),
+                source: io::Error::from_raw_os_error(error as i32),
+            })
+        }
+
+        #[cfg(not(unix))]
+        {
+            self.child.kill().map_err(|source| PtyCodexError::Signal {
+                signal: signal.name(),
+                source,
+            })
+        }
+    }
+
     /// Returns the native child process identifier when the PTY backend has
     /// one. This is metadata only; the session retains process ownership here.
     #[must_use]
     pub fn process_id(&self) -> Option<u32> {
         self.child.process_id()
+    }
+}
+
+impl Drop for PtyCodexChild {
+    fn drop(&mut self) {
+        // A dropped async session has no opportunity to await its cleanup
+        // future. Kill the retained process group and reap the direct child
+        // synchronously as a final liveness guard; normal session paths still
+        // report cleanup errors before this fallback runs.
+        let _ = self.kill_group();
+        let _ = self.child.wait();
     }
 }

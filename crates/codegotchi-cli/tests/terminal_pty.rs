@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use codegotchi_cli::{CodexInvocation, PtyCodexChild};
 
@@ -109,4 +109,125 @@ fn managed_pty_preserves_direct_invocation_input_resize_ansi_and_exit_code() {
     assert!(output.contains("FAKE_CODEX_INPUT=<input delivered through pty>"));
     assert!(output.contains("FAKE_CODEX_SIZE=<31 120>"));
     assert_eq!(status.exit_code(), 23);
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_pty_preserves_sigint_and_sigterm_exit_statuses() {
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake-codex-signal-pty.sh");
+
+    let invocation = CodexInvocation {
+        program: fixture.clone(),
+        arguments: vec!["--interrupt".into()],
+        environment: Vec::new(),
+    };
+    let mut interrupt_child =
+        PtyCodexChild::spawn(&invocation, 24, 80).expect("spawn SIGINT fixture in PTY");
+    let mut interrupt_reader = interrupt_child.reader().expect("clone SIGINT reader");
+    read_until(&mut interrupt_reader, b"FAKE_SIGNAL_READY");
+    interrupt_child
+        .interrupt()
+        .expect("deliver SIGINT to the PTY process group");
+    let interrupt_status = interrupt_child.wait().expect("reap SIGINT fixture");
+    assert_eq!(interrupt_status.exit_code(), 130);
+
+    let invocation = CodexInvocation {
+        program: fixture,
+        arguments: vec!["--terminate".into()],
+        environment: Vec::new(),
+    };
+    let mut terminate_child =
+        PtyCodexChild::spawn(&invocation, 24, 80).expect("spawn SIGTERM fixture in PTY");
+    let mut terminate_reader = terminate_child.reader().expect("clone SIGTERM reader");
+    read_until(&mut terminate_reader, b"FAKE_SIGNAL_READY");
+    terminate_child
+        .terminate()
+        .expect("deliver SIGTERM to the PTY process group");
+    let terminate_status = terminate_child.wait().expect("reap SIGTERM fixture");
+    assert_eq!(terminate_status.exit_code(), 143);
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_pty_escalates_from_interrupt_to_terminate() {
+    let invocation = CodexInvocation {
+        program: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/fake-codex-signal-pty.sh"),
+        arguments: vec!["--ignore-interrupt".into()],
+        environment: Vec::new(),
+    };
+    let mut child = PtyCodexChild::spawn(&invocation, 24, 80).expect("spawn escalation fixture");
+    let mut reader = child.reader().expect("clone escalation reader");
+    read_until(&mut reader, b"FAKE_SIGNAL_READY");
+    child.interrupt().expect("deliver first SIGINT");
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    child.terminate().expect("deliver escalating SIGTERM");
+    let status = child.wait().expect("reap escalation fixture");
+    assert_eq!(status.exit_code(), 143);
+}
+
+#[cfg(unix)]
+#[test]
+fn dropping_managed_pty_kills_descendant_and_unblocks_reader() {
+    let temporary = TemporaryDirectory::new();
+    let descendant_file = temporary.path().join("descendant.pid");
+    let invocation = CodexInvocation {
+        program: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/fake-codex-descendant-pty.sh"),
+        arguments: vec![descendant_file.as_os_str().into()],
+        environment: Vec::new(),
+    };
+    let child = PtyCodexChild::spawn(&invocation, 24, 80).expect("spawn descendant fixture");
+    let mut reader = child.reader().expect("clone descendant reader");
+    let mut output = Vec::new();
+    read_until(&mut reader, b"FAKE_DESCENDANT_READY");
+    let reader_thread = std::thread::spawn(move || reader.read_to_end(&mut output));
+    let descendant_pid = wait_for_pid(&descendant_file);
+    drop(child);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while !reader_thread.is_finished() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "blocked PTY reader did not complete after process-group teardown"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    reader_thread
+        .join()
+        .expect("reader join should not panic")
+        .expect("reader should reach EOF after process-group cleanup");
+    assert_eventually(Duration::from_secs(2), || !process_exists(descendant_pid));
+}
+
+#[cfg(unix)]
+fn wait_for_pid(path: &Path) -> u32 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Ok(value) = fs::read_to_string(path)
+            && let Ok(pid) = value.trim().parse()
+        {
+            return pid;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "fixture did not publish PID"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(unix)]
+fn process_exists(pid: u32) -> bool {
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok()
+}
+
+#[cfg(unix)]
+fn assert_eventually(timeout: Duration, mut predicate: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + timeout;
+    while !predicate() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(predicate(), "condition did not become true before timeout");
 }

@@ -11,6 +11,7 @@ done
 printf 'FAKE_CODEX_CODEX_HOME=<%s>\r\n' "${CODEX_HOME-}"
 printf 'FAKE_CODEX_SESSION_FILE=<%s>\r\n' "${CODEGOTCHI_SESSION_FILE-}"
 
+trap 'exit 130' INT
 IFS= read -r input
 printf 'FAKE_CODEX_INPUT=<%s>\r\n' "$input"
 printf 'FAKE_CODEX_SIZE=<%s>\r\n' "$(stty size)"
