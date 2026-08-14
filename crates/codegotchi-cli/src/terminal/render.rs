@@ -28,10 +28,18 @@ pub fn render_codex(screen: &CodexScreen, area: Rect, buffer: &mut Buffer) -> Op
             let Some(y) = area.y.checked_add(row) else {
                 continue;
             };
-            let Some(destination) = buffer.cell_mut(Position { x, y }) else {
+            let Some(source) = vt_screen.cell(row, column) else {
                 continue;
             };
-            let Some(source) = vt_screen.cell(row, column) else {
+
+            let continuation_in_area = column
+                .checked_add(1)
+                .is_some_and(|next_column| next_column < visible_columns);
+            let continuation_in_buffer = continuation_in_area
+                && x.checked_add(1)
+                    .is_some_and(|next_x| buffer.cell(Position { x: next_x, y }).is_some());
+
+            let Some(destination) = buffer.cell_mut(Position { x, y }) else {
                 continue;
             };
 
@@ -44,7 +52,7 @@ pub fn render_codex(screen: &CodexScreen, area: Rect, buffer: &mut Buffer) -> Op
             // A wide lead must have its continuation inside the clipped area
             // before it is emitted. Otherwise the terminal would paint one
             // column beyond the compositor's ownership boundary.
-            if source.is_wide() && column.saturating_add(1) >= visible_columns {
+            if source.is_wide() && !continuation_in_buffer {
                 symbol = " ";
             }
             // vt100 continuation cells carry no glyph of their own. A space

@@ -122,22 +122,27 @@ each destination cell before applying foreground/background and bold, dim,
 italic, underline, and inverse (`REVERSED`) modifiers. Combining text and
 wide-cell continuation geometry are retained without emitting a duplicate
 continuation glyph; a wide lead is blanked when its continuation would be
-clipped. The VT cursor is returned only when visible and inside the clipped
-area, translated by the area origin. Zero-sized, overflowing, and partially
-clipped areas are covered without panics or writes outside the supplied area.
+clipped or absent from the backing buffer. The VT cursor is returned only when
+visible and inside the clipped area, translated by the area origin. Zero-sized,
+overflowing, and partially clipped areas are covered without panics or writes
+outside the supplied area.
 
 The focused RED run was written before the renderer and failed on the missing
-`render_codex` export. The GREEN suite uses hand-derived `Buffer` assertions
-plus a Ratatui `TestBackend` composition and covers non-zero origins, clipping,
-zero-size areas, default/ANSI/indexed/truecolor mapping, all required
-modifiers, blank-cell style, combining/wide geometry, cursor visibility and
-translation, and screen immutability:
+`render_codex` export. The GREEN suite uses hand-derived `Buffer` assertions,
+a Ratatui `TestBackend` composition, and an in-memory Crossterm backend. The
+serialization proof forces Crossterm color output only for the test, asserts
+non-reset 38/48 ANSI sequences for ANSI/indexed/RGB cells produced by the
+production renderer, and restores the prior global color policy. The suite
+covers non-zero origins, clipping (including a wide lead whose continuation is
+missing from the backing buffer), zero-size areas, default/ANSI/indexed/truecolor
+mapping, all required modifiers, blank-cell style, combining/wide geometry,
+cursor visibility and translation, and screen immutability:
 
 ```text
 $ cargo test -p codegotchi-cli --test terminal_render -- --nocapture
-running 11 tests
-... all 11 tests ... ok
-test result: ok. 11 passed; 0 failed
+running 13 tests
+... all 13 tests ... ok
+test result: ok. 13 passed; 0 failed
 ```
 
 The deterministic fixture is
@@ -146,9 +151,12 @@ hand-authored ANSI/VT bytes covering cursor placement, erase/background,
 ANSI/indexed/truecolor colors, all renderer modifiers, Unicode combining and
 wide glyphs, and hidden/visible cursor transitions through this exact
 production renderer. It uses the H6a `TerminalGuard` lifecycle and Ratatui
-Crossterm backend, holds the rendered frame for
+Crossterm backend, deliberately calls Crossterm's
+`force_color_output(true)` in the fixture process so ambient `NO_COLOR` cannot
+erase the visual proof, holds the rendered frame for
 `CODEGOTCHI_TERMINAL_FIXTURE_MS` (default 3 seconds), and restores the
-terminal on normal and error exits.
+terminal on normal and error exits. This override is fixture-only; production
+CodeGotchi rendering remains respectful of the user's `NO_COLOR` setting.
 
 PTY execution evidence (this is pre-real-Codex and pre-room, and is not a
 real-Codex fidelity or first-room gate) was captured with:
@@ -158,6 +166,16 @@ $ script -q -c 'stty rows 24 cols 80; TERM=xterm-256color CODEGOTCHI_TERMINAL_FI
 ```
 
 The resulting ANSI transcript is at
-`/tmp/codegotchi-terminal-fixture.scriptlog`. A PNG screenshot was not
-recorded in this worker run because the environment has no reachable X display
-or terminal-window capture target; no image is claimed as screenshot evidence.
+`/tmp/codegotchi-terminal-fixture.scriptlog`. The first visual capture attempt
+at `/tmp/codegotchi-codex-renderer-fixture.png` is retained as failed evidence:
+ambient `NO_COLOR=1` suppressed Crossterm's 38/48 color sequences even though
+the production `Buffer` cells retained their styles.
+
+After the fixture-only color override, the orchestrator ran the same production
+renderer in an 80 x 24 xterm on Xvfb and captured
+`/tmp/codegotchi-codex-renderer-fixture-pass2.png`. Direct image inspection on
+2026-08-14 confirmed distinct ANSI red/blue, indexed magenta/yellow, truecolor
+cyan, inverse styling, aligned wide/combining Unicode, and a correctly placed
+visible cursor with no obvious wide-cell seam. This passes the renderer fixture
+visual loop only; it remains pre-real-Codex and pre-room evidence and does not
+satisfy either later hard gate.

@@ -1,11 +1,46 @@
+use std::{
+    io::{self, Write},
+    sync::{Arc, Mutex, OnceLock},
+};
+
 use codegotchi_cli::terminal::{CodexScreen, render_codex};
+use crossterm::style::{Colored, force_color_output};
 use ratatui::{
     Terminal,
-    backend::TestBackend,
+    backend::{Backend, CrosstermBackend, TestBackend},
     buffer::{Buffer, Cell},
     layout::{Position, Rect},
     style::{Color, Modifier, Style},
 };
+
+static COLOR_OUTPUT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+struct ColorOutputPolicyRestore {
+    was_disabled: bool,
+}
+
+impl Drop for ColorOutputPolicyRestore {
+    fn drop(&mut self) {
+        force_color_output(!self.was_disabled);
+    }
+}
+
+#[derive(Clone, Default)]
+struct InMemoryWriter(Arc<Mutex<Vec<u8>>>);
+
+impl Write for InMemoryWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0
+            .lock()
+            .expect("in-memory writer lock")
+            .extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 fn render(screen: &CodexScreen, area: Rect, buffer: &mut Buffer) -> Option<Position> {
     render_codex(screen, area, buffer)
@@ -145,6 +180,68 @@ fn clips_a_wide_lead_when_its_continuation_is_outside_the_area() {
     render(&screen, buffer.area, &mut buffer);
 
     assert_eq!(buffer[(0, 0)].symbol(), " ");
+}
+
+#[test]
+fn clips_a_wide_lead_when_its_continuation_is_outside_the_backing_buffer() {
+    let mut screen = CodexScreen::new(1, 3);
+    screen.process("a界".as_bytes());
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 2, 1));
+
+    render(&screen, Rect::new(0, 0, 4, 1), &mut buffer);
+
+    assert_eq!(buffer[(0, 0)].symbol(), "a");
+    assert_eq!(buffer[(1, 0)].symbol(), " ");
+}
+
+#[test]
+fn serializes_production_rendered_colors_as_non_reset_crossterm_ansi() {
+    let _lock = COLOR_OUTPUT_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("color output test lock");
+    let was_disabled = Colored::ansi_color_disabled_memoized();
+    force_color_output(true);
+    let _restore = ColorOutputPolicyRestore { was_disabled };
+
+    let mut screen = CodexScreen::new(1, 3);
+    screen.process(b"\x1b[31;44mA\x1b[38;5;16;48;5;200mB\x1b[38;2;1;2;3;48;2;4;5;6mC");
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 3, 1));
+    render(&screen, buffer.area, &mut buffer);
+
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let mut backend = CrosstermBackend::new(InMemoryWriter(Arc::clone(&bytes)));
+    backend
+        .draw(
+            buffer
+                .content()
+                .iter()
+                .enumerate()
+                .map(|(column, cell)| (column as u16, 0, cell)),
+        )
+        .expect("serialize rendered cells");
+    let output = String::from_utf8(bytes.lock().expect("in-memory writer lock").clone())
+        .expect("ANSI output");
+
+    assert!(
+        output.contains("\x1b[38;5;1;48;5;4m"),
+        "ANSI palette colors were not serialized: {output:?}"
+    );
+    assert!(
+        output.contains("\x1b[38;5;16;48;5;200m"),
+        "indexed colors were not serialized: {output:?}"
+    );
+    assert!(
+        output.contains("\x1b[38;2;1;2;3;48;2;4;5;6m"),
+        "RGB colors were not serialized: {output:?}"
+    );
+
+    drop(_restore);
+    assert_eq!(
+        Colored::ansi_color_disabled_memoized(),
+        was_disabled,
+        "Crossterm color policy was not restored"
+    );
 }
 
 #[test]

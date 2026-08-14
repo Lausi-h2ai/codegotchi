@@ -15,6 +15,10 @@ fn main() {
 }
 
 fn run_fixture() -> Result<(), Box<dyn Error>> {
+    // This fixture is visual proof and must retain colors even under ambient NO_COLOR.
+    // Production CodeGotchi rendering continues to respect the user's setting.
+    crossterm::style::force_color_output(true);
+
     let result = TerminalGuard::run_with(CrosstermTerminal::new(), |guard| {
         draw_fixture(guard).map_err(|error| io::Error::other(error.to_string()))
     });
