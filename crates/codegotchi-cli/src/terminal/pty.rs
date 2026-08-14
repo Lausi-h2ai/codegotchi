@@ -55,6 +55,14 @@ struct InterruptiblePtyReader {
 }
 
 #[cfg(unix)]
+fn poll_error_to_io(error: filedescriptor::Error) -> io::Error {
+    match error {
+        filedescriptor::Error::Poll(source) => source,
+        error => io::Error::other(error),
+    }
+}
+
+#[cfg(unix)]
 impl Read for InterruptiblePtyReader {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
         let mut descriptor = [pollfd {
@@ -62,8 +70,8 @@ impl Read for InterruptiblePtyReader {
             events: POLLIN | POLLHUP | POLLERR,
             revents: 0,
         }];
-        let ready = poll(&mut descriptor, Some(PTY_READER_POLL_INTERVAL))
-            .map_err(|error| io::Error::other(error.to_string()))?;
+        let ready =
+            poll(&mut descriptor, Some(PTY_READER_POLL_INTERVAL)).map_err(poll_error_to_io)?;
         if ready == 0 {
             return Err(io::Error::from(io::ErrorKind::WouldBlock));
         }
@@ -665,7 +673,25 @@ impl Drop for PtyCodexChild {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+
     use super::ProcessGroupState;
+
+    #[cfg(unix)]
+    #[test]
+    fn poll_errors_preserve_os_error_kind_and_code() {
+        for (code, kind) in [
+            (nix::libc::EINTR, io::ErrorKind::Interrupted),
+            (nix::libc::EINVAL, io::ErrorKind::InvalidInput),
+        ] {
+            let error = super::poll_error_to_io(filedescriptor::Error::Poll(
+                io::Error::from_raw_os_error(code),
+            ));
+
+            assert_eq!(error.kind(), kind);
+            assert_eq!(error.raw_os_error(), Some(code));
+        }
+    }
 
     #[test]
     fn process_group_state_retains_identity_for_one_immediate_cleanup_after_reap() {
