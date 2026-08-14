@@ -18,7 +18,7 @@ pub use codex_hook::{
     translate_hook_json,
 };
 pub use codex_profile::{PersistentCodexProfile, PersistentCodexProfileGuard};
-pub use launcher::{LauncherError, ValidatedLaunch};
+pub use launcher::{LaunchRequest, LauncherError, UiMode, ValidatedLaunch, parse_launch_request};
 pub use persistence::{PersistenceError, SQLITE_SCHEMA_VERSION, SqliteStore};
 pub use protocol::{
     CleanRequest, DebugRequest, ErrorEnvelope, EventIngestRequest, EventIngestResponse,

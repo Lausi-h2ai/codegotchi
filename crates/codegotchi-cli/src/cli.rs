@@ -14,6 +14,8 @@ use crate::launcher;
 use crate::protocol::HookOutput;
 use crate::runtime_metadata::read_metadata;
 
+pub use crate::launcher::{LaunchRequest, UiMode, parse_launch_request};
+
 pub const CODEGOTCHI_ENABLE_DEBUG: &str = "CODEGOTCHI_ENABLE_DEBUG";
 
 #[derive(Debug)]

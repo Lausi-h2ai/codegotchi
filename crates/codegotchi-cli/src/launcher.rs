@@ -154,7 +154,22 @@ impl LauncherError {
 pub struct ValidatedLaunch {
     pub codex_path: PathBuf,
     pub codegotchi_executable: PathBuf,
+    pub ui_mode: UiMode,
     pub trailing_arguments: Vec<OsString>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UiMode {
+    Auto,
+    Terminal,
+    Browser,
+    Both,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LaunchRequest {
+    pub ui_mode: UiMode,
+    pub trailing_codex_arguments: Vec<OsString>,
 }
 
 /// Validates the exact launcher shape and resolves both executables without
@@ -163,13 +178,14 @@ pub fn validate(
     arguments: impl IntoIterator<Item = OsString>,
 ) -> Result<ValidatedLaunch, LauncherError> {
     let arguments = arguments.into_iter().collect::<Vec<_>>();
-    let trailing_arguments = parse_command_shape(&arguments)?;
+    let request = parse_launch_request(&arguments)?;
     let codegotchi_executable = current_codegotchi_executable()?;
     let codex_path = resolve_codex(&codegotchi_executable)?;
     Ok(ValidatedLaunch {
         codex_path,
         codegotchi_executable,
-        trailing_arguments,
+        ui_mode: request.ui_mode,
+        trailing_arguments: request.trailing_codex_arguments,
     })
 }
 
@@ -376,24 +392,95 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
     Ok(numeric_exit_status(status))
 }
 
-fn parse_command_shape(arguments: &[OsString]) -> Result<Vec<OsString>, LauncherError> {
-    if arguments.first().map(OsString::as_os_str) != Some(OsStr::new("--")) {
-        return Err(LauncherError::message(
-            "`codegotchi run` requires the exact separator `--` before the agent",
-        ));
-    }
-    if arguments.get(1).map(OsString::as_os_str) != Some(OsStr::new("codex")) {
-        let agent = arguments
-            .get(1)
-            .map(|argument| argument.to_string_lossy())
-            .unwrap_or_else(|| "<missing>".into());
+pub fn parse_launch_request<I, A>(arguments: I) -> Result<LaunchRequest, LauncherError>
+where
+    I: IntoIterator<Item = A>,
+    A: AsRef<OsStr>,
+{
+    const SUPPORTED_FORM: &str = "supported command form: `codegotchi run [--ui auto|terminal|browser|both] -- codex [arguments...]`";
+
+    let arguments = arguments
+        .into_iter()
+        .map(|argument| argument.as_ref().to_os_string())
+        .collect::<Vec<_>>();
+    let separator_index = arguments
+        .iter()
+        .position(|argument| argument == OsStr::new("--"))
+        .ok_or_else(|| {
+            LauncherError::message(format!(
+                "`codegotchi run` requires the exact separator `--` before the agent; {SUPPORTED_FORM}"
+            ))
+        })?;
+
+    let mut ui_mode = UiMode::Auto;
+    let mut saw_ui = false;
+    let mut index = 0;
+    while index < separator_index {
+        let argument = &arguments[index];
+        if argument == OsStr::new("--ui") {
+            if saw_ui {
+                return Err(LauncherError::message(format!(
+                    "duplicate `--ui` option before the separator; {SUPPORTED_FORM}"
+                )));
+            }
+            let value = arguments.get(index + 1).ok_or_else(|| {
+                LauncherError::message(format!(
+                    "`--ui` requires one of `auto`, `terminal`, `browser`, or `both`; {SUPPORTED_FORM}"
+                ))
+            })?;
+            if value == OsStr::new("--") || value == OsStr::new("--ui") {
+                return Err(LauncherError::message(format!(
+                    "`--ui` requires one of `auto`, `terminal`, `browser`, or `both`; {SUPPORTED_FORM}"
+                )));
+            }
+            ui_mode = parse_ui_mode(value, SUPPORTED_FORM)?;
+            saw_ui = true;
+            index += 2;
+            continue;
+        }
+
+        if let Some(value) = argument
+            .to_str()
+            .and_then(|argument| argument.strip_prefix("--ui="))
+        {
+            if saw_ui {
+                return Err(LauncherError::message(format!(
+                    "duplicate `--ui` option before the separator; {SUPPORTED_FORM}"
+                )));
+            }
+            if value.is_empty() {
+                return Err(LauncherError::message(format!(
+                    "`--ui` requires one of `auto`, `terminal`, `browser`, or `both`; {SUPPORTED_FORM}"
+                )));
+            }
+            ui_mode = parse_ui_mode(OsStr::new(value), SUPPORTED_FORM)?;
+            saw_ui = true;
+            index += 1;
+            continue;
+        }
+
         return Err(LauncherError::message(format!(
-            "unsupported agent `{agent}`; the only supported form is `codegotchi run -- codex [arguments...]`"
+            "unexpected pre-separator argument `{}`; CodeGotchi accepts only `--ui auto|terminal|browser|both` before the separator; {SUPPORTED_FORM}",
+            argument.to_string_lossy()
         )));
     }
 
-    let trailing = arguments.iter().skip(2).cloned().collect::<Vec<_>>();
-    if let Some(conflict) = trailing
+    if arguments.get(separator_index + 1).map(OsString::as_os_str) != Some(OsStr::new("codex")) {
+        let agent = arguments
+            .get(separator_index + 1)
+            .map(|argument| argument.to_string_lossy())
+            .unwrap_or_else(|| "<missing>".into());
+        return Err(LauncherError::message(format!(
+            "unsupported agent `{agent}`; the only supported agent is `codex`; {SUPPORTED_FORM}"
+        )));
+    }
+
+    let trailing_codex_arguments = arguments
+        .iter()
+        .skip(separator_index + 2)
+        .cloned()
+        .collect::<Vec<_>>();
+    if let Some(conflict) = trailing_codex_arguments
         .iter()
         .find(|argument| is_profile_conflict(argument))
     {
@@ -402,7 +489,24 @@ fn parse_command_shape(arguments: &[OsString]) -> Result<Vec<OsString>, Launcher
             conflict.to_string_lossy()
         )));
     }
-    Ok(trailing)
+
+    Ok(LaunchRequest {
+        ui_mode,
+        trailing_codex_arguments,
+    })
+}
+
+fn parse_ui_mode(value: &OsStr, supported_form: &str) -> Result<UiMode, LauncherError> {
+    match value {
+        value if value == OsStr::new("auto") => Ok(UiMode::Auto),
+        value if value == OsStr::new("terminal") => Ok(UiMode::Terminal),
+        value if value == OsStr::new("browser") => Ok(UiMode::Browser),
+        value if value == OsStr::new("both") => Ok(UiMode::Both),
+        value => Err(LauncherError::message(format!(
+            "unsupported `--ui` value `{}`; choose `auto|terminal|browser|both`; {supported_form}",
+            value.to_string_lossy()
+        ))),
+    }
 }
 
 fn is_profile_conflict(argument: &OsString) -> bool {
@@ -1072,4 +1176,166 @@ fn numeric_exit_status(status: ExitStatus) -> i32 {
 #[cfg(not(unix))]
 fn numeric_exit_status(status: ExitStatus) -> i32 {
     status.code().unwrap_or(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LaunchRequest, UiMode, parse_launch_request};
+    use std::ffi::OsString;
+
+    fn os(arguments: &[&str]) -> Vec<OsString> {
+        arguments.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn parses_terminal_ui_before_separator_and_preserves_codex_arguments() {
+        let parsed = parse_launch_request(os(&[
+            "--ui", "terminal", "--", "codex", "--model", "gpt-5.6",
+        ]))
+        .unwrap();
+
+        assert_eq!(
+            parsed,
+            LaunchRequest {
+                ui_mode: UiMode::Terminal,
+                trailing_codex_arguments: os(&["--model", "gpt-5.6"]),
+            }
+        );
+    }
+
+    #[test]
+    fn defaults_to_auto_without_a_pre_separator_ui_option() {
+        let parsed = parse_launch_request(os(&["--", "codex", "--search"])).unwrap();
+
+        assert_eq!(parsed.ui_mode, UiMode::Auto);
+        assert_eq!(parsed.trailing_codex_arguments, os(&["--search"]));
+    }
+
+    #[test]
+    fn preserves_codex_ui_arguments_after_the_separator() {
+        let parsed = parse_launch_request(os(&["--", "codex", "--ui", "browser"])).unwrap();
+
+        assert_eq!(parsed.ui_mode, UiMode::Auto);
+        assert_eq!(parsed.trailing_codex_arguments, os(&["--ui", "browser"]));
+
+        let equals_form = parse_launch_request(os(&["--", "codex", "--ui=browser"])).unwrap();
+        assert_eq!(equals_form.ui_mode, UiMode::Auto);
+        assert_eq!(equals_form.trailing_codex_arguments, os(&["--ui=browser"]));
+    }
+
+    #[test]
+    fn parses_each_explicit_ui_mode() {
+        for (value, expected) in [
+            ("auto", UiMode::Auto),
+            ("terminal", UiMode::Terminal),
+            ("browser", UiMode::Browser),
+            ("both", UiMode::Both),
+        ] {
+            let parsed = parse_launch_request(os(&["--ui", value, "--", "codex"])).unwrap();
+            assert_eq!(parsed.ui_mode, expected, "--ui {value}");
+        }
+    }
+
+    #[test]
+    fn parses_equals_form_before_separator() {
+        let parsed = parse_launch_request(os(&["--ui=browser", "--", "codex"])).unwrap();
+
+        assert_eq!(parsed.ui_mode, UiMode::Browser);
+        assert!(parsed.trailing_codex_arguments.is_empty());
+    }
+
+    #[test]
+    fn rejects_duplicate_pre_separator_ui_options() {
+        let error = parse_launch_request(os(&["--ui", "terminal", "--ui=browser", "--", "codex"]))
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("duplicate `--ui`"), "{error}");
+        assert!(error.contains("codegotchi run [--ui"), "{error}");
+    }
+
+    #[test]
+    fn rejects_unknown_ui_values() {
+        let error = parse_launch_request(os(&["--ui", "desktop", "--", "codex"]))
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("unsupported `--ui` value `desktop`"),
+            "{error}"
+        );
+        assert!(error.contains("auto|terminal|browser|both"), "{error}");
+    }
+
+    #[test]
+    fn rejects_missing_ui_values() {
+        for arguments in [
+            os(&["--ui", "--", "codex"]),
+            os(&["--ui", "--ui", "terminal", "--", "codex"]),
+            os(&["--ui=", "--", "codex"]),
+        ] {
+            let error = parse_launch_request(arguments).unwrap_err().to_string();
+            assert!(error.contains("`--ui` requires one of"), "{error}");
+        }
+    }
+
+    #[test]
+    fn rejects_unexpected_pre_separator_tokens() {
+        let error = parse_launch_request(os(&["terminal", "--", "codex"]))
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("unexpected pre-separator argument `terminal`"),
+            "{error}"
+        );
+        assert!(error.contains("codegotchi run [--ui"), "{error}");
+    }
+
+    #[test]
+    fn rejects_missing_separator() {
+        let error = parse_launch_request(os(&["codex"]))
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("requires the exact separator `--`"),
+            "{error}"
+        );
+        assert!(error.contains("codegotchi run [--ui"), "{error}");
+    }
+
+    #[test]
+    fn rejects_missing_or_non_codex_agent() {
+        for arguments in [os(&["--"]), os(&["--", "claude"])] {
+            let error = parse_launch_request(arguments).unwrap_err().to_string();
+
+            assert!(error.contains("unsupported agent"), "{error}");
+            assert!(error.contains("codegotchi run [--ui"), "{error}");
+        }
+    }
+
+    #[test]
+    fn rejects_each_generated_profile_conflict_in_codex_arguments() {
+        for conflict in ["-p", "-pfoo", "--profile", "--profile=foo"] {
+            let error = parse_launch_request(os(&["--", "codex", conflict]))
+                .unwrap_err()
+                .to_string();
+
+            assert!(
+                error.contains(&format!("Codex argument `{conflict}` conflicts")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn parsing_does_not_mutate_the_argument_vector() {
+        let arguments = os(&["--ui", "both", "--", "codex", "--ui=browser"]);
+        let before = arguments.clone();
+
+        let _ = parse_launch_request(arguments.clone()).unwrap();
+
+        assert_eq!(arguments, before);
+    }
 }
