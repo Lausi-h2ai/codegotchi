@@ -9,6 +9,7 @@ pub mod protocol;
 pub mod runtime;
 pub mod runtime_metadata;
 pub mod server;
+pub mod terminal;
 
 pub use classify::classify_command;
 pub use codex_hook::{
@@ -29,3 +30,4 @@ pub use runtime::{
     AuthoritativeRuntime, EventIngestReceipt, MutationReceipt, RuntimeError, RuntimeInitial,
 };
 pub use server::{MAX_REQUEST_BODY_BYTES, RunningServer, ServerError};
+pub use terminal::{PtyCodexChild, PtyCodexError};
