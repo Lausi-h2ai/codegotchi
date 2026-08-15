@@ -139,6 +139,7 @@ pub struct PresentationState {
     home: Position,
     phase: u8,
     next_blink: Duration,
+    blink_until: Duration,
 }
 
 impl PresentationState {
@@ -155,6 +156,7 @@ impl PresentationState {
             home: Position::new(0, 0),
             phase: 0,
             next_blink: Duration::from_secs(2),
+            blink_until: Duration::ZERO,
         }
     }
 
@@ -240,13 +242,19 @@ impl PresentationState {
             _ => {}
         }
 
-        // Need influence: express without repairing.
-        if generic_sleeping {
+        // Need influence: express without repairing. Needs are on the domain
+        // 0..100 scale and hunger is inverted (0 = full, 100 = starving). The
+        // bias is probabilistic so need-driven behavior never becomes an
+        // exclusive loop that stops the pet from wandering.
+        if generic_sleeping && roll < 70 {
             self.start_intent(now, IdleIntent::Yawn, Duration::from_millis(1_800), area);
             return;
         }
         if let Some(needs) = needs {
-            if needs.hunger() < 0.35 {
+            let food_roll = self.rng.next_u64() % 100;
+            let bed_roll = self.rng.next_u64() % 100;
+            let lonely_roll = self.rng.next_u64() % 100;
+            if needs.hunger() >= 65.0 && food_roll < 60 {
                 self.start_intent(
                     now,
                     IdleIntent::Inspect(RoomObject::Food),
@@ -255,7 +263,7 @@ impl PresentationState {
                 );
                 return;
             }
-            if needs.energy() < 0.25 {
+            if needs.energy() <= 25.0 && bed_roll < 55 {
                 self.start_intent(
                     now,
                     IdleIntent::Inspect(RoomObject::Bed),
@@ -264,7 +272,7 @@ impl PresentationState {
                 );
                 return;
             }
-            if needs.happiness() < 0.25 {
+            if needs.happiness() <= 25.0 && lonely_roll < 50 {
                 self.start_intent(
                     now,
                     IdleIntent::WatchCodex,
@@ -299,22 +307,12 @@ impl PresentationState {
         self.intent_started = now;
         self.intent_duration = duration;
         self.phase = 0;
-        let pose = match intent {
-            IdleIntent::Wander(_) => PetPose::WalkA,
-            IdleIntent::Sit => PetPose::Sit,
-            IdleIntent::Inspect(_) | IdleIntent::LookOutWindow | IdleIntent::WatchCodex => {
-                PetPose::Curious
-            }
-            IdleIntent::Yawn => PetPose::Yawn,
-            IdleIntent::Celebrate => PetPose::Happy,
-            IdleIntent::Worry => PetPose::Upset,
-        };
         let target = match intent {
             IdleIntent::Wander(target) => target,
             IdleIntent::Inspect(object) => anchor_for(object, area),
             _ => self.target,
         };
-        self.frame.pose = pose;
+        self.frame.pose = base_pose(intent);
         self.target = target;
     }
 
@@ -322,34 +320,56 @@ impl PresentationState {
         if self.frame.pose == PetPose::Sleep {
             return;
         }
-        // Periodic blink overrides the base pose briefly.
-        if now >= self.next_blink {
-            self.next_blink = now + Duration::from_millis(self.rng.range(2_000, 6_000));
-            if self.frame.pose == PetPose::Idle {
-                self.frame.pose = PetPose::Blink;
-            } else if self.frame.pose == PetPose::Blink {
-                self.frame.pose = PetPose::Idle;
-            }
-        }
-        // Walk A/B alternation while wandering, and step toward the target.
-        if let IdleIntent::Wander(target) = self.intent {
+        let walking = matches!(self.intent, IdleIntent::Wander(_));
+        let inspecting = matches!(self.intent, IdleIntent::Inspect(_));
+
+        // Wander and inspect step toward their target; walking alternates A/B.
+        if walking || inspecting {
             self.phase = self.phase.wrapping_add(1);
-            self.frame.pose = if self.phase.is_multiple_of(2) {
-                PetPose::WalkA
-            } else {
-                PetPose::WalkB
+            let target = match self.intent {
+                IdleIntent::Wander(target) => target,
+                _ => self.target,
             };
             let (dx, dy) = step_toward(self.frame.offset, target, self.home, 1);
             let candidate = (self.frame.offset.0 + dx, self.frame.offset.1 + dy);
             self.frame.offset = clamp_offset(candidate, area);
-        } else if matches!(self.intent, IdleIntent::Sit) {
-            self.frame.pose = PetPose::Sit;
-        } else if matches!(self.intent, IdleIntent::Inspect(_)) {
-            self.phase = self.phase.wrapping_add(1);
-            let (dx, dy) = step_toward(self.frame.offset, self.target, self.home, 1);
-            let candidate = (self.frame.offset.0 + dx, self.frame.offset.1 + dy);
-            self.frame.offset = clamp_offset(candidate, area);
         }
+
+        let base = if matches!(self.intent, IdleIntent::Wander(_)) {
+            if self.phase.is_multiple_of(2) {
+                PetPose::WalkA
+            } else {
+                PetPose::WalkB
+            }
+        } else {
+            base_pose(self.intent)
+        };
+
+        // Occasional blink during dwell poses keeps the pet visibly animated
+        // even while standing still or inspecting furniture.
+        if now >= self.next_blink {
+            self.next_blink = now + Duration::from_millis(self.rng.range(2_000, 6_000));
+            self.blink_until = now + Duration::from_millis(300);
+        }
+        let blinking = matches!(
+            base,
+            PetPose::Idle | PetPose::Sit | PetPose::Curious | PetPose::Doze
+        ) && now < self.blink_until;
+        self.frame.pose = if blinking { PetPose::Blink } else { base };
+    }
+}
+
+/// The base pose for an autonomous intent (walk A/B alternates while moving).
+fn base_pose(intent: IdleIntent) -> PetPose {
+    match intent {
+        IdleIntent::Wander(_) => PetPose::WalkA,
+        IdleIntent::Sit => PetPose::Sit,
+        IdleIntent::Inspect(_) | IdleIntent::LookOutWindow | IdleIntent::WatchCodex => {
+            PetPose::Curious
+        }
+        IdleIntent::Yawn => PetPose::Yawn,
+        IdleIntent::Celebrate => PetPose::Happy,
+        IdleIntent::Worry => PetPose::Upset,
     }
 }
 

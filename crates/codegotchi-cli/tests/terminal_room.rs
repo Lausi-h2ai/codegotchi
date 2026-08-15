@@ -231,6 +231,88 @@ fn room_renders_full_compact_and_minimal_projection() {
     );
 }
 
+/// Domain needs are 0..100 (hunger inverted). The room must render
+/// intermediate values gradually instead of collapsing every meter to 0/100.
+#[test]
+fn need_display_uses_domain_scale_gradually() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot.needs.set_hunger(25.0);
+    snapshot.needs.set_energy(50.0);
+    snapshot.needs.set_happiness(75.0);
+    snapshot.needs.set_cleanliness(0.0);
+
+    let full = Rect::new(0, 0, 120, 14);
+    let mut full_buffer = Buffer::filled(full, Cell::new(" "));
+    render_room(full, &mut full_buffer, &snapshot, &default_frame());
+    let full_text = buffer_text(&full_buffer, full.width, full.height);
+    assert!(
+        full_text.contains("Hunger ██"),
+        "hunger 25 must render as a 2/8 bar: {full_text}"
+    );
+    assert!(
+        full_text.contains("Energy ████"),
+        "energy 50 must render as a 4/8 bar: {full_text}"
+    );
+    assert!(
+        full_text.contains("Happy  ██████"),
+        "happiness 75 must render as a 6/8 bar: {full_text}"
+    );
+    assert!(
+        full_text.contains("Clean  ░"),
+        "cleanliness 0 must render as an empty bar: {full_text}"
+    );
+
+    let compact = Rect::new(0, 0, 120, 7);
+    let mut compact_buffer = Buffer::filled(compact, Cell::new(" "));
+    render_room(compact, &mut compact_buffer, &snapshot, &default_frame());
+    let compact_text = buffer_text(&compact_buffer, compact.width, compact.height);
+    for (label, value) in [("H 25", 25), ("E 50", 50), ("P 75", 75), ("C 0", 0)] {
+        assert!(
+            compact_text.contains(label),
+            "compact status missing {label} (value {value}): {compact_text}"
+        );
+    }
+}
+
+/// The Full bedroom renders the decorative furniture specified by the design
+/// (window, shelf, wardrobe, desk, plants) without replacing care objects.
+#[test]
+fn full_room_renders_decorative_furniture() {
+    let snapshot = base_snapshot(Utc::now());
+    let full = Rect::new(0, 0, 120, 14);
+    let mut buffer = Buffer::filled(full, Cell::new(" "));
+    render_room(full, &mut buffer, &snapshot, &default_frame());
+    let text = buffer_text(&buffer, full.width, full.height);
+    for (glyph, name) in [
+        ("┌────────────┐", "window"),
+        ("┌─┬─────┬────┐", "shelf"),
+        ("┌──────────┐", "wardrobe"),
+        ("┌────────────────┐", "desk"),
+        ("┌───┐", "plants"),
+    ] {
+        assert!(
+            text.contains(glyph),
+            "Full room missing {name} furniture ({glyph})"
+        );
+    }
+}
+
+/// Compact keeps at least a window and a plant; decoration disappears before
+/// care functionality.
+#[test]
+fn compact_room_keeps_window_decoration() {
+    let snapshot = base_snapshot(Utc::now());
+    let compact = Rect::new(0, 0, 120, 7);
+    let mut buffer = Buffer::filled(compact, Cell::new(" "));
+    render_room(compact, &mut buffer, &snapshot, &default_frame());
+    let text = buffer_text(&buffer, compact.width, compact.height);
+    assert!(
+        text.contains("┌──────────┐"),
+        "Compact room should keep the window: {text}"
+    );
+}
+
 /// Auto theme uses terminal defaults plus neutral gray steps so the same art
 /// stays readable on dark and light terminals.
 #[test]

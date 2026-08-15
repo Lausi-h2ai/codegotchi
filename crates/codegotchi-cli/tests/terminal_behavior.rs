@@ -195,16 +195,56 @@ fn success_and_failure_produce_short_reactions() {
 fn hungry_pet_lingers_near_food_without_care() {
     let now = Utc::now();
     let mut snapshot = base_snapshot(now);
-    snapshot.needs.set_hunger(20.0);
+    // Hunger is inverted in the domain: 0 = full, 100 = starving.
+    snapshot.needs.set_hunger(80.0);
     snapshot.activity = AgentActivityState::Idle;
 
     let mut state = PresentationState::new(13);
-    let rendered = frames(&mut state, Some(&snapshot));
+    let mut saw_curious = false;
+    let mut saw_food = false;
+    for tick in 1..=TICKS {
+        let frame = state.tick(
+            Duration::from_millis(tick as u64 * TICK_MS),
+            Some(&snapshot),
+            FULL_ROOM,
+        );
+        saw_curious |= frame.pose == PetPose::Curious;
+        saw_food |= state.current_intent() == IdleIntent::Inspect(RoomObject::Food);
+    }
+    assert!(saw_curious, "hungry pet should express attention near food");
     assert!(
-        rendered
-            .iter()
-            .any(|(_, pose, _)| *pose == PetPose::Curious),
-        "hungry pet should express attention near food"
+        saw_food,
+        "a starving pet should periodically inspect the food anchor"
+    );
+}
+
+/// A tired pet lingers near the bed anchor but never starts a nap.
+#[test]
+fn tired_pet_lingers_near_bed_without_nap() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot.needs.set_energy(10.0);
+    snapshot.activity = AgentActivityState::Idle;
+
+    let mut state = PresentationState::new(18);
+    let mut saw_bed = false;
+    let mut never_slept = true;
+    for tick in 1..=TICKS {
+        let frame = state.tick(
+            Duration::from_millis(tick as u64 * TICK_MS),
+            Some(&snapshot),
+            FULL_ROOM,
+        );
+        saw_bed |= state.current_intent() == IdleIntent::Inspect(RoomObject::Bed);
+        never_slept &= frame.pose != PetPose::Sleep;
+    }
+    assert!(
+        saw_bed,
+        "a tired pet should periodically inspect the bed anchor"
+    );
+    assert!(
+        never_slept,
+        "tiredness must never present the bed-sleep pose without a nap"
     );
 }
 
@@ -237,6 +277,17 @@ fn wander_survives_small_minimal_rooms_without_panicking() {
     }
 }
 
+/// Dwell poses blink periodically, so a standing pet never appears frozen.
+#[test]
+fn dwell_poses_blink_to_stay_animated() {
+    let mut state = PresentationState::new(20);
+    let rendered = frames(&mut state, None);
+    assert!(
+        rendered.iter().any(|(_, pose, _)| *pose == PetPose::Blink),
+        "calm pet should blink during dwell poses"
+    );
+}
+
 /// Even with critical needs the presentation state only produces presentation
 /// poses and intents; care is structurally impossible.
 #[test]
@@ -260,6 +311,46 @@ fn critical_needs_never_emit_care_intents() {
             "critical needs must not imply an authoritative nap"
         );
     }
+}
+
+/// A severely drained pet (starving, exhausted, lonely) must still produce a
+/// varied intent sequence — need bias must never pin it permanently next to
+/// the bed.
+#[test]
+fn drained_pet_still_wanders_between_anchors() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot.needs.set_hunger(100.0);
+    snapshot.needs.set_energy(0.0);
+    snapshot.needs.set_happiness(0.0);
+    snapshot.activity = AgentActivityState::Idle;
+
+    let mut state = PresentationState::new(19);
+    let mut saw_bed = false;
+    let mut saw_other = false;
+    for tick in 1..=TICKS {
+        let _ = state.tick(
+            Duration::from_millis(tick as u64 * TICK_MS),
+            Some(&snapshot),
+            FULL_ROOM,
+        );
+        match state.current_intent() {
+            IdleIntent::Inspect(RoomObject::Bed) => saw_bed = true,
+            IdleIntent::Inspect(RoomObject::Food)
+            | IdleIntent::WatchCodex
+            | IdleIntent::Wander(_)
+            | IdleIntent::Sit
+            | IdleIntent::LookOutWindow
+            | IdleIntent::Yawn
+            | IdleIntent::Inspect(_) => saw_other = true,
+            IdleIntent::Celebrate | IdleIntent::Worry => {}
+        }
+    }
+    assert!(saw_bed, "drained pet should still show bed tiredness");
+    assert!(
+        saw_other,
+        "drained pet must not be pinned next to the bed; other intents should occur"
+    );
 }
 
 #[test]

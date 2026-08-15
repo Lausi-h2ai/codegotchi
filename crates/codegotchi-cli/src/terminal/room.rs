@@ -348,6 +348,7 @@ fn render_full(
         &format!("{:?}", activity),
         auto_style(SemanticTone::Tone2),
     );
+    render_furniture_full(area, buffer);
 
     if let Some(bed) = geometry.bed {
         let bed_x = bed.x.saturating_sub(area.x);
@@ -433,6 +434,7 @@ fn render_compact(
         &format!("{:?}", activity),
         auto_style(SemanticTone::Tone2),
     );
+    render_furniture_compact(area, buffer);
 
     if let Some(bed) = geometry.bed {
         let bed_x = bed.x.saturating_sub(area.x);
@@ -541,6 +543,24 @@ fn put_sprite(area: Rect, buffer: &mut Buffer, sprite: &[&str], x: u16, y: u16) 
     }
 }
 
+/// Decorative bedroom furniture for the Full layout. Deterministic simple
+/// silhouettes; VISUAL_FIDELITY_UNVERIFIED. Placement deliberately avoids the
+/// status bars, pet home, bed, food tray, and poop slots.
+fn render_furniture_full(area: Rect, buffer: &mut Buffer) {
+    put_sprite(area, buffer, &WINDOW_FULL, 22, 1);
+    put_sprite(area, buffer, &SHELF_FULL, 40, 2);
+    put_sprite(area, buffer, &WARDROBE_FULL, 62, 3);
+    put_sprite(area, buffer, &DESK_FULL, 42, 7);
+    put_sprite(area, buffer, &PLANTS_FULL, 22, 7);
+}
+
+/// Minimal decoration for the Compact layout: decoration disappears before
+/// care functionality.
+fn render_furniture_compact(area: Rect, buffer: &mut Buffer) {
+    put_sprite(area, buffer, &WINDOW_COMPACT, 22, 0);
+    put_sprite(area, buffer, &PLANTS_COMPACT, 34, 4);
+}
+
 fn full_sprite(pose: PetPose) -> &'static [&'static str] {
     match pose {
         PetPose::Idle => &PET_FULL,
@@ -573,14 +593,15 @@ fn compact_sprite(pose: PetPose) -> &'static [&'static str] {
 }
 
 fn need_bar(value: f32) -> String {
-    let filled = (value.clamp(0.0, 1.0) * 8.0).round() as usize;
+    // Domain needs are 0..100 (hunger is inverted: 0 = full, 100 = starving).
+    let filled = ((value.clamp(0.0, 100.0) / 100.0) * 8.0).round() as usize;
     let mut bar = "█".repeat(filled);
     bar.push_str(&"░".repeat(8usize.saturating_sub(filled)));
     bar
 }
 
 fn need_percent(value: f32) -> u8 {
-    (value.clamp(0.0, 1.0) * 100.0).round() as u8
+    value.clamp(0.0, 100.0).round() as u8
 }
 
 const PET_FULL: [&str; 5] = [
@@ -660,7 +681,7 @@ const PET_DOZE_FULL: [&str; 5] = [
 const PET_SLEEP_FULL: [&str; 5] = [
     "  ▄▄▄▄▄▄  ",
     " █  ██ ██ ",
-    " █        █",
+    " █  ──  █ ",
     " █▄▄▄▄▄▄█ ",
     "  ▀▀▀▀▀▀  ",
 ];
@@ -681,6 +702,37 @@ const PET_HAPPY_COMPACT: [&str; 3] = ["▄▄▄▄▄▄▄", "█ ██ █�
 
 const PET_UPSET_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", "▀▀▀▀▀▀ "];
 
+const WINDOW_FULL: [&str; 4] = [
+    "┌────────────┐",
+    "│▀▀▀▀▀▀▀▀▀▀▀▀│",
+    "│▄▄▄▄▄▄▄▄▄▄▄▄│",
+    "└────────────┘",
+];
+
+const SHELF_FULL: [&str; 3] = ["┌─┬─────┬────┐", "│▄│▄▄▄▄▄│▄▄▄▄│", "└─┴─────┴────┘"];
+
+const WARDROBE_FULL: [&str; 6] = [
+    "┌──────────┐",
+    "│┌──┐  ┌──┐│",
+    "││  │  │  ││",
+    "│└──┘  └──┘│",
+    "│┌──┐  ┌──┐│",
+    "└──────────┘",
+];
+
+const DESK_FULL: [&str; 4] = [
+    "┌────────────────┐",
+    "│    ▄▄▄▄▄▄▄▄    │",
+    "│    ██████████  │",
+    "└────────────────┘",
+];
+
+const PLANTS_FULL: [&str; 3] = ["  ▀  ", " ▀▀▀ ", "┌───┐"];
+
+const WINDOW_COMPACT: [&str; 3] = ["┌──────────┐", "│▀▀▀▀▀▀▀▀▀▀│", "└──────────┘"];
+
+const PLANTS_COMPACT: [&str; 3] = PLANTS_FULL;
+
 const PET_DOZE_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", " ▀▀▀▀▀ "];
 
 const PET_SLEEP_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█     █", " ▀▀▀▀▀ "];
@@ -693,3 +745,56 @@ const BED_FULL: [&str; 4] = [
 ];
 
 const BED_COMPACT: [&str; 2] = ["┌────────┐", "└────────┘"];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every sprite row must have the same width; a ragged row (like the old
+    /// sleep face) corrupts the rendered glyph alignment.
+    #[test]
+    fn every_sprite_has_consistent_row_widths() {
+        let sprites: &[&[&str]] = &[
+            &PET_FULL,
+            &PET_BLINK_FULL,
+            &PET_SIT_FULL,
+            &PET_WALK_A_FULL,
+            &PET_WALK_B_FULL,
+            &PET_YAWN_FULL,
+            &PET_CURIOUS_FULL,
+            &PET_HAPPY_FULL,
+            &PET_UPSET_FULL,
+            &PET_DOZE_FULL,
+            &PET_SLEEP_FULL,
+            &PET_COMPACT,
+            &PET_BLINK_COMPACT,
+            &PET_SIT_COMPACT,
+            &PET_WALK_A_COMPACT,
+            &PET_WALK_B_COMPACT,
+            &PET_CURIOUS_COMPACT,
+            &PET_HAPPY_COMPACT,
+            &PET_UPSET_COMPACT,
+            &PET_DOZE_COMPACT,
+            &PET_SLEEP_COMPACT,
+            &BED_FULL,
+            &BED_COMPACT,
+            &WINDOW_FULL,
+            &SHELF_FULL,
+            &WARDROBE_FULL,
+            &DESK_FULL,
+            &PLANTS_FULL,
+            &WINDOW_COMPACT,
+            &PLANTS_COMPACT,
+        ];
+        for sprite in sprites {
+            let width = sprite[0].chars().count();
+            for (index, row) in sprite.iter().enumerate() {
+                assert_eq!(
+                    row.chars().count(),
+                    width,
+                    "sprite row {index} has a different width than row 0"
+                );
+            }
+        }
+    }
+}
