@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use codegotchi_cli::CodexInvocation;
+use chrono::Utc;
 use codegotchi_cli::terminal::{
     TerminalBackend, TerminalSessionCore, TerminalSessionError, TerminalSessionEventSource,
     TerminalSessionSignal, TerminalSessionStartError, initialize_terminal_and_spawn, render_codex,
@@ -18,11 +18,17 @@ use codegotchi_cli::terminal::{
     run_terminal_session_with_spawn_guard_and_initialization_recovery,
     terminal_session_signal_channel,
 };
+use codegotchi_cli::{AuthoritativeRuntime, CodexInvocation, SqliteStore};
+use codegotchi_domain::{
+    DefaultNeedProgressionStrategy, FoodInventory, Pet, PetSimulation, PetSpecies,
+    SimulationSnapshot, SystemClock,
+};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::{buffer::Buffer, layout::Rect, style::Color};
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 #[derive(Default)]
 struct BackendState {
@@ -439,7 +445,7 @@ async fn composed_session_adapter_fairly_handles_signals_during_continuous_outpu
 
         let status = tokio::time::timeout(
             Duration::from_secs(3),
-            run_terminal_session_with_events(&invocation, receiver, PendingEvents),
+            run_terminal_session_with_events(&invocation, receiver, PendingEvents, None),
         )
         .await
         .expect("signal should not starve behind PTY output")
@@ -464,7 +470,7 @@ async fn composed_session_adapter_cancellation_under_output_flood_completes() {
     local
         .run_until(async move {
             let task = tokio::task::spawn_local(async move {
-                run_terminal_session_with_events(&invocation, receiver, PendingEvents).await
+                run_terminal_session_with_events(&invocation, receiver, PendingEvents, None).await
             });
 
             tokio::time::sleep(Duration::from_millis(150)).await;
@@ -493,7 +499,7 @@ async fn composed_session_adapter_closed_signal_receiver_completes_without_spin(
 
     let status = tokio::time::timeout(
         Duration::from_secs(3),
-        run_terminal_session_with_events(&invocation, receiver, PendingEvents),
+        run_terminal_session_with_events(&invocation, receiver, PendingEvents, None),
     )
     .await
     .expect("closed signal input should not spin or hang")
@@ -525,7 +531,7 @@ async fn composed_session_adapter_cleans_descendant_after_natural_leader_exit() 
 
     let status = tokio::time::timeout(
         Duration::from_secs(2),
-        run_terminal_session_with_events(&invocation, receiver, PendingEvents),
+        run_terminal_session_with_events(&invocation, receiver, PendingEvents, None),
     )
     .await
     .expect("natural leader exit should not leave the PTY reader blocked")
@@ -585,7 +591,7 @@ async fn composed_session_adapter_delivers_exact_invocation_modes_input_and_stat
         result.expect("resize the outer test PTY").success()
     }));
 
-    let status = run_terminal_session_with_events(&invocation, receiver, events)
+    let status = run_terminal_session_with_events(&invocation, receiver, events, None)
         .await
         .expect("composed fixture should exit and restore");
     assert!(resize_task.finish().await);
@@ -603,6 +609,73 @@ async fn composed_session_adapter_delivers_exact_invocation_modes_input_and_stat
 
     // Keep explicit restoration in the success path, with Drop covering
     // assertion failures and unwinding in the outer PTY test.
+    outer_size.restore();
+}
+
+#[tokio::test]
+#[ignore = "requires running the test process inside a real outer PTY"]
+async fn room_care_events_reach_the_authoritative_runtime() {
+    let _outer_pty = outer_pty_lock().lock().await;
+    let mut outer_size = OuterPtySizeGuard::capture();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is before Unix epoch")
+        .as_nanos();
+    let database = std::env::temp_dir().join(format!(
+        "codegotchi-care-runtime-{}-{timestamp}.sqlite",
+        std::process::id()
+    ));
+    let now = Utc::now();
+    let pet = Pet::with_inventory(
+        Uuid::from_u128(1),
+        "Mochi",
+        PetSpecies::Cat,
+        now,
+        FoodInventory::starter(),
+    );
+    let snapshot: SimulationSnapshot =
+        PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot();
+    let runtime =
+        AuthoritativeRuntime::new(SqliteStore::open(&database).expect("store opens"), snapshot)
+            .expect("runtime starts");
+
+    let invocation = CodexInvocation {
+        program: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/fake-codex-composed-pty.sh"),
+        arguments: Vec::new(),
+        environment: vec![(
+            "FAKE_COMPOSED_LOG".into(),
+            std::env::temp_dir()
+                .join(format!(
+                    "codegotchi-care-fixture-{}-{timestamp}.log",
+                    std::process::id()
+                ))
+                .into_os_string(),
+        )],
+    };
+    // At a 24 row outer PTY the room is Minimal (rows 21-23). The bed
+    // affordance sits at room-relative (9..13, 1), i.e. absolute row 22.
+    let events = ScriptedEvents::new([Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: 10,
+        row: 22,
+        modifiers: KeyModifiers::NONE,
+    })]);
+    let (sender, receiver) = terminal_session_signal_channel(2);
+    let status =
+        run_terminal_session_with_events(&invocation, receiver, events, Some(runtime.clone()))
+            .await
+            .expect("care session runs and restores");
+    assert_eq!(status.exit_code(), 0);
+    let _ = sender;
+
+    let (after, _) = runtime.subscribe().expect("runtime snapshot after care");
+    assert!(
+        after.napping_until.is_some(),
+        "clicking the bed must start an authoritative nap"
+    );
+
+    fs::remove_file(&database).expect("remove care runtime database");
     outer_size.restore();
 }
 

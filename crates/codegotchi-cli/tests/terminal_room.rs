@@ -165,20 +165,35 @@ fn sleeping_without_active_nap_never_uses_the_recovery_bed() {
     render_room(area, &mut doze_buffer, &idle_doze);
     let doze_text = buffer_text(&doze_buffer, area.width, area.height);
     assert!(
-        !doze_text.contains('┌'),
-        "generic idle sleeping must not render the recovery bed"
+        doze_text.contains('┌'),
+        "the bed is permanent furniture in the Full room"
     );
     assert!(
-        doze_text.contains('z'),
+        !doze_text.contains("z z z"),
+        "generic idle sleeping must not use the recovery-sleep indicator"
+    );
+    assert_eq!(
+        doze_text.matches('z').count(),
+        1,
         "generic idle sleeping should render a harmless floor doze"
+    );
+    assert_eq!(
+        doze_buffer[(25, 9)].symbol(),
+        "▄",
+        "idle dozing leaves the bed mattress bare"
     );
 
     let mut nap_buffer = Buffer::filled(area, Cell::new(" "));
     render_room(area, &mut nap_buffer, &bed_nap);
     let nap_text = buffer_text(&nap_buffer, area.width, area.height);
     assert!(
-        nap_text.contains('┌'),
-        "authoritative nap must render the bed sleep pose"
+        nap_text.contains("z z z"),
+        "authoritative nap must render the recovery-sleep indicator"
+    );
+    assert_eq!(
+        nap_buffer[(25, 9)].symbol(),
+        "█",
+        "authoritative nap places the pet body on the bed mattress"
     );
 }
 

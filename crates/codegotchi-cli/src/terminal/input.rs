@@ -1,8 +1,200 @@
+use codegotchi_domain::SimulationSnapshot;
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
+use ratatui::layout::{Position, Rect};
+use uuid::Uuid;
 
+use super::room::room_geometry;
 use super::{CodexInputModes, MouseEncoding, MouseTrackingMode};
+
+/// Backend-compatible pointer-distance scale for one terminal-cell path unit.
+///
+/// The conversion is a stable logical interaction unit, not an inference of
+/// physical pixels: each Euclidean terminal-cell path unit contributes
+/// `16.0` to the backend `pointer_distance` metric, whose thresholds stay
+/// `1_500 ms` and `120.0`.
+pub const POINTER_DISTANCE_PER_CELL: f32 = 16.0;
+
+/// Sums Euclidean terminal-cell path lengths and converts them to the
+/// backend pointer-distance metric.
+#[must_use]
+pub fn pointer_distance(path: &[Position]) -> f32 {
+    path.windows(2)
+        .map(|segment| {
+            let dx = f32::from(segment[1].x) - f32::from(segment[0].x);
+            let dy = f32::from(segment[1].y) - f32::from(segment[0].y);
+            dx.hypot(dy)
+        })
+        .sum::<f32>()
+        * POINTER_DISTANCE_PER_CELL
+}
+
+/// Accumulates one pointer-down-to-pointer-up petting gesture in terminal
+/// cell coordinates. The backend threshold contract (duration and distance)
+/// is enforced by the caller before submitting a care request.
+#[derive(Clone, Debug, Default)]
+pub struct PetGesture {
+    started_at: Option<std::time::Instant>,
+    last: Option<Position>,
+    cells: f32,
+}
+
+impl PetGesture {
+    /// Begins a gesture at the pointer-down cell.
+    pub fn begin(point: Position) -> Self {
+        Self {
+            started_at: Some(std::time::Instant::now()),
+            last: Some(point),
+            cells: 0.0,
+        }
+    }
+
+    /// Extends the gesture path with a new pointer position.
+    pub fn move_to(&mut self, point: Position) {
+        if let Some(last) = self.last {
+            let dx = f32::from(point.x) - f32::from(last.x);
+            let dy = f32::from(point.y) - f32::from(last.y);
+            self.cells += dx.hypot(dy);
+        }
+        self.last = Some(point);
+    }
+
+    /// Completes the gesture, returning `(interaction_ms, pointer_distance)`.
+    #[must_use]
+    pub fn finish(self) -> (u64, f32) {
+        let interaction_ms = self
+            .started_at
+            .map(|start| start.elapsed().as_millis() as u64)
+            .unwrap_or(0);
+        (interaction_ms, self.cells * POINTER_DISTANCE_PER_CELL)
+    }
+
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        self.started_at.is_some()
+    }
+}
+
+/// One validated care request produced by the room's mouse surface. The
+/// terminal never mutates simulation state directly; every request goes
+/// through the authoritative runtime gateway.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RoomCareRequest {
+    Feed {
+        action_id: Uuid,
+        food_id: String,
+    },
+    Clean {
+        action_id: Uuid,
+        poop_id: Uuid,
+    },
+    Nap {
+        action_id: Uuid,
+    },
+    Pet {
+        action_id: Uuid,
+        interaction_ms: u64,
+        pointer_distance: f32,
+    },
+}
+
+/// Injection seam for authoritative care requests. The production
+/// implementation is the `AuthoritativeRuntime`; tests can record requests
+/// without a database.
+pub trait CareGateway {
+    fn feed(&self, action_id: Uuid, food_id: &str);
+    fn clean(&self, action_id: Uuid, poop_id: Uuid);
+    fn nap(&self, action_id: Uuid);
+    fn pet(&self, action_id: Uuid, interaction_ms: u64, pointer_distance: f32);
+}
+
+/// Pure room-mouse state machine. It owns petting-gesture and food-drag state
+/// and converts pane-routed mouse events into authoritative care requests.
+/// Room events never produce Codex input bytes; the caller routes by pane.
+#[derive(Clone, Debug, Default)]
+pub struct RoomInputSession {
+    gesture: Option<PetGesture>,
+    dragging_food: Option<String>,
+}
+
+impl RoomInputSession {
+    /// Processes one mouse event inside the room rectangle and returns any
+    /// completed care requests. `snapshot` is the latest authoritative state.
+    #[must_use]
+    pub fn process(
+        &mut self,
+        room: Rect,
+        snapshot: &SimulationSnapshot,
+        event: &MouseEvent,
+    ) -> Vec<RoomCareRequest> {
+        let geometry = room_geometry(room, snapshot);
+        let point = Position::new(event.column, event.row);
+        match event.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some((_, food_id)) = geometry.food_hit(point) {
+                    self.dragging_food = Some(food_id);
+                    self.gesture = None;
+                    return Vec::new();
+                }
+                if geometry.pet.contains(point) {
+                    self.gesture = Some(PetGesture::begin(point));
+                    self.dragging_food = None;
+                }
+                Vec::new()
+            }
+            MouseEventKind::Drag(_) => {
+                if let Some(gesture) = self.gesture.as_mut() {
+                    gesture.move_to(point);
+                }
+                Vec::new()
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                let mut requests = Vec::new();
+                if let Some(food_id) = self.dragging_food.take() {
+                    if geometry.pet.contains(point) || geometry.minimal {
+                        requests.push(RoomCareRequest::Feed {
+                            action_id: Uuid::new_v4(),
+                            food_id,
+                        });
+                    }
+                    return requests;
+                }
+                if let Some(gesture) = self.gesture.take() {
+                    let (interaction_ms, pointer_distance) = gesture.finish();
+                    if interaction_ms >= 1_500 && pointer_distance >= 120.0 {
+                        requests.push(RoomCareRequest::Pet {
+                            action_id: Uuid::new_v4(),
+                            interaction_ms,
+                            pointer_distance,
+                        });
+                    }
+                    return requests;
+                }
+                if let Some(poop_id) = geometry.poop_hit(point) {
+                    requests.push(RoomCareRequest::Clean {
+                        action_id: Uuid::new_v4(),
+                        poop_id,
+                    });
+                    return requests;
+                }
+                if geometry.bed.is_some_and(|bed| bed.contains(point)) {
+                    requests.push(RoomCareRequest::Nap {
+                        action_id: Uuid::new_v4(),
+                    });
+                }
+                requests
+            }
+            MouseEventKind::Up(_)
+            | MouseEventKind::Down(_)
+            | MouseEventKind::Moved
+            | MouseEventKind::ScrollLeft
+            | MouseEventKind::ScrollRight
+            | MouseEventKind::ScrollDown
+            | MouseEventKind::ScrollUp => Vec::new(),
+        }
+    }
+}
 
 /// Encodes one crossterm key event for the currently negotiated Codex modes.
 #[must_use]

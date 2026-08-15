@@ -24,9 +24,10 @@ use futures_util::StreamExt;
 use ratatui::{
     Terminal,
     backend::{Backend as RatatuiBackend, CrosstermBackend},
-    layout::Rect,
+    layout::{Position, Rect},
 };
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use uuid::Uuid;
 
 use codegotchi_domain::SimulationSnapshot;
 
@@ -35,11 +36,33 @@ use crate::runtime::{AuthoritativeRuntime, RuntimeError};
 
 use super::pty::PtyWriter;
 use super::{
-    CodexScreen, CrosstermTerminal, PtyCodexChild, PtyCodexError, TerminalBackend,
-    TerminalEntryError, TerminalGuard, TerminalLayout, TerminalRestoreError, choose_layout,
-    encode_focus_event, encode_key_event, encode_mouse_event, encode_paste, render_codex,
-    render_room,
+    CareGateway, CodexScreen, CrosstermTerminal, PtyCodexChild, PtyCodexError, RoomCareRequest,
+    RoomInputSession, TerminalBackend, TerminalEntryError, TerminalGuard, TerminalLayout,
+    TerminalRestoreError, choose_layout, encode_focus_event, encode_key_event, encode_mouse_event,
+    encode_paste, render_codex, render_room,
 };
+
+impl CareGateway for AuthoritativeRuntime {
+    fn feed(&self, action_id: Uuid, food_id: &str) {
+        // Care validation errors are normal UI feedback (for example an
+        // out-of-stock click after a stale snapshot). The authoritative
+        // snapshot broadcast is the source of truth; a rejected request
+        // simply leaves the room unchanged.
+        let _ = AuthoritativeRuntime::feed(self, action_id, food_id);
+    }
+
+    fn clean(&self, action_id: Uuid, poop_id: Uuid) {
+        let _ = AuthoritativeRuntime::clean(self, action_id, poop_id);
+    }
+
+    fn nap(&self, action_id: Uuid) {
+        let _ = AuthoritativeRuntime::nap(self, action_id);
+    }
+
+    fn pet(&self, action_id: Uuid, interaction_ms: u64, pointer_distance: f32) {
+        let _ = AuthoritativeRuntime::pet(self, action_id, interaction_ms, pointer_distance);
+    }
+}
 
 /// A host-owned signal delivered to a running terminal session.
 ///
@@ -333,7 +356,7 @@ pub async fn run_terminal_session(
     invocation: &CodexInvocation,
     signals: TerminalSessionSignalReceiver,
 ) -> Result<portable_pty::ExitStatus, TerminalSessionError> {
-    run_terminal_session_with_events(invocation, signals, EventStream::new()).await
+    run_terminal_session_with_events(invocation, signals, EventStream::new(), None).await
 }
 
 /// Runs the real terminal session with an injected event source.
@@ -346,22 +369,22 @@ pub async fn run_terminal_session_with_events<E>(
     invocation: &CodexInvocation,
     signals: TerminalSessionSignalReceiver,
     mut events: E,
+    runtime: Option<Arc<AuthoritativeRuntime>>,
 ) -> Result<portable_pty::ExitStatus, TerminalSessionError>
 where
     E: TerminalSessionEventSource,
 {
     let mut guard = TerminalGuard::enter(CrosstermTerminal::new())
         .map_err(TerminalSessionError::Initialization)?;
-    let body =
-        run_session_after_entry(
-            &mut guard,
-            invocation,
-            signals,
-            &mut events,
-            None,
-            || Ok(()),
-        )
-        .await;
+    let body = run_session_after_entry(
+        &mut guard,
+        invocation,
+        signals,
+        &mut events,
+        runtime,
+        || Ok(()),
+    )
+    .await;
     finish_guard(&mut guard, body)
 }
 
@@ -576,7 +599,7 @@ where
         )));
     }
     let mut snapshot_receiver = None;
-    if let Some(runtime) = runtime {
+    if let Some(runtime) = runtime.as_ref() {
         let (snapshot, receiver) = runtime.subscribe().map_err(TerminalSessionError::Runtime)?;
         core.set_snapshot(snapshot);
         snapshot_receiver = Some(receiver);
@@ -634,6 +657,8 @@ where
     let mut poll = tokio::time::interval(CHILD_POLL_INTERVAL);
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut fairness_turn = 0;
+    let mut room_input = RoomInputSession::default();
+    let runtime = runtime.as_ref();
 
     if body_error.is_none()
         && let Err(error) = draw_frame(
@@ -696,6 +721,8 @@ where
                         &mut resources.child,
                         &mut resources.writer,
                         event,
+                        runtime,
+                        &mut room_input,
                     ) {
                         body_error = Some(error);
                     }
@@ -1094,6 +1121,8 @@ fn handle_event<B>(
     child: &mut Option<PtyCodexChild>,
     writer: &mut Option<PtyWriter>,
     event: Event,
+    runtime: Option<&Arc<AuthoritativeRuntime>>,
+    room_input: &mut RoomInputSession,
 ) -> Result<(), TerminalSessionError>
 where
     B: RatatuiBackend<Error = io::Error>,
@@ -1101,11 +1130,40 @@ where
     if let Event::Resize(_, _) = event {
         return resize_session(compositor, core, child.as_ref());
     }
+    if let Event::Mouse(mouse) = &event {
+        let layout = core.layout();
+        let point = Position::new(mouse.column, mouse.row);
+        if layout.room.contains(point) {
+            let Some(snapshot) = core.snapshot() else {
+                return Ok(());
+            };
+            let requests = room_input.process(layout.room, snapshot, mouse);
+            if let Some(runtime) = runtime {
+                for request in requests {
+                    apply_room_request(runtime.as_ref(), request);
+                }
+            }
+            return Ok(());
+        }
+    }
     let bytes = core.encode_event(&event);
     if bytes.is_empty() {
         return Ok(());
     }
     write_input(writer, &bytes)
+}
+
+fn apply_room_request(runtime: &dyn CareGateway, request: RoomCareRequest) {
+    match request {
+        RoomCareRequest::Feed { action_id, food_id } => runtime.feed(action_id, &food_id),
+        RoomCareRequest::Clean { action_id, poop_id } => runtime.clean(action_id, poop_id),
+        RoomCareRequest::Nap { action_id } => runtime.nap(action_id),
+        RoomCareRequest::Pet {
+            action_id,
+            interaction_ms,
+            pointer_distance,
+        } => runtime.pet(action_id, interaction_ms, pointer_distance),
+    }
 }
 
 fn handle_signal<B>(
@@ -1221,15 +1279,34 @@ mod tests {
         time::Duration,
     };
 
+    use chrono::Utc;
+    use codegotchi_domain::{
+        DefaultNeedProgressionStrategy, FoodInventory, Pet, PetSimulation, PetSpecies,
+        SimulationSnapshot, SystemClock,
+    };
+    use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     use crossterm::style::{Colored, force_color_output};
     use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect};
 
     use super::{
-        ReaderMessage, ReaderThreadGuard, SessionResources, TerminalSessionCore,
-        TerminalSessionError, draw_frame, finish_guard, finish_signal_delivery, resize_compositor,
-        session_work_order, spawn_reader, write_input,
+        ReaderMessage, ReaderThreadGuard, RoomInputSession, SessionResources, TerminalSessionCore,
+        TerminalSessionError, draw_frame, finish_guard, finish_signal_delivery, handle_event,
+        resize_compositor, session_work_order, spawn_reader, write_input,
     };
     use crate::terminal::{TerminalBackend, TerminalGuard, TerminalStep};
+    use uuid::Uuid;
+
+    fn test_snapshot() -> SimulationSnapshot {
+        let now = Utc::now();
+        let pet = Pet::with_inventory(
+            Uuid::from_u128(1),
+            "Mochi",
+            PetSpecies::Cat,
+            now,
+            FoodInventory::starter(),
+        );
+        PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot()
+    }
 
     struct ScriptedReader {
         steps: VecDeque<io::Result<Vec<u8>>>,
@@ -1529,6 +1606,78 @@ mod tests {
         assert_eq!(cleared.fgcolor(), vt100::Color::Default);
         assert_eq!(cleared.bgcolor(), vt100::Color::Default);
         assert!(!cleared.bold(), "default cell must not retain stale style");
+    }
+
+    #[test]
+    fn room_mouse_events_never_reach_the_codex_writer() {
+        let compositor_bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut compositor = fixed_compositor(Arc::clone(&compositor_bytes), 80, 24);
+        let writer_bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut core = TerminalSessionCore::new(24, 80);
+        core.set_snapshot(test_snapshot());
+        let layout = core.layout();
+        let mut writer = Some(Box::new(RecordingWriter {
+            bytes: Arc::clone(&writer_bytes),
+        }) as super::PtyWriter);
+        let mut room_input = RoomInputSession::default();
+
+        let event = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: layout.room.y + 2,
+            modifiers: KeyModifiers::NONE,
+        });
+        handle_event(
+            &mut compositor,
+            &mut core,
+            &mut None,
+            &mut writer,
+            event,
+            None,
+            &mut room_input,
+        )
+        .expect("room mouse event handles without error");
+
+        assert!(
+            writer_bytes.lock().expect("writer lock").is_empty(),
+            "room mouse input must never be forwarded to the Codex PTY"
+        );
+    }
+
+    #[test]
+    fn codex_pane_mouse_events_forward_with_negotiated_encoding() {
+        let compositor_bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut compositor = fixed_compositor(Arc::clone(&compositor_bytes), 80, 24);
+        let writer_bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut core = TerminalSessionCore::new(24, 80);
+        core.process_output(b"\x1b[?1000h\x1b[?1006h");
+        let mut writer = Some(Box::new(RecordingWriter {
+            bytes: Arc::clone(&writer_bytes),
+        }) as super::PtyWriter);
+        let mut room_input = RoomInputSession::default();
+
+        let event = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        });
+        handle_event(
+            &mut compositor,
+            &mut core,
+            &mut None,
+            &mut writer,
+            event,
+            None,
+            &mut room_input,
+        )
+        .expect("codex mouse event encodes");
+
+        assert_eq!(
+            writer_bytes.lock().expect("writer lock").as_slice(),
+            b"\x1b[<0;6;3M",
+            "Codex-pane mouse must use the negotiated SGR encoding"
+        );
     }
 
     struct RestorationBackend {
