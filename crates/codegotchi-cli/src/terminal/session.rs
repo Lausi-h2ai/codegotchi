@@ -311,6 +311,18 @@ impl TerminalSessionCore {
             .tick(now, self.snapshot.as_ref(), self.layout.room);
     }
 
+    /// Triggers the presentation-only eating reaction after an authoritative
+    /// feed.
+    pub fn react_to_feed(&mut self, now: std::time::Duration) {
+        self.presentation.react_to_feed(now);
+    }
+
+    /// Triggers the presentation-only petted reaction after an authoritative
+    /// pet.
+    pub fn react_to_pet(&mut self, now: std::time::Duration) {
+        self.presentation.react_to_pet(now);
+    }
+
     /// The current deterministic presentation frame (pose + wander offset).
     #[must_use]
     pub fn presentation_frame(&self) -> PresentationFrame {
@@ -685,6 +697,7 @@ where
     let mut last_behavior_at = Duration::ZERO;
     let mut last_behavior_frame = core.presentation_frame();
     let mut fairness_turn = 0;
+    let mut event_redraw = false;
     let mut room_input = RoomInputSession::default();
     let runtime = runtime.as_ref();
 
@@ -694,6 +707,7 @@ where
                 .as_mut()
                 .expect("compositor exists when initial draw starts"),
             &core,
+            None,
         )
     {
         body_error = Some(error);
@@ -729,6 +743,7 @@ where
                                 .as_mut()
                                 .expect("compositor exists while session is rendering"),
                             &core,
+                            room_input.active_drag(),
                         )
                     {
                         body_error = Some(error);
@@ -751,8 +766,13 @@ where
                         event,
                         runtime,
                         &mut room_input,
+                        session_started.elapsed(),
                     ) {
                         body_error = Some(error);
+                    } else {
+                        // Mouse/key events can change the room (drag ghost,
+                        // eating/petted reactions), so redraw after each one.
+                        event_redraw = true;
                     }
                 }
                 Some(Err(error)) => body_error = Some(TerminalSessionError::Input(error)),
@@ -823,7 +843,7 @@ where
             },
         }
         if body_error.is_none() {
-            let mut redraw = false;
+            let mut redraw = event_redraw;
             // Autonomous presentation tick: advance at a bounded rate and
             // redraw only when the pose or wander offset changed.
             let behavior_now = session_started.elapsed();
@@ -855,6 +875,7 @@ where
                         .as_mut()
                         .expect("compositor exists while session is rendering"),
                     &core,
+                    room_input.active_drag(),
                 )
             {
                 body_error = Some(error);
@@ -1155,6 +1176,10 @@ fn poll_child(
     child.try_wait().map_err(TerminalSessionError::Child)
 }
 
+// The event dispatcher needs the compositor, core, PTY seams, the event,
+// runtime, room input, and the presentation clock; a context struct would add
+// noise for a private dispatcher.
+#[allow(clippy::too_many_arguments)]
 fn handle_event<B>(
     compositor: &mut Terminal<B>,
     core: &mut TerminalSessionCore,
@@ -1163,6 +1188,7 @@ fn handle_event<B>(
     event: Event,
     runtime: Option<&Arc<AuthoritativeRuntime>>,
     room_input: &mut RoomInputSession,
+    now: Duration,
 ) -> Result<(), TerminalSessionError>
 where
     B: RatatuiBackend<Error = io::Error>,
@@ -1181,6 +1207,11 @@ where
                 room_input.process(layout.room, snapshot, &core.presentation_frame(), mouse);
             if let Some(runtime) = runtime {
                 for request in requests {
+                    match &request {
+                        RoomCareRequest::Feed { .. } => core.react_to_feed(now),
+                        RoomCareRequest::Pet { .. } => core.react_to_pet(now),
+                        RoomCareRequest::Clean { .. } | RoomCareRequest::Nap { .. } => {}
+                    }
                     apply_room_request(runtime.as_ref(), request);
                 }
             }
@@ -1272,7 +1303,7 @@ where
     compositor
         .resize(Rect::new(0, 0, columns, rows))
         .map_err(TerminalSessionError::Render)?;
-    draw_frame(compositor, core)
+    draw_frame(compositor, core, None)
 }
 
 fn write_input(writer: &mut Option<PtyWriter>, bytes: &[u8]) -> Result<(), TerminalSessionError> {
@@ -1288,6 +1319,7 @@ fn write_input(writer: &mut Option<PtyWriter>, bytes: &[u8]) -> Result<(), Termi
 fn draw_frame<B>(
     compositor: &mut Terminal<B>,
     core: &TerminalSessionCore,
+    drag: Option<(&str, Position)>,
 ) -> Result<(), TerminalSessionError>
 where
     B: RatatuiBackend<Error = io::Error>,
@@ -1302,6 +1334,7 @@ where
                     frame.buffer_mut(),
                     snapshot,
                     &core.presentation_frame(),
+                    drag,
                 );
             }
             if let Some(cursor) = cursor {
@@ -1603,7 +1636,7 @@ mod tests {
         let mut core = TerminalSessionCore::new(24, 6);
         core.process_output(b"HELLO");
 
-        draw_frame(&mut compositor, &core).expect("first frame should render");
+        draw_frame(&mut compositor, &core, None).expect("first frame should render");
         apply_new_output(&bytes, &mut offset, &mut parser);
         assert_eq!(
             parser.screen().cell(0, 0).expect("cell exists").contents(),
@@ -1611,7 +1644,7 @@ mod tests {
         );
 
         core.process_output(b"\x1b[2J\x1b[H");
-        draw_frame(&mut compositor, &core).expect("blank frame should render");
+        draw_frame(&mut compositor, &core, None).expect("blank frame should render");
         apply_new_output(&bytes, &mut offset, &mut parser);
 
         let cell = parser.screen().cell(0, 0).expect("cell exists");
@@ -1634,7 +1667,7 @@ mod tests {
         let mut core = TerminalSessionCore::new(24, 6);
         core.process_output(b"\x1b[31;44;1mSTALE");
 
-        draw_frame(&mut compositor, &core).expect("styled frame should render");
+        draw_frame(&mut compositor, &core, None).expect("styled frame should render");
         apply_new_output(&bytes, &mut offset, &mut parser);
         let styled = parser.screen().cell(0, 0).expect("cell exists");
         assert_eq!(styled.fgcolor(), vt100::Color::Idx(1));
@@ -1681,6 +1714,7 @@ mod tests {
             event,
             None,
             &mut room_input,
+            Duration::ZERO,
         )
         .expect("room mouse event handles without error");
 
@@ -1716,6 +1750,7 @@ mod tests {
             event,
             None,
             &mut room_input,
+            Duration::ZERO,
         )
         .expect("codex mouse event encodes");
 

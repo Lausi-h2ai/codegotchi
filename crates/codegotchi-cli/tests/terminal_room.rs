@@ -5,11 +5,12 @@ use codegotchi_cli::terminal::{
 };
 use codegotchi_domain::{
     ActivityKind, AgentActivityState, DefaultNeedProgressionStrategy, FoodInventory, Pet,
-    PetBehavior, PetSimulation, PetSpecies, SimulationSnapshot, SystemClock,
+    PetBehavior, PetDemand, PetDemandKind, PetSimulation, PetSpecies, SimulationSnapshot,
+    SystemClock,
 };
 use ratatui::{
     buffer::{Buffer, Cell},
-    layout::Rect,
+    layout::{Position, Rect},
     style::Color,
 };
 use uuid::Uuid;
@@ -166,7 +167,7 @@ fn sleeping_without_active_nap_never_uses_the_recovery_bed() {
 
     let area = Rect::new(0, 0, 40, 14);
     let mut doze_buffer = Buffer::filled(area, Cell::new(" "));
-    render_room(area, &mut doze_buffer, &idle_doze, &default_frame());
+    render_room(area, &mut doze_buffer, &idle_doze, &default_frame(), None);
     let doze_text = buffer_text(&doze_buffer, area.width, area.height);
     assert!(
         doze_text.contains('┌'),
@@ -188,7 +189,7 @@ fn sleeping_without_active_nap_never_uses_the_recovery_bed() {
     );
 
     let mut nap_buffer = Buffer::filled(area, Cell::new(" "));
-    render_room(area, &mut nap_buffer, &bed_nap, &default_frame());
+    render_room(area, &mut nap_buffer, &bed_nap, &default_frame(), None);
     let nap_text = buffer_text(&nap_buffer, area.width, area.height);
     assert!(
         nap_text.contains("z z z"),
@@ -209,7 +210,7 @@ fn room_renders_full_compact_and_minimal_projection() {
 
     let full = Rect::new(0, 0, 40, 14);
     let mut full_buffer = Buffer::filled(full, Cell::new(" "));
-    render_room(full, &mut full_buffer, &snapshot, &default_frame());
+    render_room(full, &mut full_buffer, &snapshot, &default_frame(), None);
     let full_text = buffer_text(&full_buffer, full.width, full.height);
     for label in ["Hunger", "Energy", "Happy", "Clean"] {
         assert!(full_text.contains(label), "Full room missing {label}");
@@ -217,13 +218,25 @@ fn room_renders_full_compact_and_minimal_projection() {
 
     let compact = Rect::new(0, 0, 40, 7);
     let mut compact_buffer = Buffer::filled(compact, Cell::new(" "));
-    render_room(compact, &mut compact_buffer, &snapshot, &default_frame());
+    render_room(
+        compact,
+        &mut compact_buffer,
+        &snapshot,
+        &default_frame(),
+        None,
+    );
     let compact_text = buffer_text(&compact_buffer, compact.width, compact.height);
     assert!(compact_text.contains("H "), "Compact status row missing");
 
     let minimal = Rect::new(0, 0, 40, 3);
     let mut minimal_buffer = Buffer::filled(minimal, Cell::new(" "));
-    render_room(minimal, &mut minimal_buffer, &snapshot, &default_frame());
+    render_room(
+        minimal,
+        &mut minimal_buffer,
+        &snapshot,
+        &default_frame(),
+        None,
+    );
     let minimal_text = buffer_text(&minimal_buffer, minimal.width, minimal.height);
     assert!(
         minimal_text.contains("CG "),
@@ -244,7 +257,7 @@ fn need_display_uses_domain_scale_gradually() {
 
     let full = Rect::new(0, 0, 120, 14);
     let mut full_buffer = Buffer::filled(full, Cell::new(" "));
-    render_room(full, &mut full_buffer, &snapshot, &default_frame());
+    render_room(full, &mut full_buffer, &snapshot, &default_frame(), None);
     let full_text = buffer_text(&full_buffer, full.width, full.height);
     assert!(
         full_text.contains("Hunger ██"),
@@ -265,7 +278,13 @@ fn need_display_uses_domain_scale_gradually() {
 
     let compact = Rect::new(0, 0, 120, 7);
     let mut compact_buffer = Buffer::filled(compact, Cell::new(" "));
-    render_room(compact, &mut compact_buffer, &snapshot, &default_frame());
+    render_room(
+        compact,
+        &mut compact_buffer,
+        &snapshot,
+        &default_frame(),
+        None,
+    );
     let compact_text = buffer_text(&compact_buffer, compact.width, compact.height);
     for (label, value) in [("H 25", 25), ("E 50", 50), ("P 75", 75), ("C 0", 0)] {
         assert!(
@@ -282,7 +301,7 @@ fn full_room_renders_decorative_furniture() {
     let snapshot = base_snapshot(Utc::now());
     let full = Rect::new(0, 0, 120, 14);
     let mut buffer = Buffer::filled(full, Cell::new(" "));
-    render_room(full, &mut buffer, &snapshot, &default_frame());
+    render_room(full, &mut buffer, &snapshot, &default_frame(), None);
     let text = buffer_text(&buffer, full.width, full.height);
     for (glyph, name) in [
         ("┌────────────┐", "window"),
@@ -305,11 +324,104 @@ fn compact_room_keeps_window_decoration() {
     let snapshot = base_snapshot(Utc::now());
     let compact = Rect::new(0, 0, 120, 7);
     let mut buffer = Buffer::filled(compact, Cell::new(" "));
-    render_room(compact, &mut buffer, &snapshot, &default_frame());
+    render_room(compact, &mut buffer, &snapshot, &default_frame(), None);
     let text = buffer_text(&buffer, compact.width, compact.height);
     assert!(
         text.contains("┌──────────┐"),
         "Compact room should keep the window: {text}"
+    );
+}
+
+/// Pending affection/snack demands are projected as care affordances in the
+/// Full room.
+#[test]
+fn full_room_renders_pending_demand_chips() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot.pending_demands.push(PetDemand::new(
+        Uuid::from_u128(2),
+        PetDemandKind::Affection,
+        now,
+    ));
+    snapshot.pending_demands.push(PetDemand::new(
+        Uuid::from_u128(3),
+        PetDemandKind::Snack,
+        now,
+    ));
+    snapshot.pending_demands.push(PetDemand::new(
+        Uuid::from_u128(4),
+        PetDemandKind::Snack,
+        now,
+    ));
+
+    let full = Rect::new(0, 0, 120, 14);
+    let mut buffer = Buffer::filled(full, Cell::new(" "));
+    render_room(full, &mut buffer, &snapshot, &default_frame(), None);
+    let text = buffer_text(&buffer, full.width, full.height);
+    assert!(
+        text.contains("Affection x1"),
+        "Full room missing affection chip: {text}"
+    );
+    assert!(
+        text.contains("Snack x2"),
+        "Full room missing snack chip: {text}"
+    );
+
+    // Compact and Minimal also surface demand counts.
+    let compact = Rect::new(0, 0, 120, 7);
+    let mut compact_buffer = Buffer::filled(compact, Cell::new(" "));
+    render_room(
+        compact,
+        &mut compact_buffer,
+        &snapshot,
+        &default_frame(),
+        None,
+    );
+    let compact_text = buffer_text(&compact_buffer, compact.width, compact.height);
+    assert!(
+        compact_text.contains("A1 S2"),
+        "Compact status missing demand counts: {compact_text}"
+    );
+
+    let minimal = Rect::new(0, 0, 120, 3);
+    let mut minimal_buffer = Buffer::filled(minimal, Cell::new(" "));
+    render_room(
+        minimal,
+        &mut minimal_buffer,
+        &snapshot,
+        &default_frame(),
+        None,
+    );
+    let minimal_text = buffer_text(&minimal_buffer, minimal.width, minimal.height);
+    assert!(
+        minimal_text.contains("AFF") && minimal_text.contains("SNACK"),
+        "Minimal affordances missing demands: {minimal_text}"
+    );
+}
+
+/// The active food drag renders a visible ghost at the pointer cell.
+#[test]
+fn drag_ghost_renders_at_the_pointer_cell() {
+    let snapshot = base_snapshot(Utc::now());
+    let full = Rect::new(0, 0, 120, 14);
+    let mut buffer = Buffer::filled(full, Cell::new(" "));
+    render_room(
+        full,
+        &mut buffer,
+        &snapshot,
+        &default_frame(),
+        Some(("kibble", Position::new(30, 10))),
+    );
+    let cell = buffer.cell((30, 10)).expect("ghost cell exists");
+    assert_eq!(
+        cell.symbol(),
+        "K",
+        "ghost should draw the food label at the pointer"
+    );
+    let text = buffer_text(&buffer, full.width, full.height);
+    assert!(
+        text.contains("KIB"),
+        "ghost label should render in the room text"
     );
 }
 

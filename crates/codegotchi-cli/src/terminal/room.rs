@@ -9,10 +9,19 @@ use uuid::Uuid;
 use super::behavior::{
     PetPose, PresentationActivity, PresentationFrame, has_authoritative_nap, presentation_activity,
 };
+use super::sprites::{downsample2x, draw_sprite, pet_sprite};
 use super::theme::{SemanticTone, auto_style};
 
 const FULL_ROOM_HEIGHT: u16 = 14;
 const COMPACT_ROOM_HEIGHT: u16 = 7;
+
+/// One draggable food source rendered from authoritative inventory counts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FoodSource {
+    pub rect: Rect,
+    pub food_id: &'static str,
+    pub count: u32,
+}
 
 /// Stable interactive regions of the room. Rendering and mouse hit testing
 /// share this geometry so affordances always correspond to drawn objects.
@@ -22,10 +31,8 @@ pub struct RoomGeometry {
     pub pet: Rect,
     /// The bed region; a click submits an authoritative nap.
     pub bed: Option<Rect>,
-    /// The food tray region; a press starts a food drag.
-    pub food: Option<Rect>,
-    /// The food id stocked in the tray (kibble by default).
-    pub food_id: String,
+    /// Stocked draggable food sources with authoritative counts.
+    pub food_sources: Vec<FoodSource>,
     /// Authoritative poop objects with their click regions.
     pub poops: Vec<(Uuid, Rect)>,
     /// True when the room uses the Minimal layout.
@@ -33,12 +40,13 @@ pub struct RoomGeometry {
 }
 
 impl RoomGeometry {
-    /// Returns the food region and its stocked id when a press starts a drag.
+    /// Returns the stocked food id under the pointer, if any.
     #[must_use]
-    pub fn food_hit(&self, point: Position) -> Option<(Rect, String)> {
-        self.food
-            .filter(|rect| rect.contains(point))
-            .map(|rect| (rect, self.food_id.clone()))
+    pub fn food_hit(&self, point: Position) -> Option<&'static str> {
+        self.food_sources
+            .iter()
+            .find(|source| source.rect.contains(point))
+            .map(|source| source.food_id)
     }
 
     /// Returns the authoritative poop id under the pointer, if any.
@@ -72,8 +80,7 @@ pub fn room_geometry_with_frame(
         return RoomGeometry {
             pet: Rect::ZERO,
             bed: None,
-            food: None,
-            food_id: FoodKind::Kibble.id().to_owned(),
+            food_sources: Vec::new(),
             poops: Vec::new(),
             minimal: false,
         };
@@ -96,6 +103,7 @@ pub fn render_room(
     buffer: &mut Buffer,
     snapshot: &SimulationSnapshot,
     frame: &PresentationFrame,
+    drag: Option<(&str, Position)>,
 ) {
     if area.is_empty() {
         return;
@@ -107,11 +115,13 @@ pub fn render_room(
     let geometry = room_geometry_with_frame(area, snapshot, frame);
 
     match room_mode(area.height) {
-        RoomMode::Full => render_full(area, buffer, snapshot, activity, napping, frame, &geometry),
-        RoomMode::Compact => {
-            render_compact(area, buffer, snapshot, activity, napping, frame, &geometry)
-        }
-        RoomMode::Minimal => render_minimal(area, buffer, snapshot, napping),
+        RoomMode::Full => render_full(
+            area, buffer, snapshot, activity, napping, frame, &geometry, drag,
+        ),
+        RoomMode::Compact => render_compact(
+            area, buffer, snapshot, activity, napping, frame, &geometry, drag,
+        ),
+        RoomMode::Minimal => render_minimal(area, buffer, snapshot, napping, drag),
     }
 }
 
@@ -139,7 +149,7 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
             area.x.saturating_add(pet_x),
             area.y.saturating_add(4),
             (area.width.saturating_sub(pet_x)).min(14),
-            5,
+            6,
         ),
         offset,
         area,
@@ -151,13 +161,12 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
         (area.width.saturating_sub(bed_x)).min(12),
         4,
     );
-    let food = Rect::new(area.x.saturating_add(2), area.y.saturating_add(11), 12, 2);
+    let food_sources = food_sources(area, snapshot, 2, 11, 15, 16);
     let poops = poop_slots(area, snapshot, 16, 12, 3);
     RoomGeometry {
         pet,
         bed: Some(bed),
-        food: Some(food),
-        food_id: FoodKind::Kibble.id().to_owned(),
+        food_sources,
         poops,
         minimal: false,
     }
@@ -182,13 +191,12 @@ fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16
         (area.width.saturating_sub(bed_x)).min(10),
         2,
     );
-    let food = Rect::new(area.x.saturating_add(2), area.y.saturating_add(5), 10, 1);
-    let poops = poop_slots(area, snapshot, 14, 5, 2);
+    let food_sources = food_sources(area, snapshot, 2, 5, 8, 10);
+    let poops = poop_slots(area, snapshot, 44, 5, 2);
     RoomGeometry {
         pet,
         bed: Some(bed),
-        food: Some(food),
-        food_id: FoodKind::Kibble.id().to_owned(),
+        food_sources,
         poops,
         minimal: false,
     }
@@ -196,7 +204,11 @@ fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16
 
 fn minimal_geometry(area: Rect, snapshot: &SimulationSnapshot) -> RoomGeometry {
     let pet = Rect::new(area.x, area.y, 3, 1);
-    let food = Rect::new(area.x, area.y.saturating_add(1), 7, 1);
+    let food_sources = vec![FoodSource {
+        rect: Rect::new(area.x, area.y.saturating_add(1), 7, 1),
+        food_id: FoodKind::Kibble.id(),
+        count: snapshot.inventory.count(FoodKind::Kibble),
+    }];
     let bed = Rect::new(area.x.saturating_add(9), area.y.saturating_add(1), 4, 1);
     let poops = snapshot
         .pending_poops
@@ -218,11 +230,48 @@ fn minimal_geometry(area: Rect, snapshot: &SimulationSnapshot) -> RoomGeometry {
     RoomGeometry {
         pet,
         bed: Some(bed),
-        food: Some(food),
-        food_id: FoodKind::Kibble.id().to_owned(),
+        food_sources,
         poops,
         minimal: true,
     }
+}
+
+/// Builds one drag source per stocked food kind (kibble, treat, fruit,
+/// energy drink) in a horizontal row starting at `(x, y)`. Only stocked
+/// foods (count > 0) become drag sources.
+fn food_sources(
+    area: Rect,
+    snapshot: &SimulationSnapshot,
+    x: u16,
+    y: u16,
+    width: u16,
+    spacing: u16,
+) -> Vec<FoodSource> {
+    [
+        FoodKind::Kibble,
+        FoodKind::Treat,
+        FoodKind::Fruit,
+        FoodKind::EnergyDrink,
+    ]
+    .into_iter()
+    .enumerate()
+    .filter_map(|(index, food)| {
+        let count = snapshot.inventory.count(food);
+        if count == 0 {
+            return None;
+        }
+        Some(FoodSource {
+            rect: Rect::new(
+                area.x.saturating_add(x + index as u16 * spacing),
+                area.y.saturating_add(y),
+                width,
+                1,
+            ),
+            food_id: food.id(),
+            count,
+        })
+    })
+    .collect()
 }
 
 fn poop_slots(
@@ -315,6 +364,10 @@ fn put_text(area: Rect, buffer: &mut Buffer, x: u16, y: u16, text: &str, style: 
     }
 }
 
+// Rendering a projection needs the area, snapshot, activity projection, nap
+// state, presentation frame, geometry, and drag state; a context struct would
+// add noise for a private renderer.
+#[allow(clippy::too_many_arguments)]
 fn render_full(
     area: Rect,
     buffer: &mut Buffer,
@@ -323,6 +376,7 @@ fn render_full(
     napping: bool,
     frame: &PresentationFrame,
     geometry: &RoomGeometry,
+    drag: Option<(&str, Position)>,
 ) {
     let needs = snapshot.needs;
     let status_lines = [
@@ -359,7 +413,8 @@ fn render_full(
         if let Some(bed) = geometry.bed {
             let bed_x = bed.x.saturating_sub(area.x);
             let bed_y = bed.y.saturating_sub(area.y);
-            put_sprite(area, buffer, &PET_SLEEP_FULL, bed_x, bed_y);
+            let compact = downsample2x(pet_sprite(PetPose::Sleep));
+            draw_sprite(area, buffer, &compact, bed_x, bed_y);
             put_line(
                 area,
                 buffer,
@@ -372,7 +427,7 @@ fn render_full(
         let pet_x = geometry.pet.x.saturating_sub(area.x);
         let pet_y = geometry.pet.y.saturating_sub(area.y);
         if snapshot.behavior == PetBehavior::Sleeping {
-            put_sprite(area, buffer, &PET_DOZE_FULL, pet_x, pet_y);
+            draw_sprite(area, buffer, pet_sprite(PetPose::Doze), pet_x, pet_y);
             put_line(
                 area,
                 buffer,
@@ -381,28 +436,21 @@ fn render_full(
                 auto_style(SemanticTone::Tone2),
             );
         } else {
-            put_sprite(area, buffer, full_sprite(frame.pose), pet_x, pet_y);
+            draw_sprite(area, buffer, pet_sprite(frame.pose), pet_x, pet_y);
         }
     }
 
-    if let Some(food) = geometry.food {
-        let food_y = food.y.saturating_sub(area.y);
-        let stocked = snapshot.inventory.count(FoodKind::Kibble);
-        put_line(
-            area,
-            buffer,
-            food_y,
-            &format!("KIB x{stocked}  drag to pet"),
-            auto_style(SemanticTone::Tone2),
-        );
-    }
+    render_food_sources(area, buffer, geometry, true);
+    render_pending_demands_full(area, buffer, snapshot);
     for (_, rect) in &geometry.poops {
         let x = rect.x.saturating_sub(area.x);
         let y = rect.y.saturating_sub(area.y);
         put(area, buffer, x, y, "●", auto_style(SemanticTone::Tone1));
     }
+    render_drag_ghost(area, buffer, drag);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_compact(
     area: Rect,
     buffer: &mut Buffer,
@@ -411,6 +459,7 @@ fn render_compact(
     napping: bool,
     frame: &PresentationFrame,
     geometry: &RoomGeometry,
+    drag: Option<(&str, Position)>,
 ) {
     let needs = snapshot.needs;
     let status_line = format!(
@@ -427,11 +476,17 @@ fn render_compact(
         &status_line,
         auto_style(SemanticTone::Tone3),
     );
+    let (affection, snack) = demand_counts(snapshot);
+    let activity_line = if affection > 0 || snack > 0 {
+        format!("{:?}  A{affection} S{snack}", activity)
+    } else {
+        format!("{:?}", activity)
+    };
     put_line(
         area,
         buffer,
         1,
-        &format!("{:?}", activity),
+        &activity_line,
         auto_style(SemanticTone::Tone2),
     );
     render_furniture_compact(area, buffer);
@@ -445,7 +500,8 @@ fn render_compact(
         if let Some(bed) = geometry.bed {
             let bed_x = bed.x.saturating_sub(area.x);
             let bed_y = bed.y.saturating_sub(area.y);
-            put_sprite(area, buffer, &PET_SLEEP_COMPACT, bed_x, bed_y);
+            let compact = downsample2x(pet_sprite(PetPose::Sleep));
+            draw_sprite(area, buffer, &compact, bed_x, bed_y);
             put_line(
                 area,
                 buffer,
@@ -458,7 +514,8 @@ fn render_compact(
         let pet_x = geometry.pet.x.saturating_sub(area.x);
         let pet_y = geometry.pet.y.saturating_sub(area.y);
         if snapshot.behavior == PetBehavior::Sleeping {
-            put_sprite(area, buffer, &PET_DOZE_COMPACT, pet_x, pet_y);
+            let compact = downsample2x(pet_sprite(PetPose::Doze));
+            draw_sprite(area, buffer, &compact, pet_x, pet_y);
             put_line(
                 area,
                 buffer,
@@ -467,29 +524,27 @@ fn render_compact(
                 auto_style(SemanticTone::Tone2),
             );
         } else {
-            put_sprite(area, buffer, compact_sprite(frame.pose), pet_x, pet_y);
+            let compact = downsample2x(pet_sprite(frame.pose));
+            draw_sprite(area, buffer, &compact, pet_x, pet_y);
         }
     }
 
-    if let Some(food) = geometry.food {
-        let food_y = food.y.saturating_sub(area.y);
-        let stocked = snapshot.inventory.count(FoodKind::Kibble);
-        put_line(
-            area,
-            buffer,
-            food_y,
-            &format!("KIB x{stocked}"),
-            auto_style(SemanticTone::Tone2),
-        );
-    }
+    render_food_sources(area, buffer, geometry, false);
     for (_, rect) in &geometry.poops {
         let x = rect.x.saturating_sub(area.x);
         let y = rect.y.saturating_sub(area.y);
         put(area, buffer, x, y, "●", auto_style(SemanticTone::Tone1));
     }
+    render_drag_ghost(area, buffer, drag);
 }
 
-fn render_minimal(area: Rect, buffer: &mut Buffer, snapshot: &SimulationSnapshot, napping: bool) {
+fn render_minimal(
+    area: Rect,
+    buffer: &mut Buffer,
+    snapshot: &SimulationSnapshot,
+    napping: bool,
+    drag: Option<(&str, Position)>,
+) {
     let needs = snapshot.needs;
     let state = if napping {
         "SLEEP"
@@ -513,12 +568,100 @@ fn render_minimal(area: Rect, buffer: &mut Buffer, snapshot: &SimulationSnapshot
     for _ in &snapshot.pending_poops {
         affordances.push_str("  POOP");
     }
+    let (affection, snack) = demand_counts(snapshot);
+    if affection > 0 {
+        affordances.push_str("  AFF");
+    }
+    if snack > 0 {
+        affordances.push_str("  SNACK");
+    }
     put_line(
         area,
         buffer,
         1,
         &affordances,
         auto_style(SemanticTone::Tone2),
+    );
+    render_drag_ghost(area, buffer, drag);
+}
+
+/// Short terminal labels for the authoritative food kinds.
+fn food_label(food_id: &str) -> &'static str {
+    match food_id {
+        "kibble" => "KIB",
+        "treat" => "TRT",
+        "fruit" => "FRT",
+        "energy_drink" => "ENE",
+        _ => "???",
+    }
+}
+
+/// Renders every stocked drag source with its authoritative count.
+fn render_food_sources(area: Rect, buffer: &mut Buffer, geometry: &RoomGeometry, verbose: bool) {
+    for source in &geometry.food_sources {
+        let x = source.rect.x.saturating_sub(area.x);
+        let y = source.rect.y.saturating_sub(area.y);
+        let label = if verbose {
+            format!("{} x{} drag", food_label(source.food_id), source.count)
+        } else {
+            format!("{} x{}", food_label(source.food_id), source.count)
+        };
+        put_text(area, buffer, x, y, &label, auto_style(SemanticTone::Tone2));
+    }
+}
+
+/// `(affection, snack)` counts from authoritative pending demands.
+fn demand_counts(snapshot: &SimulationSnapshot) -> (u32, u32) {
+    snapshot
+        .pending_demands
+        .iter()
+        .fold((0, 0), |(affection, snack), demand| match demand.kind() {
+            codegotchi_domain::PetDemandKind::Affection => (affection + 1, snack),
+            codegotchi_domain::PetDemandKind::Snack => (affection, snack + 1),
+        })
+}
+
+/// Full layout projects pending affection/snack demands as care affordances.
+fn render_pending_demands_full(area: Rect, buffer: &mut Buffer, snapshot: &SimulationSnapshot) {
+    let (affection, snack) = demand_counts(snapshot);
+    if affection == 0 && snack == 0 {
+        return;
+    }
+    let mut line = String::new();
+    if affection > 0 {
+        line.push_str(&format!("Affection x{affection}  "));
+    }
+    if snack > 0 {
+        line.push_str(&format!("Snack x{snack}  "));
+    }
+    put_text(
+        area,
+        buffer,
+        2,
+        area.height.saturating_sub(1),
+        &line,
+        auto_style(SemanticTone::Tone3),
+    );
+}
+
+/// Draws the dragged-food ghost at the current pointer cell (room-relative
+/// clamp applied by the caller's coordinate subtraction).
+fn render_drag_ghost(area: Rect, buffer: &mut Buffer, drag: Option<(&str, Position)>) {
+    let Some((food_id, position)) = drag else {
+        return;
+    };
+    let x = position.x.saturating_sub(area.x);
+    let y = position.y.saturating_sub(area.y);
+    if x >= area.width || y >= area.height {
+        return;
+    }
+    put_text(
+        area,
+        buffer,
+        x,
+        y,
+        food_label(food_id),
+        auto_style(SemanticTone::Tone3),
     );
 }
 
@@ -561,37 +704,6 @@ fn render_furniture_compact(area: Rect, buffer: &mut Buffer) {
     put_sprite(area, buffer, &PLANTS_COMPACT, 34, 4);
 }
 
-fn full_sprite(pose: PetPose) -> &'static [&'static str] {
-    match pose {
-        PetPose::Idle => &PET_FULL,
-        PetPose::Blink => &PET_BLINK_FULL,
-        PetPose::WalkA => &PET_WALK_A_FULL,
-        PetPose::WalkB => &PET_WALK_B_FULL,
-        PetPose::Sit => &PET_SIT_FULL,
-        PetPose::Doze => &PET_DOZE_FULL,
-        PetPose::Yawn => &PET_YAWN_FULL,
-        PetPose::Curious => &PET_CURIOUS_FULL,
-        PetPose::Happy => &PET_HAPPY_FULL,
-        PetPose::Upset => &PET_UPSET_FULL,
-        PetPose::Sleep => &PET_SLEEP_FULL,
-    }
-}
-
-fn compact_sprite(pose: PetPose) -> &'static [&'static str] {
-    match pose {
-        PetPose::Idle => &PET_COMPACT,
-        PetPose::Blink => &PET_BLINK_COMPACT,
-        PetPose::WalkA => &PET_WALK_A_COMPACT,
-        PetPose::WalkB => &PET_WALK_B_COMPACT,
-        PetPose::Sit => &PET_SIT_COMPACT,
-        PetPose::Doze => &PET_DOZE_COMPACT,
-        PetPose::Yawn | PetPose::Curious => &PET_CURIOUS_COMPACT,
-        PetPose::Happy => &PET_HAPPY_COMPACT,
-        PetPose::Upset => &PET_UPSET_COMPACT,
-        PetPose::Sleep => &PET_SLEEP_COMPACT,
-    }
-}
-
 fn need_bar(value: f32) -> String {
     // Domain needs are 0..100 (hunger is inverted: 0 = full, 100 = starving).
     let filled = ((value.clamp(0.0, 100.0) / 100.0) * 8.0).round() as usize;
@@ -603,104 +715,6 @@ fn need_bar(value: f32) -> String {
 fn need_percent(value: f32) -> u8 {
     value.clamp(0.0, 100.0).round() as u8
 }
-
-const PET_FULL: [&str; 5] = [
-    "  ▄▄▄▄▄▄  ",
-    " █  ██ ██ ",
-    " █  ▄▄   █",
-    " █▄▄▄▄▄▄█ ",
-    "  ▀▀▀▀▀▀  ",
-];
-
-const PET_BLINK_FULL: [&str; 5] = [
-    "  ▄▄▄▄▄▄  ",
-    " █  ██ ██ ",
-    " █  ──   █",
-    " █▄▄▄▄▄▄█ ",
-    "  ▀▀▀▀▀▀  ",
-];
-
-const PET_SIT_FULL: [&str; 5] = [
-    "  ▄▄▄▄▄▄  ",
-    " █  ██ ██ ",
-    " █  ▄▄   █",
-    " █▄▄▄▄▄▄█ ",
-    "  ████    ",
-];
-
-const PET_WALK_A_FULL: [&str; 5] = [
-    "  ▄▄▄▄▄▄  ",
-    " █  ██ ██ ",
-    " █  ▄▄   █",
-    " █▄▄▄▄▄▄█ ",
-    " ▀  ▀▀  ▀ ",
-];
-
-const PET_WALK_B_FULL: [&str; 5] = [
-    "  ▄▄▄▄▄▄  ",
-    " █  ██ ██ ",
-    " █  ▄▄   █",
-    " █▄▄▄▄▄▄█ ",
-    "▀  ▀▀  ▀  ",
-];
-
-const PET_YAWN_FULL: [&str; 5] = [
-    "  ▄▄▄▄▄▄  ",
-    " █  ██ ██ ",
-    " █──▄▄──█ ",
-    " █▄▄▄▄▄▄█ ",
-    "  ▀▀▀▀▀▀  ",
-];
-
-const PET_CURIOUS_FULL: [&str; 5] = PET_FULL;
-
-const PET_HAPPY_FULL: [&str; 5] = [
-    " ▄▄▄▄▄▄▄▄ ",
-    " █  ██ ██ ",
-    " █  ──   █",
-    " █▄▄▄▄▄▄█ ",
-    "  ▀▀▀▀▀▀  ",
-];
-
-const PET_UPSET_FULL: [&str; 5] = [
-    "  ▄▄▄▄▄▄  ",
-    " █  ██ ██ ",
-    " █  ▄▄  █ ",
-    " █▄▄▄▄▄▄█ ",
-    "  ▀▀▀▀▀▀  ",
-];
-
-const PET_DOZE_FULL: [&str; 5] = [
-    "  ▄▄▄▄▄▄  ",
-    " █  ██ ██ ",
-    " █  ▄▄   █",
-    " █▄▄▄▄▄▄█ ",
-    "  ▀▀▀▀▀▀  ",
-];
-
-const PET_SLEEP_FULL: [&str; 5] = [
-    "  ▄▄▄▄▄▄  ",
-    " █  ██ ██ ",
-    " █  ──  █ ",
-    " █▄▄▄▄▄▄█ ",
-    "  ▀▀▀▀▀▀  ",
-];
-
-const PET_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", " ▀▀▀▀▀ "];
-
-const PET_BLINK_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ── ██", " ▀▀▀▀▀ "];
-
-const PET_SIT_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", "  ███  "];
-
-const PET_WALK_A_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", "▀ ▀▀  ▀"];
-
-const PET_WALK_B_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", "  ▀▀ ▀▀"];
-
-const PET_CURIOUS_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", " ▀▀▀▀▀ "];
-
-const PET_HAPPY_COMPACT: [&str; 3] = ["▄▄▄▄▄▄▄", "█ ██ ██", " ▀▀▀▀▀ "];
-
-const PET_UPSET_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", "▀▀▀▀▀▀ "];
 
 const WINDOW_FULL: [&str; 4] = [
     "┌────────────┐",
@@ -733,10 +747,6 @@ const WINDOW_COMPACT: [&str; 3] = ["┌──────────┐", "│�
 
 const PLANTS_COMPACT: [&str; 3] = PLANTS_FULL;
 
-const PET_DOZE_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", " ▀▀▀▀▀ "];
-
-const PET_SLEEP_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█     █", " ▀▀▀▀▀ "];
-
 const BED_FULL: [&str; 4] = [
     "┌──────────┐",
     "│▄▄▄▄▄▄▄▄▄▄│",
@@ -755,27 +765,6 @@ mod tests {
     #[test]
     fn every_sprite_has_consistent_row_widths() {
         let sprites: &[&[&str]] = &[
-            &PET_FULL,
-            &PET_BLINK_FULL,
-            &PET_SIT_FULL,
-            &PET_WALK_A_FULL,
-            &PET_WALK_B_FULL,
-            &PET_YAWN_FULL,
-            &PET_CURIOUS_FULL,
-            &PET_HAPPY_FULL,
-            &PET_UPSET_FULL,
-            &PET_DOZE_FULL,
-            &PET_SLEEP_FULL,
-            &PET_COMPACT,
-            &PET_BLINK_COMPACT,
-            &PET_SIT_COMPACT,
-            &PET_WALK_A_COMPACT,
-            &PET_WALK_B_COMPACT,
-            &PET_CURIOUS_COMPACT,
-            &PET_HAPPY_COMPACT,
-            &PET_UPSET_COMPACT,
-            &PET_DOZE_COMPACT,
-            &PET_SLEEP_COMPACT,
             &BED_FULL,
             &BED_COMPACT,
             &WINDOW_FULL,

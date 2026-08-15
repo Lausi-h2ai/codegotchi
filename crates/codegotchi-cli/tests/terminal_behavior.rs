@@ -288,6 +288,36 @@ fn dwell_poses_blink_to_stay_animated() {
     );
 }
 
+/// Authoritative feed/pet interactions trigger short presentation-only
+/// Eating and Petted reactions that expire back to normal poses.
+#[test]
+fn feed_and_pet_reactions_show_eating_and_petted_poses() {
+    let now = Utc::now();
+    let snapshot = base_snapshot(now);
+    let mut state = PresentationState::new(21);
+    let _ = state.tick(Duration::from_secs(5), Some(&snapshot), FULL_ROOM);
+
+    state.react_to_feed(Duration::from_secs(6));
+    let frame = state.tick(Duration::from_millis(6_250), Some(&snapshot), FULL_ROOM);
+    assert_eq!(
+        frame.pose,
+        PetPose::Eating,
+        "feed should show the eating pose"
+    );
+    let frame = state.tick(Duration::from_secs(9), Some(&snapshot), FULL_ROOM);
+    assert_ne!(frame.pose, PetPose::Eating, "eating reaction must expire");
+
+    state.react_to_pet(Duration::from_secs(10));
+    let frame = state.tick(Duration::from_millis(10_250), Some(&snapshot), FULL_ROOM);
+    assert_eq!(
+        frame.pose,
+        PetPose::Petted,
+        "pet should show the petted pose"
+    );
+    let frame = state.tick(Duration::from_secs(13), Some(&snapshot), FULL_ROOM);
+    assert_ne!(frame.pose, PetPose::Petted, "petted reaction must expire");
+}
+
 /// Even with critical needs the presentation state only produces presentation
 /// poses and intents; care is structurally impossible.
 #[test]

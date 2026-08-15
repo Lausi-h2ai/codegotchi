@@ -23,6 +23,10 @@ use crate::{
 const HUNGER_PER_HOUR: f32 = 25.0;
 const ENERGY_PER_HOUR: f32 = -50.0;
 const INCIDENT_PRESSURE_PER_HOUR: f32 = 240.0;
+/// Hunger pressure from each pending snack demand is deliberately gentler
+/// than affection/poop pressure (2 points/min instead of 4), so starvation
+/// stays a multi-minute, readable decline.
+const HUNGER_PRESSURE_PER_HOUR: f32 = 120.0;
 /// The scheduler has one representable terminal deadline. It keeps the
 /// internal scheduler type as `DateTime<Utc>` while making the final valid
 /// attention sequence persistable without ever attempting to add another
@@ -74,7 +78,7 @@ impl NeedProgressionStrategy for DefaultNeedProgressionStrategy {
 
         let needs = pet.needs_mut();
         needs.adjust_hunger_precise(
-            (HUNGER_PER_HOUR as f64 + INCIDENT_PRESSURE_PER_HOUR as f64 * snack_count)
+            (HUNGER_PER_HOUR as f64 + HUNGER_PRESSURE_PER_HOUR as f64 * snack_count)
                 * elapsed_hours,
         );
         needs.adjust_happiness_precise(
@@ -1358,7 +1362,7 @@ mod tests {
             AgentActivityState::WaitingForUser,
         );
 
-        let expected = (25.0 + 2.0 * 240.0) * (5.0 / 60.0);
+        let expected = (25.0 + 2.0 * 120.0) * (5.0 / 60.0);
         assert!((pet.needs().hunger() - expected).abs() < 0.0001);
     }
 

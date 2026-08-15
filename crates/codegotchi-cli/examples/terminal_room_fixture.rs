@@ -67,7 +67,7 @@ fn main() {
             }
             let frame = presentation.frame();
             let mut buffer = Buffer::filled(area, Cell::new(" "));
-            render_room(area, &mut buffer, &snapshot, &frame);
+            render_room(area, &mut buffer, &snapshot, &frame, None);
             println!(
                 "==== {name} at t={}ms pose={:?} offset={:?} ====",
                 tick_ms, frame.pose, frame.offset

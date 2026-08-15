@@ -116,7 +116,8 @@ pub trait CareGateway {
 #[derive(Clone, Debug, Default)]
 pub struct RoomInputSession {
     gesture: Option<PetGesture>,
-    dragging_food: Option<String>,
+    dragging_food: Option<&'static str>,
+    drag_position: Option<Position>,
 }
 
 impl RoomInputSession {
@@ -134,14 +135,16 @@ impl RoomInputSession {
         let point = Position::new(event.column, event.row);
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                if let Some((_, food_id)) = geometry.food_hit(point) {
+                if let Some(food_id) = geometry.food_hit(point) {
                     self.dragging_food = Some(food_id);
+                    self.drag_position = Some(point);
                     self.gesture = None;
                     return Vec::new();
                 }
                 if geometry.pet.contains(point) {
                     self.gesture = Some(PetGesture::begin(point));
                     self.dragging_food = None;
+                    self.drag_position = None;
                 }
                 Vec::new()
             }
@@ -149,15 +152,21 @@ impl RoomInputSession {
                 if let Some(gesture) = self.gesture.as_mut() {
                     gesture.move_to(point);
                 }
+                if self.dragging_food.is_some() {
+                    self.drag_position = Some(point);
+                }
                 Vec::new()
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 let mut requests = Vec::new();
+                self.drag_position = None;
                 if let Some(food_id) = self.dragging_food.take() {
-                    if geometry.pet.contains(point) || geometry.minimal {
+                    // Every layout uses the same drag-to-pet interaction:
+                    // dropping anywhere else cancels the drag.
+                    if geometry.pet.contains(point) {
                         requests.push(RoomCareRequest::Feed {
                             action_id: Uuid::new_v4(),
-                            food_id,
+                            food_id: food_id.to_owned(),
                         });
                     }
                     return requests;
@@ -199,6 +208,13 @@ impl RoomInputSession {
             | MouseEventKind::ScrollDown
             | MouseEventKind::ScrollUp => Vec::new(),
         }
+    }
+
+    /// The active food drag (food id + current pointer cell), used by the
+    /// renderer to draw the drag ghost. Returns `None` when no drag is active.
+    #[must_use]
+    pub fn active_drag(&self) -> Option<(&'static str, Position)> {
+        self.dragging_food.zip(self.drag_position)
     }
 }
 

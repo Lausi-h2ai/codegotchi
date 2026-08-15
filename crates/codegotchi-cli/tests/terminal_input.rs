@@ -232,6 +232,70 @@ fn petting_hitbox_follows_the_wandering_pet() {
     assert!(*pointer_distance >= 120.0);
 }
 
+/// Full exposes every stocked food kind as its own draggable source with its
+/// authoritative count, and each drag submits the correct food id.
+#[test]
+fn every_stocked_food_is_a_draggable_source_with_count() {
+    let snapshot = base_snapshot();
+    let room = Rect::new(0, 0, 120, 14);
+    let geometry = room_geometry_with_frame(room, &snapshot, &default_frame());
+    let mut sources: Vec<_> = geometry
+        .food_sources
+        .iter()
+        .map(|source| (source.food_id, source.count))
+        .collect();
+    sources.sort();
+    assert_eq!(
+        sources,
+        vec![
+            ("energy_drink", 10),
+            ("fruit", 25),
+            ("kibble", 50),
+            ("treat", 25),
+        ]
+    );
+
+    for (food_id, _) in sources {
+        let mut input = RoomInputSession::default();
+        let gateway = RecordingCareGateway::default();
+        let source = geometry
+            .food_sources
+            .iter()
+            .find(|source| source.food_id == food_id)
+            .expect("source exists");
+        apply(
+            &gateway,
+            input.process(
+                room,
+                &snapshot,
+                &default_frame(),
+                &mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    source.rect.x + 1,
+                    source.rect.y,
+                ),
+            ),
+        );
+        let pet = geometry.pet;
+        apply(
+            &gateway,
+            input.process(
+                room,
+                &snapshot,
+                &default_frame(),
+                &mouse(MouseEventKind::Up(MouseButton::Left), pet.x + 2, pet.y + 2),
+            ),
+        );
+        let recorded = gateway.requests.lock().unwrap();
+        assert_eq!(recorded.len(), 1, "{food_id} should feed once");
+        assert!(
+            matches!(&recorded[0], RoomCareRequest::Feed { food_id: id, .. } if id == food_id),
+            "{food_id} drag submitted {:?}",
+            recorded[0]
+        );
+    }
+}
+
 /// A short gesture below both thresholds never reaches the runtime.
 #[test]
 fn short_pet_gesture_is_dropped() {
@@ -269,14 +333,14 @@ fn food_drag_to_pet_feeds_and_other_drops_do_not() {
     let mut input = RoomInputSession::default();
     let gateway = RecordingCareGateway::default();
 
-    // Down on the food tray (x=2..14, y=11..12), up on the pet (x=6..20, y=4..8).
+    // Down on the kibble source (x=2..16, y=11), up on the pet.
     apply(
         &gateway,
         input.process(
             room,
             &snapshot,
             &default_frame(),
-            &mouse(MouseEventKind::Down(MouseButton::Left), 4, 12),
+            &mouse(MouseEventKind::Down(MouseButton::Left), 4, 11),
         ),
     );
     apply(
@@ -300,7 +364,7 @@ fn food_drag_to_pet_feeds_and_other_drops_do_not() {
             room,
             &snapshot,
             &default_frame(),
-            &mouse(MouseEventKind::Down(MouseButton::Left), 4, 12),
+            &mouse(MouseEventKind::Down(MouseButton::Left), 4, 11),
         ),
     );
     apply(
@@ -379,14 +443,41 @@ fn poop_click_cleans_and_bed_click_naps() {
     );
 }
 
-/// Minimal keeps recovery possible: food down + any room up feeds.
+/// Minimal keeps recovery possible with the same strict drag-to-pet rule:
+/// dropping on the pet feeds, dropping anywhere else cancels.
 #[test]
-fn minimal_food_tray_feeds_from_any_room_release() {
+fn minimal_food_tray_requires_drop_on_pet() {
     let snapshot = base_snapshot();
     let room = Rect::new(0, 0, 40, 3);
     let mut input = RoomInputSession::default();
     let gateway = RecordingCareGateway::default();
 
+    // Drop on the pet (3x1 rect at the far left) feeds.
+    apply(
+        &gateway,
+        input.process(
+            room,
+            &snapshot,
+            &default_frame(),
+            &mouse(MouseEventKind::Down(MouseButton::Left), 3, 1),
+        ),
+    );
+    apply(
+        &gateway,
+        input.process(
+            room,
+            &snapshot,
+            &default_frame(),
+            &mouse(MouseEventKind::Up(MouseButton::Left), 1, 0),
+        ),
+    );
+    let recorded = gateway.requests.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert!(matches!(&recorded[0], RoomCareRequest::Feed { .. }));
+    drop(recorded);
+
+    // Dropping anywhere else in the room must NOT feed.
+    let mut input = RoomInputSession::default();
     apply(
         &gateway,
         input.process(
@@ -405,9 +496,11 @@ fn minimal_food_tray_feeds_from_any_room_release() {
             &mouse(MouseEventKind::Up(MouseButton::Left), 20, 2),
         ),
     );
-    let recorded = gateway.requests.lock().unwrap();
-    assert_eq!(recorded.len(), 1);
-    assert!(matches!(&recorded[0], RoomCareRequest::Feed { .. }));
+    assert_eq!(
+        gateway.requests.lock().unwrap().len(),
+        1,
+        "Minimal must use the same drag-to-pet rule: a drop outside the pet must not feed"
+    );
 }
 
 fn action_id(request: &RoomCareRequest) -> Uuid {

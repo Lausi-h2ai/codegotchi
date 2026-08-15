@@ -81,6 +81,8 @@ pub enum PetPose {
     Curious,
     Happy,
     Upset,
+    Eating,
+    Petted,
     Sleep,
 }
 
@@ -140,6 +142,7 @@ pub struct PresentationState {
     phase: u8,
     next_blink: Duration,
     blink_until: Duration,
+    reaction: Option<(PetPose, Duration)>,
 }
 
 impl PresentationState {
@@ -157,6 +160,7 @@ impl PresentationState {
             phase: 0,
             next_blink: Duration::from_secs(2),
             blink_until: Duration::ZERO,
+            reaction: None,
         }
     }
 
@@ -172,6 +176,18 @@ impl PresentationState {
         self.intent
     }
 
+    /// Shows the eating pose for a short presentation-only reaction after an
+    /// authoritative feed. Never mutates care state.
+    pub fn react_to_feed(&mut self, now: Duration) {
+        self.reaction = Some((PetPose::Eating, now + Duration::from_millis(2_000)));
+    }
+
+    /// Shows the petted pose for a short presentation-only reaction after an
+    /// authoritative pet. Never mutates care state.
+    pub fn react_to_pet(&mut self, now: Duration) {
+        self.reaction = Some((PetPose::Petted, now + Duration::from_millis(1_500)));
+    }
+
     /// Advances the presentation clock to `now` and returns the current frame.
     ///
     /// `area` is the room rectangle; `snapshot` is the latest authoritative
@@ -185,9 +201,20 @@ impl PresentationState {
     ) -> PresentationFrame {
         if now < self.intent_started + self.intent_duration {
             self.advance_within_intent(now, area);
-            return self.frame;
+            return self.apply_reaction(now);
         }
         self.choose_intent(now, snapshot, area);
+        self.apply_reaction(now)
+    }
+
+    fn apply_reaction(&mut self, now: Duration) -> PresentationFrame {
+        if let Some((pose, until)) = self.reaction {
+            if now >= until {
+                self.reaction = None;
+            } else if self.frame.pose != PetPose::Sleep {
+                self.frame.pose = pose;
+            }
+        }
         self.frame
     }
 
@@ -246,7 +273,7 @@ impl PresentationState {
         // 0..100 scale and hunger is inverted (0 = full, 100 = starving). The
         // bias is probabilistic so need-driven behavior never becomes an
         // exclusive loop that stops the pet from wandering.
-        if generic_sleeping && roll < 70 {
+        if generic_sleeping && roll < 30 {
             self.start_intent(now, IdleIntent::Yawn, Duration::from_millis(1_800), area);
             return;
         }
@@ -291,6 +318,7 @@ impl PresentationState {
             3 => IdleIntent::Inspect(RoomObject::Plants),
             4 => IdleIntent::Inspect(RoomObject::Shelf),
             5 => IdleIntent::Inspect(RoomObject::Laptop),
+            6 => IdleIntent::Sit,
             _ => IdleIntent::Wander(random_point(&mut self.rng, self.home, area)),
         };
         let duration = match calm {
