@@ -21,6 +21,13 @@ pub enum CareCommand {
         interaction_ms: u64,
         pointer_distance: f32,
     },
+    /// One increment of an in-progress petting gesture. A stroke raises
+    /// happiness continuously while the user pets (until the meter fills)
+    /// without consuming an affection demand; the pointer-up `Pet` remains
+    /// the discrete completion that resolves the oldest demand.
+    PetStroke {
+        action_id: Uuid,
+    },
     /// Settles the pet into the hammock for a fixed 5-second nap. Energy
     /// recovers quickly while `napping_until` is in the future.
     Nap {
@@ -34,6 +41,7 @@ impl CareCommand {
             Self::Feed { action_id, .. }
             | Self::CleanPoop { action_id, .. }
             | Self::Pet { action_id, .. }
+            | Self::PetStroke { action_id }
             | Self::Nap { action_id } => *action_id,
         }
     }

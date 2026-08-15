@@ -35,6 +35,10 @@ const TERMINAL_INCIDENT_AT: DateTime<Utc> = DateTime::<Utc>::MAX_UTC;
 /// A hammock nap is a deliberately fast power nap: 20 energy points per
 /// second, so a 5-second nap restores the full meter from empty.
 const NAP_ENERGY_PER_HOUR: f32 = 72_000.0;
+/// Happiness gained by one in-progress petting stroke. Strokes are emitted
+/// at the terminal's presentation tick (~4/s), so a short pet visibly raises
+/// the bar during the gesture and repeated petting fills it.
+const PET_STROKE_HAPPINESS: f32 = 4.0;
 
 /// Applies elapsed need changes without consulting wall-clock state.
 pub trait NeedProgressionStrategy {
@@ -499,6 +503,7 @@ where
                     return Err(CareError::InsufficientDistance);
                 }
             }
+            CareCommand::PetStroke { .. } => {}
             CareCommand::Nap { .. } => {}
         }
 
@@ -551,6 +556,11 @@ where
             CareCommand::Pet { .. } => {
                 self.pet.needs_mut().adjust_happiness(10.0);
                 self.resolve_oldest_demand(PetDemandKind::Affection);
+            }
+            CareCommand::PetStroke { .. } => {
+                // Continuous petting happiness: clamped by the needs meter so
+                // repeated strokes simply hold the bar at full.
+                self.pet.needs_mut().adjust_happiness(PET_STROKE_HAPPINESS);
             }
             CareCommand::Nap { .. } => {
                 self.pet
@@ -1222,6 +1232,68 @@ mod tests {
             demand_ids(&simulation),
             vec![Uuid::from_u128(2), Uuid::from_u128(3)]
         );
+    }
+
+    #[test]
+    fn pet_stroke_raises_happiness_without_resolving_demands() {
+        let mut simulation =
+            simulation_with_demands([(1, PetDemandKind::Affection), (2, PetDemandKind::Snack)]);
+        simulation.pet.needs_mut().set_happiness(50.0);
+
+        for action in 100..112 {
+            simulation
+                .apply_care(&CareCommand::PetStroke {
+                    action_id: Uuid::from_u128(action),
+                })
+                .unwrap();
+        }
+
+        assert_eq!(
+            simulation.pet().needs().happiness(),
+            98.0,
+            "twelve 4-point strokes raise happiness continuously"
+        );
+        assert_eq!(
+            demand_ids(&simulation),
+            vec![Uuid::from_u128(1), Uuid::from_u128(2)],
+            "strokes must not consume affection demands"
+        );
+    }
+
+    #[test]
+    fn pet_stroke_clamps_happiness_at_full() {
+        let mut simulation = simulation_with_demands([(1, PetDemandKind::Affection)]);
+        simulation.pet.needs_mut().set_happiness(96.0);
+
+        for action in 100..105 {
+            simulation
+                .apply_care(&CareCommand::PetStroke {
+                    action_id: Uuid::from_u128(action),
+                })
+                .unwrap();
+        }
+
+        assert_eq!(
+            simulation.pet().needs().happiness(),
+            100.0,
+            "petting fills the happiness meter and holds it at full"
+        );
+    }
+
+    #[test]
+    fn pet_stroke_is_replay_safe() {
+        let mut simulation = simulation_with_demands([(1, PetDemandKind::Affection)]);
+        simulation.pet.needs_mut().set_happiness(40.0);
+        let stroke = CareCommand::PetStroke {
+            action_id: Uuid::from_u128(99),
+        };
+
+        assert_eq!(simulation.apply_care(&stroke).unwrap(), CareResult::Applied);
+        assert_eq!(
+            simulation.apply_care(&stroke).unwrap(),
+            CareResult::Duplicate
+        );
+        assert_eq!(simulation.pet().needs().happiness(), 44.0);
     }
 
     #[test]

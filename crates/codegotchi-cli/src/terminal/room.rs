@@ -9,7 +9,7 @@ use uuid::Uuid;
 use super::behavior::{
     PetPose, PresentationActivity, PresentationFrame, has_authoritative_nap, presentation_activity,
 };
-use super::sprites::{downsample2x, draw_sprite, pet_sprite};
+use super::sprites::{draw_sprite, pet_sprite, pet_sprite_compact};
 use super::theme::{SemanticTone, auto_style};
 
 const FULL_ROOM_HEIGHT: u16 = 14;
@@ -413,8 +413,7 @@ fn render_full(
         if let Some(bed) = geometry.bed {
             let bed_x = bed.x.saturating_sub(area.x);
             let bed_y = bed.y.saturating_sub(area.y);
-            let compact = downsample2x(pet_sprite(PetPose::Sleep));
-            draw_sprite(area, buffer, &compact, bed_x, bed_y);
+            draw_sprite(area, buffer, pet_sprite(PetPose::Sleep), bed_x, bed_y);
             put_line(
                 area,
                 buffer,
@@ -500,8 +499,13 @@ fn render_compact(
         if let Some(bed) = geometry.bed {
             let bed_x = bed.x.saturating_sub(area.x);
             let bed_y = bed.y.saturating_sub(area.y);
-            let compact = downsample2x(pet_sprite(PetPose::Sleep));
-            draw_sprite(area, buffer, &compact, bed_x, bed_y);
+            draw_sprite(
+                area,
+                buffer,
+                pet_sprite_compact(PetPose::Sleep),
+                bed_x,
+                bed_y,
+            );
             put_line(
                 area,
                 buffer,
@@ -514,8 +518,13 @@ fn render_compact(
         let pet_x = geometry.pet.x.saturating_sub(area.x);
         let pet_y = geometry.pet.y.saturating_sub(area.y);
         if snapshot.behavior == PetBehavior::Sleeping {
-            let compact = downsample2x(pet_sprite(PetPose::Doze));
-            draw_sprite(area, buffer, &compact, pet_x, pet_y);
+            draw_sprite(
+                area,
+                buffer,
+                pet_sprite_compact(PetPose::Doze),
+                pet_x,
+                pet_y,
+            );
             put_line(
                 area,
                 buffer,
@@ -524,8 +533,7 @@ fn render_compact(
                 auto_style(SemanticTone::Tone2),
             );
         } else {
-            let compact = downsample2x(pet_sprite(frame.pose));
-            draw_sprite(area, buffer, &compact, pet_x, pet_y);
+            draw_sprite(area, buffer, pet_sprite_compact(frame.pose), pet_x, pet_y);
         }
     }
 

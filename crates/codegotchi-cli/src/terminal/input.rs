@@ -16,6 +16,11 @@ use super::{CodexInputModes, MouseEncoding, MouseTrackingMode};
 /// `16.0` to the backend `pointer_distance` metric, whose thresholds stay
 /// `1_500 ms` and `120.0`.
 pub const POINTER_DISTANCE_PER_CELL: f32 = 16.0;
+/// Minimum gesture duration for a pet to count, per the locked backend
+/// contract. Strokes only start once a gesture qualifies.
+pub const PET_MIN_INTERACTION_MS: u64 = 1_500;
+/// Minimum pointer path length (in backend units) for a pet to count.
+pub const PET_MIN_POINTER_DISTANCE: f32 = 120.0;
 
 /// Sums Euclidean terminal-cell path lengths and converts them to the
 /// backend pointer-distance metric.
@@ -64,11 +69,25 @@ impl PetGesture {
     /// Completes the gesture, returning `(interaction_ms, pointer_distance)`.
     #[must_use]
     pub fn finish(self) -> (u64, f32) {
+        self.metrics()
+    }
+
+    /// Current `(interaction_ms, pointer_distance)` without consuming the
+    /// gesture, so the session can keep emitting strokes while it is active.
+    #[must_use]
+    pub fn metrics(&self) -> (u64, f32) {
         let interaction_ms = self
             .started_at
             .map(|start| start.elapsed().as_millis() as u64)
             .unwrap_or(0);
         (interaction_ms, self.cells * POINTER_DISTANCE_PER_CELL)
+    }
+
+    /// Whether this gesture already meets the backend pet thresholds.
+    #[must_use]
+    pub fn qualified(&self) -> bool {
+        let (interaction_ms, pointer_distance) = self.metrics();
+        interaction_ms >= PET_MIN_INTERACTION_MS && pointer_distance >= PET_MIN_POINTER_DISTANCE
     }
 
     #[must_use]
@@ -98,6 +117,13 @@ pub enum RoomCareRequest {
         interaction_ms: u64,
         pointer_distance: f32,
     },
+    /// One increment of an active, already-qualified petting gesture. The
+    /// session emits these every tick while the user keeps petting so the
+    /// happiness bar rises continuously (until full) instead of only on
+    /// pointer release.
+    PetStroke {
+        action_id: Uuid,
+    },
 }
 
 /// Injection seam for authoritative care requests. The production
@@ -108,6 +134,7 @@ pub trait CareGateway {
     fn clean(&self, action_id: Uuid, poop_id: Uuid);
     fn nap(&self, action_id: Uuid);
     fn pet(&self, action_id: Uuid, interaction_ms: u64, pointer_distance: f32);
+    fn pet_stroke(&self, action_id: Uuid);
 }
 
 /// Pure room-mouse state machine. It owns petting-gesture and food-drag state
@@ -177,7 +204,9 @@ impl RoomInputSession {
                     // accumulate distance.
                     gesture.move_to(point);
                     let (interaction_ms, pointer_distance) = gesture.finish();
-                    if interaction_ms >= 1_500 && pointer_distance >= 120.0 {
+                    if interaction_ms >= PET_MIN_INTERACTION_MS
+                        && pointer_distance >= PET_MIN_POINTER_DISTANCE
+                    {
                         requests.push(RoomCareRequest::Pet {
                             action_id: Uuid::new_v4(),
                             interaction_ms,
@@ -215,6 +244,14 @@ impl RoomInputSession {
     #[must_use]
     pub fn active_drag(&self) -> Option<(&'static str, Position)> {
         self.dragging_food.zip(self.drag_position)
+    }
+
+    /// True while a petting gesture is active and already meets the backend
+    /// duration/distance contract. The session uses this to keep applying
+    /// authoritative happiness strokes each tick until the gesture ends.
+    #[must_use]
+    pub fn petting_qualified(&self) -> bool {
+        self.gesture.as_ref().is_some_and(PetGesture::qualified)
     }
 }
 

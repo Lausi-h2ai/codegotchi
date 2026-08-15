@@ -101,6 +101,13 @@ impl CareGateway for RecordingCareGateway {
             pointer_distance,
         });
     }
+
+    fn pet_stroke(&self, action_id: Uuid) {
+        self.requests
+            .lock()
+            .unwrap()
+            .push(RoomCareRequest::PetStroke { action_id });
+    }
 }
 
 fn apply(gateway: &RecordingCareGateway, requests: Vec<RoomCareRequest>) {
@@ -116,6 +123,7 @@ fn apply(gateway: &RecordingCareGateway, requests: Vec<RoomCareRequest>) {
                 interaction_ms,
                 pointer_distance,
             } => gateway.pet(action_id, interaction_ms, pointer_distance),
+            RoomCareRequest::PetStroke { action_id } => gateway.pet_stroke(action_id),
         }
     }
 }
@@ -177,6 +185,82 @@ fn petting_gesture_submits_only_after_backend_thresholds() {
         }
         other => panic!("expected Pet request, got {other:?}"),
     }
+}
+
+/// The session emits continuous happiness strokes only while a petting
+/// gesture is active AND already qualifies; a bare press or a short wiggle
+/// must never stroke, and pointer-up still submits the discrete Pet.
+#[test]
+fn petting_qualified_gates_continuous_strokes() {
+    let snapshot = base_snapshot();
+    let room = Rect::new(0, 0, 40, 14);
+    let mut input = RoomInputSession::default();
+    let gateway = RecordingCareGateway::default();
+
+    let mut requests = input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(MouseEventKind::Down(MouseButton::Left), 10, 6),
+    );
+    apply(&gateway, requests);
+    assert!(
+        !input.petting_qualified(),
+        "a fresh press is not yet a qualifying pet"
+    );
+    assert!(gateway.requests.lock().unwrap().is_empty());
+
+    // Short wiggle before the duration threshold: still not qualified.
+    requests = input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(MouseEventKind::Drag(MouseButton::Left), 12, 6),
+    );
+    apply(&gateway, requests);
+    assert!(!input.petting_qualified());
+
+    std::thread::sleep(Duration::from_millis(1_600));
+    for point in [
+        Position::new(14, 6),
+        Position::new(16, 7),
+        Position::new(18, 8),
+    ] {
+        requests = input.process(
+            room,
+            &snapshot,
+            &default_frame(),
+            &mouse(MouseEventKind::Drag(MouseButton::Left), point.x, point.y),
+        );
+        apply(&gateway, requests);
+    }
+    assert!(
+        input.petting_qualified(),
+        "an active gesture past 1500ms and 120 distance should keep stroking"
+    );
+
+    requests = input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(MouseEventKind::Up(MouseButton::Left), 18, 8),
+    );
+    apply(&gateway, requests);
+
+    let recorded = gateway.requests.lock().unwrap();
+    assert!(
+        !input.petting_qualified(),
+        "pointer-up ends the gesture so strokes stop"
+    );
+    assert_eq!(
+        recorded.len(),
+        1,
+        "release submits exactly one discrete Pet"
+    );
+    assert!(
+        matches!(&recorded[0], RoomCareRequest::Pet { .. }),
+        "the release request must be the discrete Pet"
+    );
 }
 
 /// The pet hitbox follows the presentation wander offset: a gesture that
@@ -508,6 +592,7 @@ fn action_id(request: &RoomCareRequest) -> Uuid {
         RoomCareRequest::Feed { action_id, .. }
         | RoomCareRequest::Clean { action_id, .. }
         | RoomCareRequest::Nap { action_id }
-        | RoomCareRequest::Pet { action_id, .. } => *action_id,
+        | RoomCareRequest::Pet { action_id, .. }
+        | RoomCareRequest::PetStroke { action_id } => *action_id,
     }
 }

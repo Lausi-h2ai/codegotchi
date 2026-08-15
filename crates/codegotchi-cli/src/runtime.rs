@@ -228,6 +228,12 @@ impl AuthoritativeRuntime {
         })
     }
 
+    /// Applies one increment of an in-progress petting gesture so happiness
+    /// rises continuously while the user pets, not only on pointer release.
+    pub fn pet_stroke(&self, action_id: Uuid) -> Result<MutationReceipt, RuntimeError> {
+        self.apply_care(CareCommand::PetStroke { action_id })
+    }
+
     pub fn apply_care(&self, command: CareCommand) -> Result<MutationReceipt, RuntimeError> {
         let mut simulation = self.lock_simulation()?;
         let before = simulation.snapshot();
@@ -394,6 +400,7 @@ fn care_action_id(command: &CareCommand) -> Uuid {
         CareCommand::Feed { action_id, .. }
         | CareCommand::CleanPoop { action_id, .. }
         | CareCommand::Pet { action_id, .. }
+        | CareCommand::PetStroke { action_id }
         | CareCommand::Nap { action_id } => *action_id,
     }
 }

@@ -19,6 +19,13 @@ use ratatui::{
 use uuid::Uuid;
 
 fn main() {
+    // Optional per-frame hold so a screen capture can catch a specific
+    // layout (e.g. `CG_FIXTURE_PAUSE_MS=20000` under xterm + import).
+    let pause_ms = std::env::var("CG_FIXTURE_PAUSE_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+
     let now = Utc::now();
     let pet = Pet::with_inventory(
         Uuid::from_u128(1),
@@ -80,6 +87,9 @@ fn main() {
                     }
                 }
                 println!("{row}");
+            }
+            if pause_ms > 0 {
+                std::thread::sleep(Duration::from_millis(pause_ms));
             }
         }
     }
