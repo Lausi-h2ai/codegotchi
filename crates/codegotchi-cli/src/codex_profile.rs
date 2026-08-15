@@ -533,24 +533,39 @@ fn verify_profile_path_identity(
 }
 
 /// Codex 0.147 persists its normal hook approval by mutating a user profile:
-/// it prepends the selected approvals reviewer and appends one trusted hash
+/// it may prepend the selected approvals reviewer and appends one trusted hash
 /// state entry per discovered CodeGotchi hook. The profile name remains based
 /// on the pristine rendered bytes; this validator accepts only that exact
-/// Codex-managed extension and never rewrites it.
+/// Codex-managed extension (with or without the reviewer prefix, depending on
+/// the acceptance path taken by the current Codex build) and never rewrites
+/// it.
 fn codex_managed_profile_matches(
     actual: &[u8],
     pristine: &[u8],
     path: &Path,
     hook_command: &str,
 ) -> bool {
-    let Some(mut remaining) = actual.strip_prefix(MANAGED_PROFILE_PREFIX) else {
+    // The reviewer prefix is optional: some acceptance paths (for example
+    // "Trust all and continue" in Codex 0.147) append only the trust state,
+    // while the automatic-reviewer path prepends `approvals_reviewer` first.
+    let remaining = actual
+        .strip_prefix(MANAGED_PROFILE_PREFIX)
+        .unwrap_or(actual);
+    let Some(mut remaining) = remaining.strip_prefix(pristine) else {
         return false;
     };
-    if !remaining.starts_with(pristine) {
-        return false;
-    }
-    remaining = &remaining[pristine.len()..];
 
+    codex_managed_trust_state_matches(&mut remaining, path, hook_command)
+}
+
+/// Validates the exact `[hooks.state]` block Codex appends after the rendered
+/// profile. Every discovered CodeGotchi hook must have exactly one trusted
+/// entry with the canonical hash; anything else is rejected.
+fn codex_managed_trust_state_matches(
+    remaining: &mut &[u8],
+    path: &Path,
+    hook_command: &str,
+) -> bool {
     let Ok(state) = std::str::from_utf8(remaining) else {
         return false;
     };
@@ -862,6 +877,41 @@ mod tests {
     }
 
     #[test]
+    fn codex_managed_trust_metadata_without_reviewer_prefix_is_reused() {
+        // Codex 0.147's "Trust all and continue" acceptance appends the
+        // trusted `[hooks.state]` block directly after the rendered profile
+        // without prepending an `approvals_reviewer` line (observed against a
+        // real acceptance mutation). The validator must accept that exact
+        // grammar too, otherwise the next launch is blocked by a
+        // ContentMismatch after the user legitimately trusted the hooks.
+        let home = std::env::temp_dir().join(format!(
+            "codegotchi-profile-managed-trust-noprefix-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&home).unwrap();
+        let session_file = home.join("runtime-metadata.json");
+        let hook_command = "codegotchi hook";
+        let profile = PersistentCodexProfile::ensure(&home, &session_file, hook_command).unwrap();
+        let path = profile.config_path().to_path_buf();
+        let pristine = fs::read(&path).unwrap();
+        let approved = approved_profile_fixture_without_prefix(&path, &pristine, hook_command);
+        fs::write(&path, approved).unwrap();
+        let inode = fs::metadata(&path).unwrap().ino();
+
+        let reused = PersistentCodexProfile::ensure(&home, &session_file, hook_command)
+            .expect("unprefixed Codex 0.147 trust metadata should be accepted");
+        assert_eq!(reused.config_path(), path);
+        assert_eq!(fs::metadata(&path).unwrap().ino(), inode);
+
+        let guard = reused.acquire_spawn_guard().unwrap();
+        guard
+            .verify_before_spawn()
+            .expect("guard revalidation accepts the unprefixed trust grammar");
+        drop(guard);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
     fn codex_managed_trust_metadata_rejects_hook_and_metadata_mutations() {
         let mutations = [
             "altered hook command",
@@ -870,76 +920,98 @@ mod tests {
             "malformed trust hash",
         ];
 
-        for label in mutations {
-            let home = std::env::temp_dir().join(format!(
-                "codegotchi-profile-managed-trust-mutation-{}",
-                Uuid::new_v4()
-            ));
-            fs::create_dir_all(&home).unwrap();
-            let session_file = home.join("runtime-metadata.json");
-            let hook_command = "codegotchi hook";
-            let profile =
-                PersistentCodexProfile::ensure(&home, &session_file, hook_command).unwrap();
-            let path = profile.config_path().to_path_buf();
-            let pristine = fs::read(&path).unwrap();
-            let mut approved = approved_profile_fixture(&path, &pristine, hook_command);
-            match label {
-                "altered hook command" => {
-                    let needle = b"command = \"codegotchi hook\"";
-                    let replacement = b"command = \"attacker hook\"";
-                    let start = approved
-                        .windows(needle.len())
-                        .position(|window| window == needle)
-                        .unwrap();
-                    approved.splice(start..start + needle.len(), replacement.iter().copied());
-                }
-                "extra unrelated config" => {
-                    let insert_at = approved
-                        .windows(b"[features]".len())
-                        .position(|window| window == b"[features]")
-                        .unwrap();
-                    approved.splice(
-                        insert_at..insert_at,
-                        b"model = \"foreign\"\n\n".iter().copied(),
+        for with_prefix in [true, false] {
+            for label in mutations {
+                let home = std::env::temp_dir().join(format!(
+                    "codegotchi-profile-managed-trust-mutation-{}-{}",
+                    if with_prefix { "prefixed" } else { "noprefix" },
+                    Uuid::new_v4()
+                ));
+                fs::create_dir_all(&home).unwrap();
+                let session_file = home.join("runtime-metadata.json");
+                let hook_command = "codegotchi hook";
+                let profile =
+                    PersistentCodexProfile::ensure(&home, &session_file, hook_command).unwrap();
+                let path = profile.config_path().to_path_buf();
+                let pristine = fs::read(&path).unwrap();
+                let mut approved = if with_prefix {
+                    approved_profile_fixture(&path, &pristine, hook_command)
+                } else {
+                    approved_profile_fixture_without_prefix(&path, &pristine, hook_command)
+                };
+                match label {
+                    "altered hook command" => {
+                        let needle = b"command = \"codegotchi hook\"";
+                        let replacement = b"command = \"attacker hook\"";
+                        let start = approved
+                            .windows(needle.len())
+                            .position(|window| window == needle)
+                            .unwrap();
+                        approved.splice(start..start + needle.len(), replacement.iter().copied());
+                    }
+                    "extra unrelated config" => {
+                        let insert_at = approved
+                            .windows(b"[features]".len())
+                            .position(|window| window == b"[features]")
+                            .unwrap();
+                        approved.splice(
+                            insert_at..insert_at,
+                            b"model = \"foreign\"\n\n".iter().copied(),
+                        );
+                    }
+                    "foreign trust entry" => {
+                        approved.extend_from_slice(
+                        b"[hooks.state.\"/foreign/profile:pre_tool_use:0:0\"]\ntrusted_hash = \"sha256:0000000000000000000000000000000000000000000000000000000000000000\"\n\n",
                     );
+                    }
+                    "malformed trust hash" => {
+                        let needle = b"trusted_hash = \"sha256:";
+                        let start = approved
+                            .windows(needle.len())
+                            .position(|window| window == needle)
+                            .unwrap()
+                            + needle.len();
+                        approved[start] = b'Z';
+                    }
+                    _ => unreachable!(),
                 }
-                "foreign trust entry" => {
-                    approved.extend_from_slice(
-                    b"[hooks.state.\"/foreign/profile:pre_tool_use:0:0\"]\ntrusted_hash = \"sha256:0000000000000000000000000000000000000000000000000000000000000000\"\n\n",
-                );
-                }
-                "malformed trust hash" => {
-                    let needle = b"trusted_hash = \"sha256:";
-                    let start = approved
-                        .windows(needle.len())
-                        .position(|window| window == needle)
-                        .unwrap()
-                        + needle.len();
-                    approved[start] = b'Z';
-                }
-                _ => unreachable!(),
-            }
-            fs::write(&path, &approved).unwrap();
-            drop(profile);
+                fs::write(&path, &approved).unwrap();
+                drop(profile);
 
-            let error = PersistentCodexProfile::ensure(&home, &session_file, hook_command)
-                .expect_err(label);
-            assert!(
-                matches!(error, CodexProfileError::ContentMismatch(_)),
-                "{label}: {error}"
-            );
-            assert_eq!(
-                fs::read(&path).unwrap(),
-                approved,
-                "{label} must not overwrite"
-            );
-            fs::remove_dir_all(home).unwrap();
+                let error = PersistentCodexProfile::ensure(&home, &session_file, hook_command)
+                    .expect_err(&format!("{label} with prefix={with_prefix}"));
+                assert!(
+                    matches!(error, CodexProfileError::ContentMismatch(_)),
+                    "{label} with prefix={with_prefix}: {error}"
+                );
+                assert_eq!(
+                    fs::read(&path).unwrap(),
+                    approved,
+                    "{label} with prefix={with_prefix} must not overwrite"
+                );
+                fs::remove_dir_all(home).unwrap();
+            }
         }
     }
 
     fn approved_profile_fixture(path: &Path, pristine: &[u8], hook_command: &str) -> Vec<u8> {
         let mut approved = b"approvals_reviewer = \"auto_review\"\n".to_vec();
         approved.extend_from_slice(pristine);
+        append_trust_state(&mut approved, path, hook_command);
+        approved
+    }
+
+    fn approved_profile_fixture_without_prefix(
+        path: &Path,
+        pristine: &[u8],
+        hook_command: &str,
+    ) -> Vec<u8> {
+        let mut approved = pristine.to_vec();
+        append_trust_state(&mut approved, path, hook_command);
+        approved
+    }
+
+    fn append_trust_state(approved: &mut Vec<u8>, path: &Path, hook_command: &str) {
         approved.extend_from_slice(b"[hooks.state]\n\n");
         for (_event, event_key) in MANAGED_TRUST_EVENTS {
             approved.extend_from_slice(
@@ -952,7 +1024,6 @@ mod tests {
                 .as_bytes(),
             );
         }
-        approved
     }
 
     fn test_codex_hook_trusted_hash(hook_command: &str, event_key: &str) -> String {
