@@ -230,6 +230,14 @@ fn production_session_core_output_reaches_the_production_renderer() {
     assert_eq!(cursor, Some(ratatui::layout::Position::new(5, 0)));
 }
 
+#[test]
+fn production_session_core_exposes_terminal_query_replies() {
+    let mut core = TerminalSessionCore::new(4, 20);
+
+    assert_eq!(core.process_output(b"\x1b[2;3H\x1b[6n"), b"\x1b[2;3R");
+    assert!(core.process_output(b"ordinary").is_empty());
+}
+
 #[tokio::test]
 async fn closed_signal_receiver_is_observed_once_and_can_be_disabled() {
     let (sender, mut receiver) = terminal_session_signal_channel(0);

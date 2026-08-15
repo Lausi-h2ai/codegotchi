@@ -1,4 +1,6 @@
-use vt100::{MouseProtocolEncoding, MouseProtocolMode};
+use std::collections::VecDeque;
+
+use vt100::{Callbacks, MouseProtocolEncoding, MouseProtocolMode};
 
 /// The xterm mouse tracking level negotiated by Codex.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -41,6 +43,7 @@ pub struct CodexInputModes {
 const DEFAULT_SCROLLBACK: usize = 1_000;
 const MAX_SCROLLBACK: usize = 10_000;
 const MAX_TRACKED_SEQUENCE: usize = 128;
+const MAX_PENDING_QUERY_RESPONSES: usize = 32;
 
 #[derive(Clone, Copy, Debug)]
 enum TrackerState {
@@ -141,9 +144,60 @@ impl FocusTracker {
     }
 }
 
+/// Collects the small set of terminal queries that the hosted PTY can answer
+/// truthfully from its virtual screen. Responses are drained after each
+/// bounded PTY output chunk, and the queue cap prevents a malicious child from
+/// retaining an unbounded amount of query traffic.
+#[derive(Debug, Default)]
+struct TerminalQueryCallbacks {
+    responses: VecDeque<Vec<u8>>,
+}
+
+impl TerminalQueryCallbacks {
+    fn push(&mut self, response: Vec<u8>) {
+        if self.responses.len() < MAX_PENDING_QUERY_RESPONSES {
+            self.responses.push_back(response);
+        }
+    }
+
+    fn drain(&mut self) -> Vec<u8> {
+        let response_bytes = self.responses.iter().map(Vec::len).sum();
+        let mut responses = Vec::with_capacity(response_bytes);
+        while let Some(response) = self.responses.pop_front() {
+            responses.extend(response);
+        }
+        responses
+    }
+}
+
+impl Callbacks for TerminalQueryCallbacks {
+    fn unhandled_csi(
+        &mut self,
+        screen: &mut vt100::Screen,
+        i1: Option<u8>,
+        i2: Option<u8>,
+        params: &[&[u16]],
+        c: char,
+    ) {
+        if i1.is_some() || i2.is_some() {
+            return;
+        }
+
+        if c == 'n' && params.len() == 1 && params[0] == [6] {
+            let (rows, columns) = screen.size();
+            let (row, column) = screen.cursor_position();
+            let row = row.min(rows.saturating_sub(1));
+            let column = column.min(columns.saturating_sub(1));
+            self.push(format!("\x1b[{};{}R", row + 1, column + 1).into_bytes());
+        } else if c == 'c' && (params.is_empty() || (params.len() == 1 && params[0] == [0])) {
+            self.push(b"\x1b[?1;2c".to_vec());
+        }
+    }
+}
+
 /// Incremental, non-interactive representation of a Codex PTY terminal.
 pub struct CodexScreen {
-    parser: vt100::Parser,
+    parser: vt100::Parser<TerminalQueryCallbacks>,
     focus_tracker: FocusTracker,
 }
 
@@ -159,16 +213,22 @@ impl CodexScreen {
     #[must_use]
     pub fn with_scrollback(rows: u16, cols: u16, scrollback: usize) -> Self {
         Self {
-            parser: vt100::Parser::new(rows.max(1), cols.max(1), scrollback.min(MAX_SCROLLBACK)),
+            parser: vt100::Parser::new_with_callbacks(
+                rows.max(1),
+                cols.max(1),
+                scrollback.min(MAX_SCROLLBACK),
+                TerminalQueryCallbacks::default(),
+            ),
             focus_tracker: FocusTracker::default(),
         }
     }
 
     /// Feeds an arbitrary PTY output chunk to both the VT parser and the
     /// protocol-side focus-mode tracker.
-    pub fn process(&mut self, bytes: &[u8]) {
+    pub fn process(&mut self, bytes: &[u8]) -> Vec<u8> {
         self.parser.process(bytes);
         self.focus_tracker.feed(bytes);
+        self.parser.callbacks_mut().drain()
     }
 
     /// Resizes the virtual terminal while retaining its parser state.

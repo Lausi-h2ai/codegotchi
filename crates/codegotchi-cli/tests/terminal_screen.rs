@@ -243,6 +243,86 @@ fn unknown_and_truncated_controls_leave_subsequent_screen_text_usable() {
 }
 
 #[test]
+fn query_point_reports_cursor_before_later_movement() {
+    let mut screen = CodexScreen::new(4, 20);
+
+    let replies = screen.process(b"\x1b[2;3H\x1b[6n\x1b[H");
+
+    assert_eq!(replies, b"\x1b[2;3R");
+    assert_eq!(screen.cursor_position(), (0, 0));
+}
+
+#[test]
+fn query_point_preserves_split_sequence_state() {
+    let mut screen = CodexScreen::new(4, 20);
+
+    assert!(screen.process(b"\x1b[2;3H\x1b[6").is_empty());
+    assert_eq!(screen.process(b"n"), b"\x1b[2;3R");
+}
+
+#[test]
+fn primary_device_attributes_are_conservative_and_kitty_query_is_unanswered() {
+    let mut screen = CodexScreen::new(4, 20);
+
+    assert_eq!(screen.process(b"\x1b[c\x1b[0c"), b"\x1b[?1;2c\x1b[?1;2c");
+    assert!(screen.process(b"\x1b[?u\x1b[>u\x1b[<u").is_empty());
+}
+
+#[test]
+fn split_osc_color_queries_are_unanswered() {
+    let mut screen = CodexScreen::new(4, 20);
+
+    assert!(screen.process(b"\x1b]10;?").is_empty());
+    assert!(screen.process(b"\x07\x1b]11;?\x07").is_empty());
+    assert!(screen.process(b"\x1b]10;?\x1b\\").is_empty());
+    assert!(screen.process(b"\x1b]11;?\x1b\\").is_empty());
+}
+
+#[test]
+fn deferred_wrap_cursor_reply_is_clamped_to_visible_bounds() {
+    let mut screen = CodexScreen::new(2, 3);
+
+    let replies = screen.process(b"abc\x1b[6n");
+
+    assert_eq!(replies, b"\x1b[1;3R");
+}
+
+#[test]
+fn queries_do_not_change_input_modes() {
+    let mut screen = CodexScreen::new(4, 20);
+    screen.process(b"\x1b[?1h\x1b[?2004h\x1b[?1004h\x1b[?1000h\x1b[?1006h");
+    let before = screen.input_modes();
+
+    let replies = screen.process(b"\x1b[6n\x1b[c\x1b[?u\x1b]10;?\x07\x1b[?2026h");
+
+    assert_eq!(replies, b"\x1b[1;1R\x1b[?1;2c");
+    assert_eq!(screen.input_modes(), before);
+}
+
+#[test]
+fn query_replies_are_drained_without_stale_replies() {
+    let mut screen = CodexScreen::new(4, 20);
+
+    assert_eq!(screen.process(b"\x1b[c"), b"\x1b[?1;2c");
+    assert!(screen.process(b"ordinary text").is_empty());
+    assert!(screen.process(b"ordinary text").is_empty());
+}
+
+#[test]
+fn pending_query_replies_are_bounded_and_drained() {
+    let mut screen = CodexScreen::new(4, 20);
+    let query = b"\x1b[c";
+    let mut queries = Vec::new();
+    for _ in 0..40 {
+        queries.extend_from_slice(query);
+    }
+
+    let replies = screen.process(&queries);
+    assert_eq!(replies, b"\x1b[?1;2c".repeat(32));
+    assert_eq!(screen.process(b"\x1b[6n"), b"\x1b[1;1R");
+}
+
+#[test]
 fn key_encoding_follows_application_mode_and_common_codex_keys() {
     let normal = CodexInputModes::default();
     let application = CodexInputModes {

@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -842,7 +842,8 @@ fn run_outer_pty_route(
         "CODEGOTCHI_OUTER_TTY=$(tty); export CODEGOTCHI_OUTER_TTY; stty rows 24 cols 80; exec {} run --ui {mode} -- codex",
         shell_quote_path(&binary())
     );
-    Command::new("setsid")
+    let mut command = Command::new("setsid");
+    command
         .args(["script", "-q", "-e", "-f", "-c", &command_line, "/dev/null"])
         .current_dir(cwd)
         .env_clear()
@@ -856,11 +857,39 @@ fn run_outer_pty_route(
         .env("CODEGOTCHI_BROWSER", browser)
         .env("FAKE_LAUNCHER_SPAWN_LEDGER", spawn_ledger)
         .env("FAKE_BROWSER_URL", browser_log)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .expect("script creates a real outer PTY")
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().expect("script creates a real outer PTY");
+    // Hold script's stdin pipe open for the whole run. util-linux `script`
+    // treats stdin EOF as an interactive EOF handshake and writes its EOF
+    // byte to the PTY master; the CodeGotchi host's canonical-to-raw
+    // transition then surfaces that queued byte as NUL, which Crossterm
+    // parses as Ctrl+Space and forwards into the Codex child. An open pipe
+    // means script never observes EOF, so the byte-exact query contract is
+    // the only input the child receives.
+    let stdin_holder = child.stdin.take().expect("script stdin pipe");
+    let mut stdout = child.stdout.take().expect("script stdout pipe");
+    let mut stderr = child.stderr.take().expect("script stderr pipe");
+    let stdout_reader = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = Read::read_to_end(&mut stdout, &mut bytes);
+        bytes
+    });
+    let stderr_reader = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = Read::read_to_end(&mut stderr, &mut bytes);
+        bytes
+    });
+    let status = child.wait().expect("script child waits");
+    let stdout = stdout_reader.join().expect("stdout reader joins");
+    let stderr = stderr_reader.join().expect("stderr reader joins");
+    drop(stdin_holder);
+    Output {
+        status,
+        stdout,
+        stderr,
+    }
 }
 
 #[cfg(unix)]
@@ -977,6 +1006,62 @@ fn production_binary_successful_terminal_routes_use_one_pty_child_without_fallba
         }
         assert_no_owned_metadata(&temp, mode);
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires a real outer PTY; run with script and --ignored --test-threads=1"]
+fn production_binary_routes_terminal_queries_to_child_pty_without_compositor_leak() {
+    let codex =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake-codex-query-pty.sh");
+    let temp = TempDir::new("outer-pty-queries");
+    let cwd = temp.join("cwd");
+    fs::create_dir_all(&cwd).expect("PTY query working directory creates");
+    let browser_fixture = temp.join("browser-helper");
+    write_executable(
+        &browser_fixture,
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$1\" >>\"$FAKE_BROWSER_URL\"\n",
+    );
+    let spawn_ledger = temp.join("codex-spawn-ledger.log");
+    let browser_log = temp.join("browser.log");
+
+    let output = run_outer_pty_route(
+        &temp,
+        &cwd,
+        "terminal",
+        &codex,
+        &browser_fixture,
+        &spawn_ledger,
+        &browser_log,
+    );
+    let transcript = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "query fixture route failed: {transcript}"
+    );
+    assert!(
+        transcript.contains("FAKE_QUERY_ROUTE_READY"),
+        "fixture did not receive exact CPR and DA replies: {transcript}"
+    );
+    assert!(
+        !transcript
+            .as_bytes()
+            .windows(b"\x1b[1;1R".len())
+            .any(|window| window == b"\x1b[1;1R")
+    );
+    assert!(
+        !transcript
+            .as_bytes()
+            .windows(b"\x1b[?1;2c".len())
+            .any(|window| window == b"\x1b[?1;2c")
+    );
+    assert_no_owned_metadata(&temp, "terminal query route");
 }
 
 #[cfg(unix)]

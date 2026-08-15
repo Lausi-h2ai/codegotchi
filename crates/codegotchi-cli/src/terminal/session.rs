@@ -241,9 +241,10 @@ impl TerminalSessionCore {
         &self.screen
     }
 
-    /// Feeds one PTY output chunk into the virtual screen and mode read model.
-    pub fn process_output(&mut self, bytes: &[u8]) {
-        self.screen.process(bytes);
+    /// Feeds one PTY output chunk into the virtual screen and mode read model,
+    /// returning bounded terminal-query replies for the child PTY.
+    pub fn process_output(&mut self, bytes: &[u8]) -> Vec<u8> {
+        self.screen.process(bytes)
     }
 
     /// Resizes the virtual screen using `(rows, columns)` order.
@@ -601,13 +602,20 @@ where
         match work {
             SessionWork::Output(message) => match message {
                 Some(ReaderMessage::Data(bytes)) => {
-                    core.process_output(&bytes);
-                    if let Err(error) = draw_frame(
-                        compositor
-                            .as_mut()
-                            .expect("compositor exists while session is rendering"),
-                        &core,
-                    ) {
+                    let replies = core.process_output(&bytes);
+                    if !replies.is_empty()
+                        && let Err(error) = write_input(&mut resources.writer, &replies)
+                    {
+                        body_error = Some(error);
+                    }
+                    if body_error.is_none()
+                        && let Err(error) = draw_frame(
+                            compositor
+                                .as_mut()
+                                .expect("compositor exists while session is rendering"),
+                            &core,
+                        )
+                    {
                         body_error = Some(error);
                     }
                 }
