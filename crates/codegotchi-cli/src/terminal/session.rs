@@ -28,13 +28,17 @@ use ratatui::{
 };
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
+use codegotchi_domain::SimulationSnapshot;
+
 use crate::CodexInvocation;
+use crate::runtime::{AuthoritativeRuntime, RuntimeError};
 
 use super::pty::PtyWriter;
 use super::{
     CodexScreen, CrosstermTerminal, PtyCodexChild, PtyCodexError, TerminalBackend,
-    TerminalEntryError, TerminalGuard, TerminalRestoreError, encode_focus_event, encode_key_event,
-    encode_mouse_event, encode_paste, render_codex,
+    TerminalEntryError, TerminalGuard, TerminalLayout, TerminalRestoreError, choose_layout,
+    encode_focus_event, encode_key_event, encode_mouse_event, encode_paste, render_codex,
+    render_room,
 };
 
 /// A host-owned signal delivered to a running terminal session.
@@ -114,6 +118,8 @@ pub enum TerminalSessionError {
     Render(io::Error),
     /// PTY resize failed.
     Resize(PtyCodexError),
+    /// Subscribing to the authoritative runtime failed.
+    Runtime(RuntimeError),
     /// Child polling, waiting, or reaping failed.
     Child(PtyCodexError),
     /// A reader thread could not be joined after the PTY was closed.
@@ -146,6 +152,7 @@ impl TerminalSessionError {
             | Self::Input(_)
             | Self::Render(_)
             | Self::Resize(_)
+            | Self::Runtime(_)
             | Self::Child(_)
             | Self::ReaderTask(_) => None,
         }
@@ -162,6 +169,7 @@ impl fmt::Display for TerminalSessionError {
             Self::Input(error) => write!(f, "terminal input failed: {error}"),
             Self::Render(error) => write!(f, "terminal render failed: {error}"),
             Self::Resize(error) => error.fmt(f),
+            Self::Runtime(error) => write!(f, "authoritative runtime failed: {error}"),
             Self::Child(error) => error.fmt(f),
             Self::ReaderTask(error) => write!(f, "Codex PTY reader task failed: {error}"),
             Self::Cleanup { error, failures } => {
@@ -189,6 +197,7 @@ impl std::error::Error for TerminalSessionError {
             Self::Initialization(error) => Some(error),
             Self::Spawn(error) | Self::Resize(error) | Self::Child(error) => Some(error),
             Self::Reader(error) | Self::Input(error) | Self::Render(error) => Some(error),
+            Self::Runtime(error) => Some(error),
             Self::Restoration(error) => Some(error),
             Self::Body { error, .. } => Some(error.as_ref()),
             Self::Cleanup { error, .. } => error.as_deref().and_then(|error| error.source()),
@@ -224,6 +233,8 @@ impl TerminalSessionError {
 /// to consult the modes negotiated by the latest output.
 pub struct TerminalSessionCore {
     screen: CodexScreen,
+    layout: TerminalLayout,
+    snapshot: Option<SimulationSnapshot>,
 }
 
 impl TerminalSessionCore {
@@ -232,6 +243,8 @@ impl TerminalSessionCore {
     pub fn new(rows: u16, columns: u16) -> Self {
         Self {
             screen: CodexScreen::new(rows, columns),
+            layout: choose_layout(Rect::new(0, 0, columns, rows), None),
+            snapshot: None,
         }
     }
 
@@ -239,6 +252,23 @@ impl TerminalSessionCore {
     #[must_use]
     pub fn screen(&self) -> &CodexScreen {
         &self.screen
+    }
+
+    /// Returns the current Full/Compact/Minimal pane split.
+    #[must_use]
+    pub fn layout(&self) -> TerminalLayout {
+        self.layout
+    }
+
+    /// Returns the latest authoritative room snapshot, if any.
+    #[must_use]
+    pub fn snapshot(&self) -> Option<&SimulationSnapshot> {
+        self.snapshot.as_ref()
+    }
+
+    /// Replaces the authoritative room snapshot.
+    pub fn set_snapshot(&mut self, snapshot: SimulationSnapshot) {
+        self.snapshot = Some(snapshot);
     }
 
     /// Feeds one PTY output chunk into the virtual screen and mode read model,
@@ -249,7 +279,9 @@ impl TerminalSessionCore {
 
     /// Resizes the virtual screen using `(rows, columns)` order.
     pub fn resize(&mut self, rows: u16, columns: u16) {
-        self.screen.resize(rows, columns);
+        self.layout = choose_layout(Rect::new(0, 0, columns, rows), Some(self.layout.room_mode));
+        self.screen
+            .resize(self.layout.codex.height, self.layout.codex.width);
     }
 
     /// Encodes a physical event from the mode state current at this instant.
@@ -321,7 +353,15 @@ where
     let mut guard = TerminalGuard::enter(CrosstermTerminal::new())
         .map_err(TerminalSessionError::Initialization)?;
     let body =
-        run_session_after_entry(&mut guard, invocation, signals, &mut events, || Ok(())).await;
+        run_session_after_entry(
+            &mut guard,
+            invocation,
+            signals,
+            &mut events,
+            None,
+            || Ok(()),
+        )
+        .await;
     finish_guard(&mut guard, body)
 }
 
@@ -334,6 +374,7 @@ where
 pub async fn run_terminal_session_with_spawn_guard_and_initialization_recovery<F>(
     invocation: &CodexInvocation,
     signals: TerminalSessionSignalReceiver,
+    runtime: Option<Arc<AuthoritativeRuntime>>,
     before_spawn: F,
 ) -> Result<portable_pty::ExitStatus, TerminalSessionStartError>
 where
@@ -359,6 +400,7 @@ where
             .take()
             .expect("terminal signal receiver is moved after successful entry"),
         &mut events,
+        runtime,
         before_spawn,
     )
     .await;
@@ -509,6 +551,7 @@ async fn run_session_after_entry<F>(
     invocation: &CodexInvocation,
     signals: TerminalSessionSignalReceiver,
     events: &mut impl TerminalSessionEventSource,
+    runtime: Option<Arc<AuthoritativeRuntime>>,
     before_spawn: F,
 ) -> Result<portable_pty::ExitStatus, TerminalSessionError>
 where
@@ -519,12 +562,31 @@ where
         .size()
         .map_err(TerminalSessionError::Input)?;
     let mut core = TerminalSessionCore::new(rows, columns);
+    // Normalize the virtual screen and pane split to the Codex rectangle
+    // before the child exists, so the spawned PTY, the virtual screen, and
+    // the rendered upper pane always agree on dimensions. Without this the
+    // child would believe it owns the full terminal while the room covered
+    // its lower rows.
+    core.resize(rows, columns);
+    let codex = core.layout().codex;
+    if codex.width == 0 || codex.height == 0 {
+        return Err(TerminalSessionError::Input(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "terminal is too small for a Codex pane plus the CodeGotchi room",
+        )));
+    }
+    let mut snapshot_receiver = None;
+    if let Some(runtime) = runtime {
+        let (snapshot, receiver) = runtime.subscribe().map_err(TerminalSessionError::Runtime)?;
+        core.set_snapshot(snapshot);
+        snapshot_receiver = Some(receiver);
+    }
 
     // This is the sole production spawn call. Entry and the physical size
     // query above have already succeeded, preserving pre-spawn UI fallback.
     before_spawn()?;
-    let mut child =
-        PtyCodexChild::spawn(invocation, rows, columns).map_err(TerminalSessionError::Spawn)?;
+    let mut child = PtyCodexChild::spawn(invocation, codex.height, codex.width)
+        .map_err(TerminalSessionError::Spawn)?;
     let reader = match child.interruptible_reader() {
         Ok(reader) => reader,
         Err(error) => {
@@ -704,6 +766,32 @@ where
                 Ok(None) => {}
                 Err(error) => body_error = Some(error),
             },
+        }
+        if body_error.is_none() {
+            let mut redraw = false;
+            if let Some(receiver) = snapshot_receiver.as_mut() {
+                loop {
+                    match receiver.try_recv() {
+                        Ok(snapshot) => {
+                            core.set_snapshot(snapshot);
+                            redraw = true;
+                        }
+                        Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
+                        Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::TryRecvError::Closed) => break,
+                    }
+                }
+            }
+            if redraw
+                && let Err(error) = draw_frame(
+                    compositor
+                        .as_mut()
+                        .expect("compositor exists while session is rendering"),
+                    &core,
+                )
+            {
+                body_error = Some(error);
+            }
         }
     }
 
@@ -1075,12 +1163,13 @@ fn resize_compositor<B>(
 where
     B: RatatuiBackend<Error = io::Error>,
 {
+    core.resize(rows, columns);
+    let codex = core.layout().codex;
     if let Some(child) = child {
         child
-            .resize(rows, columns)
+            .resize(codex.height, codex.width)
             .map_err(TerminalSessionError::Resize)?;
     }
-    core.resize(rows, columns);
     compositor
         .resize(Rect::new(0, 0, columns, rows))
         .map_err(TerminalSessionError::Render)?;
@@ -1106,7 +1195,11 @@ where
 {
     compositor
         .draw(|frame| {
-            let cursor = render_codex(core.screen(), frame.area(), frame.buffer_mut());
+            let layout = core.layout();
+            let cursor = render_codex(core.screen(), layout.codex, frame.buffer_mut());
+            if let Some(snapshot) = core.snapshot() {
+                render_room(layout.room, frame.buffer_mut(), snapshot);
+            }
             if let Some(cursor) = cursor {
                 frame.set_cursor_position(cursor);
             }
@@ -1381,10 +1474,10 @@ mod tests {
     #[test]
     fn persistent_compositor_clears_removed_text_from_physical_screen() {
         let bytes = Arc::new(Mutex::new(Vec::new()));
-        let mut compositor = fixed_compositor(Arc::clone(&bytes), 6, 2);
-        let mut parser = vt100::Parser::new(2, 6, 0);
+        let mut compositor = fixed_compositor(Arc::clone(&bytes), 6, 24);
+        let mut parser = vt100::Parser::new(24, 6, 0);
         let mut offset = 0;
-        let mut core = TerminalSessionCore::new(2, 6);
+        let mut core = TerminalSessionCore::new(24, 6);
         core.process_output(b"HELLO");
 
         draw_frame(&mut compositor, &core).expect("first frame should render");
@@ -1412,10 +1505,10 @@ mod tests {
         force_color_output(true);
         let _restore = ColorOutputRestore { was_disabled };
         let bytes = Arc::new(Mutex::new(Vec::new()));
-        let mut compositor = fixed_compositor(Arc::clone(&bytes), 6, 2);
-        let mut parser = vt100::Parser::new(2, 6, 0);
+        let mut compositor = fixed_compositor(Arc::clone(&bytes), 6, 24);
+        let mut parser = vt100::Parser::new(24, 6, 0);
         let mut offset = 0;
-        let mut core = TerminalSessionCore::new(2, 6);
+        let mut core = TerminalSessionCore::new(24, 6);
         core.process_output(b"\x1b[31;44;1mSTALE");
 
         draw_frame(&mut compositor, &core).expect("styled frame should render");
@@ -1426,9 +1519,9 @@ mod tests {
         assert!(styled.bold());
 
         core.process_output(b"\x1b[0m\x1b[2J\x1b[H");
-        resize_compositor(&mut compositor, &mut core, 1, 3, None)
+        resize_compositor(&mut compositor, &mut core, 4, 6, None)
             .expect("resize/default frame should render");
-        parser.screen_mut().set_size(1, 3);
+        parser.screen_mut().set_size(1, 6);
         apply_new_output(&bytes, &mut offset, &mut parser);
 
         let cleared = parser.screen().cell(0, 0).expect("cell exists");

@@ -453,11 +453,13 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
                 .expect("terminal route retains the installed signal controller");
             let (sender, receiver) = terminal_session_signal_channel(16);
             terminal_forwarder = Some(tokio::spawn(forward_terminal_signals(controller, sender)));
+            let room_runtime = std::sync::Arc::clone(&runtime);
             async {
                 let result =
                     run_terminal_session_with_spawn_guard_and_initialization_recovery(
                         &invocation,
                         receiver,
+                        Some(room_runtime),
                         || {
                             profile_guard
                                 .verify_before_spawn()

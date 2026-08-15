@@ -968,10 +968,13 @@ fn production_binary_successful_terminal_routes_use_one_pty_child_without_fallba
             field("pid").parse::<u32>().is_ok_and(|pid| pid > 0),
             "{mode}: spawn record PID is not positive: {spawn_record}"
         );
+        // The child PTY is sized to the Codex pane, not the full outer
+        // terminal: a 24 row outer PTY selects Minimal (3 row room, 21 row
+        // Codex pane).
         assert_eq!(
             field("size"),
-            "24 80",
-            "{mode}: Codex PTY size was not the expected usable geometry: {spawn_record}"
+            "21 80",
+            "{mode}: Codex PTY size was not the expected pane geometry: {spawn_record}"
         );
         let inner_tty = field("tty");
         let outer_tty = field("outer_tty");

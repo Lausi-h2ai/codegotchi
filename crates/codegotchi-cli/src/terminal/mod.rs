@@ -1,11 +1,15 @@
+mod behavior;
 mod host;
 mod input;
 mod layout;
 mod pty;
 mod render;
+mod room;
 mod screen;
 mod session;
+mod theme;
 
+pub use behavior::{PresentationActivity, has_authoritative_nap, presentation_activity};
 pub use host::{
     CrosstermTerminal, EntryDetail, EntryStage, RestoreFailure, TerminalBackend,
     TerminalEntryError, TerminalGuard, TerminalRestoreError, TerminalRunError, TerminalStep,
@@ -17,6 +21,7 @@ pub use input::{
 pub use layout::{RoomLayoutMode, TerminalLayout, choose_layout};
 pub use pty::{PtyCodexChild, PtyCodexError};
 pub use render::render_codex;
+pub use room::render_room;
 pub use screen::{CodexInputModes, CodexScreen, MouseEncoding, MouseTrackingMode};
 pub use session::{
     TerminalSessionCore, TerminalSessionError, TerminalSessionEventFuture,
@@ -26,3 +31,4 @@ pub use session::{
     run_terminal_session_with_spawn_guard_and_initialization_recovery,
     terminal_session_signal_channel,
 };
+pub use theme::{SemanticTone, auto_style};

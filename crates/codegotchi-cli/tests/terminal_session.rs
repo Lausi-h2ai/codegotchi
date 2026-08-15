@@ -129,6 +129,7 @@ async fn launcher_terminal_entry_retains_signals_when_initialization_fails() {
     let result = run_terminal_session_with_spawn_guard_and_initialization_recovery(
         &invocation(),
         receiver,
+        None,
         || {
             before_spawn_calls += 1;
             Ok(())
@@ -208,7 +209,10 @@ fn production_session_core_uses_negotiated_modes_for_every_input_kind() {
 fn production_session_core_resizes_rows_before_columns_and_bounds_screen_state() {
     let mut core = TerminalSessionCore::new(4, 10);
     core.resize(31, 120);
-    assert_eq!(core.screen().size(), (31, 120));
+    // Resize normalizes the virtual screen to the Codex pane: a 31 row
+    // terminal selects Compact (7 row room, 24 row Codex pane), proving the
+    // (rows, columns) argument order reaches the pane-sized screen.
+    assert_eq!(core.screen().size(), (24, 120));
 
     let output = "line\r\n".repeat(20_000);
     core.process_output(output.as_bytes());
@@ -587,11 +591,14 @@ async fn composed_session_adapter_delivers_exact_invocation_modes_input_and_stat
     assert!(resize_task.finish().await);
     assert_eq!(status.exit_code(), 0);
     let output = fs::read_to_string(&log).expect("fixture should record direct adapter inputs");
+    // The child PTY is sized to the Codex pane, not the full terminal. A 24
+    // row outer PTY yields the Minimal layout (3 row room, 21 row Codex pane);
+    // a 31 x 120 resize enters Compact (7 row room, 24 row Codex pane).
     assert!(output.starts_with(
-        "argc=2\narg[1]=--literal\narg[2]=argument with spaces\nenv=exact-value\nsize=24 80\n"
+        "argc=2\narg[1]=--literal\narg[2]=argument with spaces\nenv=exact-value\nsize=21 80\n"
     ));
     assert!(output.contains("1b4f411b5b3230307e610a621b5b3230317e1b5b491b5b3c303b353b364d\n"));
-    assert!(output.ends_with("resized-size=31 120\n"));
+    assert!(output.ends_with("resized-size=24 120\n"));
     fs::remove_file(log).expect("remove composed adapter log");
 
     // Keep explicit restoration in the success path, with Drop covering
