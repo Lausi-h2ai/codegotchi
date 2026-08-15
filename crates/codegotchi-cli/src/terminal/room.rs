@@ -6,7 +6,9 @@ use ratatui::{
 };
 use uuid::Uuid;
 
-use super::behavior::{PresentationActivity, has_authoritative_nap, presentation_activity};
+use super::behavior::{
+    PetPose, PresentationActivity, PresentationFrame, has_authoritative_nap, presentation_activity,
+};
 use super::theme::{SemanticTone, auto_style};
 
 const FULL_ROOM_HEIGHT: u16 = 14;
@@ -54,6 +56,18 @@ impl RoomGeometry {
 /// same regions.
 #[must_use]
 pub fn room_geometry(area: Rect, snapshot: &SimulationSnapshot) -> RoomGeometry {
+    room_geometry_with_frame(area, snapshot, &PresentationFrame::default())
+}
+
+/// Computes the interactive geometry for the current room rectangle,
+/// authoritative snapshot, and presentation frame. The pet hitbox follows the
+/// frame's wander offset so mouse care stays aligned with the visible pet.
+#[must_use]
+pub fn room_geometry_with_frame(
+    area: Rect,
+    snapshot: &SimulationSnapshot,
+    frame: &PresentationFrame,
+) -> RoomGeometry {
     if area.is_empty() {
         return RoomGeometry {
             pet: Rect::ZERO,
@@ -65,8 +79,8 @@ pub fn room_geometry(area: Rect, snapshot: &SimulationSnapshot) -> RoomGeometry 
         };
     }
     match room_mode(area.height) {
-        RoomMode::Full => full_geometry(area, snapshot),
-        RoomMode::Compact => compact_geometry(area, snapshot),
+        RoomMode::Full => full_geometry(area, snapshot, frame.offset),
+        RoomMode::Compact => compact_geometry(area, snapshot, frame.offset),
         RoomMode::Minimal => minimal_geometry(area, snapshot),
     }
 }
@@ -77,7 +91,12 @@ pub fn room_geometry(area: Rect, snapshot: &SimulationSnapshot) -> RoomGeometry 
 /// naps, or pets itself here, and bed sleep is used only when
 /// [`has_authoritative_nap`] says so. Rendering is deterministic so the same
 /// snapshot always produces the same cells.
-pub fn render_room(area: Rect, buffer: &mut Buffer, snapshot: &SimulationSnapshot) {
+pub fn render_room(
+    area: Rect,
+    buffer: &mut Buffer,
+    snapshot: &SimulationSnapshot,
+    frame: &PresentationFrame,
+) {
     if area.is_empty() {
         return;
     }
@@ -85,11 +104,13 @@ pub fn render_room(area: Rect, buffer: &mut Buffer, snapshot: &SimulationSnapsho
 
     let activity = presentation_activity(snapshot);
     let napping = has_authoritative_nap(snapshot);
-    let geometry = room_geometry(area, snapshot);
+    let geometry = room_geometry_with_frame(area, snapshot, frame);
 
     match room_mode(area.height) {
-        RoomMode::Full => render_full(area, buffer, snapshot, activity, napping, &geometry),
-        RoomMode::Compact => render_compact(area, buffer, snapshot, activity, napping, &geometry),
+        RoomMode::Full => render_full(area, buffer, snapshot, activity, napping, frame, &geometry),
+        RoomMode::Compact => {
+            render_compact(area, buffer, snapshot, activity, napping, frame, &geometry)
+        }
         RoomMode::Minimal => render_minimal(area, buffer, snapshot, napping),
     }
 }
@@ -111,13 +132,17 @@ fn room_mode(height: u16) -> RoomMode {
     }
 }
 
-fn full_geometry(area: Rect, snapshot: &SimulationSnapshot) -> RoomGeometry {
+fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) -> RoomGeometry {
     let pet_x = area.width.saturating_sub(34).max(2);
-    let pet = Rect::new(
-        area.x.saturating_add(pet_x),
-        area.y.saturating_add(4),
-        (area.width.saturating_sub(pet_x)).min(14),
-        5,
+    let pet = offset_rect(
+        Rect::new(
+            area.x.saturating_add(pet_x),
+            area.y.saturating_add(4),
+            (area.width.saturating_sub(pet_x)).min(14),
+            5,
+        ),
+        offset,
+        area,
     );
     let bed_x = area.width.saturating_sub(16).max(4);
     let bed = Rect::new(
@@ -138,13 +163,17 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot) -> RoomGeometry {
     }
 }
 
-fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot) -> RoomGeometry {
+fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) -> RoomGeometry {
     let pet_x = area.width.saturating_sub(26).max(2);
-    let pet = Rect::new(
-        area.x.saturating_add(pet_x),
-        area.y.saturating_add(1),
-        (area.width.saturating_sub(pet_x)).min(10),
-        3,
+    let pet = offset_rect(
+        Rect::new(
+            area.x.saturating_add(pet_x),
+            area.y.saturating_add(1),
+            (area.width.saturating_sub(pet_x)).min(10),
+            3,
+        ),
+        offset,
+        area,
     );
     let bed_x = area.width.saturating_sub(12).max(4);
     let bed = Rect::new(
@@ -222,6 +251,21 @@ fn poop_slots(
         .collect()
 }
 
+/// Applies a presentation wander offset to a hit rectangle, clamping it inside
+/// the room area.
+fn offset_rect(rect: Rect, offset: (i16, i16), area: Rect) -> Rect {
+    if area.is_empty() {
+        return rect;
+    }
+    let max_x =
+        i64::from(area.x) + i64::from(area.width.saturating_sub(rect.width.min(area.width)));
+    let max_y =
+        i64::from(area.y) + i64::from(area.height.saturating_sub(rect.height.min(area.height)));
+    let x = (i64::from(rect.x) + i64::from(offset.0)).clamp(i64::from(area.x), max_x);
+    let y = (i64::from(rect.y) + i64::from(offset.1)).clamp(i64::from(area.y), max_y);
+    Rect::new(x as u16, y as u16, rect.width, rect.height)
+}
+
 fn reset_area(area: Rect, buffer: &mut Buffer) {
     for y in area.y..area.y.saturating_add(area.height) {
         for x in area.x..area.x.saturating_add(area.width) {
@@ -277,6 +321,7 @@ fn render_full(
     snapshot: &SimulationSnapshot,
     activity: PresentationActivity,
     napping: bool,
+    frame: &PresentationFrame,
     geometry: &RoomGeometry,
 ) {
     let needs = snapshot.needs;
@@ -335,7 +380,7 @@ fn render_full(
                 auto_style(SemanticTone::Tone2),
             );
         } else {
-            put_sprite(area, buffer, &PET_FULL, pet_x, pet_y);
+            put_sprite(area, buffer, full_sprite(frame.pose), pet_x, pet_y);
         }
     }
 
@@ -363,6 +408,7 @@ fn render_compact(
     snapshot: &SimulationSnapshot,
     activity: PresentationActivity,
     napping: bool,
+    frame: &PresentationFrame,
     geometry: &RoomGeometry,
 ) {
     let needs = snapshot.needs;
@@ -419,7 +465,7 @@ fn render_compact(
                 auto_style(SemanticTone::Tone2),
             );
         } else {
-            put_sprite(area, buffer, &PET_COMPACT, pet_x, pet_y);
+            put_sprite(area, buffer, compact_sprite(frame.pose), pet_x, pet_y);
         }
     }
 
@@ -495,6 +541,37 @@ fn put_sprite(area: Rect, buffer: &mut Buffer, sprite: &[&str], x: u16, y: u16) 
     }
 }
 
+fn full_sprite(pose: PetPose) -> &'static [&'static str] {
+    match pose {
+        PetPose::Idle => &PET_FULL,
+        PetPose::Blink => &PET_BLINK_FULL,
+        PetPose::WalkA => &PET_WALK_A_FULL,
+        PetPose::WalkB => &PET_WALK_B_FULL,
+        PetPose::Sit => &PET_SIT_FULL,
+        PetPose::Doze => &PET_DOZE_FULL,
+        PetPose::Yawn => &PET_YAWN_FULL,
+        PetPose::Curious => &PET_CURIOUS_FULL,
+        PetPose::Happy => &PET_HAPPY_FULL,
+        PetPose::Upset => &PET_UPSET_FULL,
+        PetPose::Sleep => &PET_SLEEP_FULL,
+    }
+}
+
+fn compact_sprite(pose: PetPose) -> &'static [&'static str] {
+    match pose {
+        PetPose::Idle => &PET_COMPACT,
+        PetPose::Blink => &PET_BLINK_COMPACT,
+        PetPose::WalkA => &PET_WALK_A_COMPACT,
+        PetPose::WalkB => &PET_WALK_B_COMPACT,
+        PetPose::Sit => &PET_SIT_COMPACT,
+        PetPose::Doze => &PET_DOZE_COMPACT,
+        PetPose::Yawn | PetPose::Curious => &PET_CURIOUS_COMPACT,
+        PetPose::Happy => &PET_HAPPY_COMPACT,
+        PetPose::Upset => &PET_UPSET_COMPACT,
+        PetPose::Sleep => &PET_SLEEP_COMPACT,
+    }
+}
+
 fn need_bar(value: f32) -> String {
     let filled = (value.clamp(0.0, 1.0) * 8.0).round() as usize;
     let mut bar = "█".repeat(filled);
@@ -510,6 +587,64 @@ const PET_FULL: [&str; 5] = [
     "  ▄▄▄▄▄▄  ",
     " █  ██ ██ ",
     " █  ▄▄   █",
+    " █▄▄▄▄▄▄█ ",
+    "  ▀▀▀▀▀▀  ",
+];
+
+const PET_BLINK_FULL: [&str; 5] = [
+    "  ▄▄▄▄▄▄  ",
+    " █  ██ ██ ",
+    " █  ──   █",
+    " █▄▄▄▄▄▄█ ",
+    "  ▀▀▀▀▀▀  ",
+];
+
+const PET_SIT_FULL: [&str; 5] = [
+    "  ▄▄▄▄▄▄  ",
+    " █  ██ ██ ",
+    " █  ▄▄   █",
+    " █▄▄▄▄▄▄█ ",
+    "  ████    ",
+];
+
+const PET_WALK_A_FULL: [&str; 5] = [
+    "  ▄▄▄▄▄▄  ",
+    " █  ██ ██ ",
+    " █  ▄▄   █",
+    " █▄▄▄▄▄▄█ ",
+    " ▀  ▀▀  ▀ ",
+];
+
+const PET_WALK_B_FULL: [&str; 5] = [
+    "  ▄▄▄▄▄▄  ",
+    " █  ██ ██ ",
+    " █  ▄▄   █",
+    " █▄▄▄▄▄▄█ ",
+    "▀  ▀▀  ▀  ",
+];
+
+const PET_YAWN_FULL: [&str; 5] = [
+    "  ▄▄▄▄▄▄  ",
+    " █  ██ ██ ",
+    " █──▄▄──█ ",
+    " █▄▄▄▄▄▄█ ",
+    "  ▀▀▀▀▀▀  ",
+];
+
+const PET_CURIOUS_FULL: [&str; 5] = PET_FULL;
+
+const PET_HAPPY_FULL: [&str; 5] = [
+    " ▄▄▄▄▄▄▄▄ ",
+    " █  ██ ██ ",
+    " █  ──   █",
+    " █▄▄▄▄▄▄█ ",
+    "  ▀▀▀▀▀▀  ",
+];
+
+const PET_UPSET_FULL: [&str; 5] = [
+    "  ▄▄▄▄▄▄  ",
+    " █  ██ ██ ",
+    " █  ▄▄  █ ",
     " █▄▄▄▄▄▄█ ",
     "  ▀▀▀▀▀▀  ",
 ];
@@ -531,6 +666,20 @@ const PET_SLEEP_FULL: [&str; 5] = [
 ];
 
 const PET_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", " ▀▀▀▀▀ "];
+
+const PET_BLINK_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ── ██", " ▀▀▀▀▀ "];
+
+const PET_SIT_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", "  ███  "];
+
+const PET_WALK_A_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", "▀ ▀▀  ▀"];
+
+const PET_WALK_B_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", "  ▀▀ ▀▀"];
+
+const PET_CURIOUS_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", " ▀▀▀▀▀ "];
+
+const PET_HAPPY_COMPACT: [&str; 3] = ["▄▄▄▄▄▄▄", "█ ██ ██", " ▀▀▀▀▀ "];
+
+const PET_UPSET_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", "▀▀▀▀▀▀ "];
 
 const PET_DOZE_COMPACT: [&str; 3] = [" ▄▄▄▄▄ ", "█ ██ ██", " ▀▀▀▀▀ "];
 

@@ -5,7 +5,8 @@ use crossterm::event::{
 use ratatui::layout::{Position, Rect};
 use uuid::Uuid;
 
-use super::room::room_geometry;
+use super::behavior::PresentationFrame;
+use super::room::room_geometry_with_frame;
 use super::{CodexInputModes, MouseEncoding, MouseTrackingMode};
 
 /// Backend-compatible pointer-distance scale for one terminal-cell path unit.
@@ -126,9 +127,10 @@ impl RoomInputSession {
         &mut self,
         room: Rect,
         snapshot: &SimulationSnapshot,
+        frame: &PresentationFrame,
         event: &MouseEvent,
     ) -> Vec<RoomCareRequest> {
-        let geometry = room_geometry(room, snapshot);
+        let geometry = room_geometry_with_frame(room, snapshot, frame);
         let point = Position::new(event.column, event.row);
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
@@ -160,7 +162,11 @@ impl RoomInputSession {
                     }
                     return requests;
                 }
-                if let Some(gesture) = self.gesture.take() {
+                if let Some(mut gesture) = self.gesture.take() {
+                    // Include the pointer-up position as the final path point
+                    // so quick drags without an intermediate Drag event still
+                    // accumulate distance.
+                    gesture.move_to(point);
                     let (interaction_ms, pointer_distance) = gesture.finish();
                     if interaction_ms >= 1_500 && pointer_distance >= 120.0 {
                         requests.push(RoomCareRequest::Pet {

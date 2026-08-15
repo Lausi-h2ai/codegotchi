@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use chrono::Utc;
 use codegotchi_cli::terminal::{
-    CareGateway, POINTER_DISTANCE_PER_CELL, PetGesture, RoomCareRequest, RoomInputSession,
-    pointer_distance,
+    CareGateway, POINTER_DISTANCE_PER_CELL, PetGesture, PetPose, PresentationFrame,
+    RoomCareRequest, RoomInputSession, pointer_distance, room_geometry_with_frame,
 };
 use codegotchi_domain::{
     DefaultNeedProgressionStrategy, FoodInventory, Pet, PetSimulation, PetSpecies, Poop,
@@ -33,6 +33,10 @@ fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
         row,
         modifiers: KeyModifiers::NONE,
     }
+}
+
+fn default_frame() -> PresentationFrame {
+    PresentationFrame::default()
 }
 
 /// The terminal-to-backend petting conversion is a locked stable unit: every
@@ -129,6 +133,7 @@ fn petting_gesture_submits_only_after_backend_thresholds() {
     let mut requests = input.process(
         room,
         &snapshot,
+        &default_frame(),
         &mouse(MouseEventKind::Down(MouseButton::Left), 10, 6),
     );
     apply(&gateway, requests);
@@ -145,6 +150,7 @@ fn petting_gesture_submits_only_after_backend_thresholds() {
         requests = input.process(
             room,
             &snapshot,
+            &default_frame(),
             &mouse(MouseEventKind::Drag(MouseButton::Left), point.x, point.y),
         );
         apply(&gateway, requests);
@@ -153,6 +159,7 @@ fn petting_gesture_submits_only_after_backend_thresholds() {
     requests = input.process(
         room,
         &snapshot,
+        &default_frame(),
         &mouse(MouseEventKind::Up(MouseButton::Left), 18, 8),
     );
     apply(&gateway, requests);
@@ -172,6 +179,59 @@ fn petting_gesture_submits_only_after_backend_thresholds() {
     }
 }
 
+/// The pet hitbox follows the presentation wander offset: a gesture that
+/// starts on the moved pet must still reach the authoritative runtime.
+#[test]
+fn petting_hitbox_follows_the_wandering_pet() {
+    let snapshot = base_snapshot();
+    let room = Rect::new(0, 0, 120, 45);
+    let frame = PresentationFrame {
+        pose: PetPose::WalkA,
+        offset: (-12, 3),
+    };
+    let geometry = room_geometry_with_frame(room, &snapshot, &frame);
+    let pet = geometry.pet;
+    assert!(
+        pet.x < 120 && pet.y < 45,
+        "moved pet hitbox must stay inside the room"
+    );
+
+    let mut input = RoomInputSession::default();
+    let gateway = RecordingCareGateway::default();
+    let start = Position::new(pet.x + 2, pet.y + 2);
+    let mut requests = input.process(
+        room,
+        &snapshot,
+        &frame,
+        &mouse(MouseEventKind::Down(MouseButton::Left), start.x, start.y),
+    );
+    apply(&gateway, requests);
+    assert!(gateway.requests.lock().unwrap().is_empty());
+
+    std::thread::sleep(Duration::from_millis(1_600));
+    let end = Position::new(start.x + 8, start.y);
+    requests = input.process(
+        room,
+        &snapshot,
+        &frame,
+        &mouse(MouseEventKind::Up(MouseButton::Left), end.x, end.y),
+    );
+    apply(&gateway, requests);
+
+    let recorded = gateway.requests.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    let RoomCareRequest::Pet {
+        interaction_ms,
+        pointer_distance,
+        ..
+    } = &recorded[0]
+    else {
+        panic!("expected a pet care request, got {:?}", recorded[0]);
+    };
+    assert!(*interaction_ms >= 1_500);
+    assert!(*pointer_distance >= 120.0);
+}
+
 /// A short gesture below both thresholds never reaches the runtime.
 #[test]
 fn short_pet_gesture_is_dropped() {
@@ -185,6 +245,7 @@ fn short_pet_gesture_is_dropped() {
         input.process(
             room,
             &snapshot,
+            &default_frame(),
             &mouse(MouseEventKind::Down(MouseButton::Left), 10, 6),
         ),
     );
@@ -193,6 +254,7 @@ fn short_pet_gesture_is_dropped() {
         input.process(
             room,
             &snapshot,
+            &default_frame(),
             &mouse(MouseEventKind::Up(MouseButton::Left), 18, 8),
         ),
     );
@@ -213,6 +275,7 @@ fn food_drag_to_pet_feeds_and_other_drops_do_not() {
         input.process(
             room,
             &snapshot,
+            &default_frame(),
             &mouse(MouseEventKind::Down(MouseButton::Left), 4, 12),
         ),
     );
@@ -221,6 +284,7 @@ fn food_drag_to_pet_feeds_and_other_drops_do_not() {
         input.process(
             room,
             &snapshot,
+            &default_frame(),
             &mouse(MouseEventKind::Up(MouseButton::Left), 10, 6),
         ),
     );
@@ -235,6 +299,7 @@ fn food_drag_to_pet_feeds_and_other_drops_do_not() {
         input.process(
             room,
             &snapshot,
+            &default_frame(),
             &mouse(MouseEventKind::Down(MouseButton::Left), 4, 12),
         ),
     );
@@ -243,6 +308,7 @@ fn food_drag_to_pet_feeds_and_other_drops_do_not() {
         input.process(
             room,
             &snapshot,
+            &default_frame(),
             &mouse(MouseEventKind::Up(MouseButton::Left), 30, 12),
         ),
     );
@@ -269,6 +335,7 @@ fn poop_click_cleans_and_bed_click_naps() {
         input.process(
             room,
             &snapshot,
+            &default_frame(),
             &mouse(MouseEventKind::Up(MouseButton::Left), 16, 12),
         ),
     );
@@ -288,6 +355,7 @@ fn poop_click_cleans_and_bed_click_naps() {
         input.process(
             room,
             &snapshot,
+            &default_frame(),
             &mouse(MouseEventKind::Up(MouseButton::Left), 30, 10),
         ),
     );
@@ -300,6 +368,7 @@ fn poop_click_cleans_and_bed_click_naps() {
         input.process(
             room,
             &snapshot,
+            &default_frame(),
             &mouse(MouseEventKind::Up(MouseButton::Right), 30, 10),
         ),
     );
@@ -323,6 +392,7 @@ fn minimal_food_tray_feeds_from_any_room_release() {
         input.process(
             room,
             &snapshot,
+            &default_frame(),
             &mouse(MouseEventKind::Down(MouseButton::Left), 3, 1),
         ),
     );
@@ -331,6 +401,7 @@ fn minimal_food_tray_feeds_from_any_room_release() {
         input.process(
             room,
             &snapshot,
+            &default_frame(),
             &mouse(MouseEventKind::Up(MouseButton::Left), 20, 2),
         ),
     );

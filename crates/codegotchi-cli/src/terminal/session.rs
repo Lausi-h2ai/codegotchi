@@ -34,6 +34,7 @@ use codegotchi_domain::SimulationSnapshot;
 use crate::CodexInvocation;
 use crate::runtime::{AuthoritativeRuntime, RuntimeError};
 
+use super::behavior::{PresentationFrame, PresentationState};
 use super::pty::PtyWriter;
 use super::{
     CareGateway, CodexScreen, CrosstermTerminal, PtyCodexChild, PtyCodexError, RoomCareRequest,
@@ -258,16 +259,24 @@ pub struct TerminalSessionCore {
     screen: CodexScreen,
     layout: TerminalLayout,
     snapshot: Option<SimulationSnapshot>,
+    presentation: PresentationState,
 }
 
 impl TerminalSessionCore {
     /// Creates a virtual Codex screen with `(rows, columns)` dimensions.
     #[must_use]
     pub fn new(rows: u16, columns: u16) -> Self {
+        Self::with_seed(rows, columns, DEFAULT_BEHAVIOR_SEED)
+    }
+
+    /// Creates a session core with a deterministic presentation seed.
+    #[must_use]
+    pub fn with_seed(rows: u16, columns: u16, seed: u64) -> Self {
         Self {
             screen: CodexScreen::new(rows, columns),
             layout: choose_layout(Rect::new(0, 0, columns, rows), None),
             snapshot: None,
+            presentation: PresentationState::new(seed),
         }
     }
 
@@ -292,6 +301,20 @@ impl TerminalSessionCore {
     /// Replaces the authoritative room snapshot.
     pub fn set_snapshot(&mut self, snapshot: SimulationSnapshot) {
         self.snapshot = Some(snapshot);
+    }
+
+    /// Advances the autonomous presentation clock to `now` using the current
+    /// snapshot and room area.
+    pub fn advance_presentation(&mut self, now: std::time::Duration) {
+        let _ = self
+            .presentation
+            .tick(now, self.snapshot.as_ref(), self.layout.room);
+    }
+
+    /// The current deterministic presentation frame (pose + wander offset).
+    #[must_use]
+    pub fn presentation_frame(&self) -> PresentationFrame {
+        self.presentation.frame()
     }
 
     /// Feeds one PTY output chunk into the virtual screen and mode read model,
@@ -452,6 +475,8 @@ where
 const OUTPUT_CHANNEL_CAPACITY: usize = 16;
 const OUTPUT_CHUNK_BYTES: usize = 8 * 1024;
 const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const BEHAVIOR_TICK_INTERVAL: Duration = Duration::from_millis(250);
+const DEFAULT_BEHAVIOR_SEED: u64 = 0x436f_6465_476f_7474; // "CodeGott"
 const READER_JOIN_GRACE: Duration = Duration::from_millis(100);
 const READER_JOIN_POLL_INTERVAL: Duration = Duration::from_millis(5);
 
@@ -656,6 +681,9 @@ where
     let mut terminate_sent = false;
     let mut poll = tokio::time::interval(CHILD_POLL_INTERVAL);
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let session_started = Instant::now();
+    let mut last_behavior_at = Duration::ZERO;
+    let mut last_behavior_frame = core.presentation_frame();
     let mut fairness_turn = 0;
     let mut room_input = RoomInputSession::default();
     let runtime = runtime.as_ref();
@@ -796,6 +824,18 @@ where
         }
         if body_error.is_none() {
             let mut redraw = false;
+            // Autonomous presentation tick: advance at a bounded rate and
+            // redraw only when the pose or wander offset changed.
+            let behavior_now = session_started.elapsed();
+            if behavior_now.saturating_sub(last_behavior_at) >= BEHAVIOR_TICK_INTERVAL {
+                last_behavior_at = behavior_now;
+                core.advance_presentation(behavior_now);
+                let frame = core.presentation_frame();
+                if frame != last_behavior_frame {
+                    last_behavior_frame = frame;
+                    redraw = true;
+                }
+            }
             if let Some(receiver) = snapshot_receiver.as_mut() {
                 loop {
                     match receiver.try_recv() {
@@ -1137,7 +1177,8 @@ where
             let Some(snapshot) = core.snapshot() else {
                 return Ok(());
             };
-            let requests = room_input.process(layout.room, snapshot, mouse);
+            let requests =
+                room_input.process(layout.room, snapshot, &core.presentation_frame(), mouse);
             if let Some(runtime) = runtime {
                 for request in requests {
                     apply_room_request(runtime.as_ref(), request);
@@ -1256,7 +1297,12 @@ where
             let layout = core.layout();
             let cursor = render_codex(core.screen(), layout.codex, frame.buffer_mut());
             if let Some(snapshot) = core.snapshot() {
-                render_room(layout.room, frame.buffer_mut(), snapshot);
+                render_room(
+                    layout.room,
+                    frame.buffer_mut(),
+                    snapshot,
+                    &core.presentation_frame(),
+                );
             }
             if let Some(cursor) = cursor {
                 frame.set_cursor_position(cursor);

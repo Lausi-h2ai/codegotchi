@@ -9,7 +9,10 @@ mod screen;
 mod session;
 mod theme;
 
-pub use behavior::{PresentationActivity, has_authoritative_nap, presentation_activity};
+pub use behavior::{
+    IdleIntent, PetPose, PresentationActivity, PresentationFrame, PresentationState, RoomObject,
+    has_authoritative_nap, presentation_activity,
+};
 pub use host::{
     CrosstermTerminal, EntryDetail, EntryStage, RestoreFailure, TerminalBackend,
     TerminalEntryError, TerminalGuard, TerminalRestoreError, TerminalRunError, TerminalStep,
@@ -22,7 +25,7 @@ pub use input::{
 pub use layout::{RoomLayoutMode, TerminalLayout, choose_layout};
 pub use pty::{PtyCodexChild, PtyCodexError};
 pub use render::render_codex;
-pub use room::{RoomGeometry, render_room, room_geometry};
+pub use room::{RoomGeometry, render_room, room_geometry, room_geometry_with_frame};
 pub use screen::{CodexInputModes, CodexScreen, MouseEncoding, MouseTrackingMode};
 pub use session::{
     TerminalSessionCore, TerminalSessionError, TerminalSessionEventFuture,

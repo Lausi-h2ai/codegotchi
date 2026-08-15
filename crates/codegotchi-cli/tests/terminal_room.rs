@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 use codegotchi_cli::terminal::{
-    PresentationActivity, SemanticTone, auto_style, has_authoritative_nap, presentation_activity,
-    render_room,
+    PresentationActivity, PresentationFrame, SemanticTone, auto_style, has_authoritative_nap,
+    presentation_activity, render_room,
 };
 use codegotchi_domain::{
     ActivityKind, AgentActivityState, DefaultNeedProgressionStrategy, FoodInventory, Pet,
@@ -23,6 +23,10 @@ fn base_snapshot(now: chrono::DateTime<Utc>) -> SimulationSnapshot {
         FoodInventory::starter(),
     );
     PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot()
+}
+
+fn default_frame() -> PresentationFrame {
+    PresentationFrame::default()
 }
 
 fn buffer_text(buffer: &Buffer, width: u16, height: u16) -> String {
@@ -162,7 +166,7 @@ fn sleeping_without_active_nap_never_uses_the_recovery_bed() {
 
     let area = Rect::new(0, 0, 40, 14);
     let mut doze_buffer = Buffer::filled(area, Cell::new(" "));
-    render_room(area, &mut doze_buffer, &idle_doze);
+    render_room(area, &mut doze_buffer, &idle_doze, &default_frame());
     let doze_text = buffer_text(&doze_buffer, area.width, area.height);
     assert!(
         doze_text.contains('┌'),
@@ -184,7 +188,7 @@ fn sleeping_without_active_nap_never_uses_the_recovery_bed() {
     );
 
     let mut nap_buffer = Buffer::filled(area, Cell::new(" "));
-    render_room(area, &mut nap_buffer, &bed_nap);
+    render_room(area, &mut nap_buffer, &bed_nap, &default_frame());
     let nap_text = buffer_text(&nap_buffer, area.width, area.height);
     assert!(
         nap_text.contains("z z z"),
@@ -205,7 +209,7 @@ fn room_renders_full_compact_and_minimal_projection() {
 
     let full = Rect::new(0, 0, 40, 14);
     let mut full_buffer = Buffer::filled(full, Cell::new(" "));
-    render_room(full, &mut full_buffer, &snapshot);
+    render_room(full, &mut full_buffer, &snapshot, &default_frame());
     let full_text = buffer_text(&full_buffer, full.width, full.height);
     for label in ["Hunger", "Energy", "Happy", "Clean"] {
         assert!(full_text.contains(label), "Full room missing {label}");
@@ -213,13 +217,13 @@ fn room_renders_full_compact_and_minimal_projection() {
 
     let compact = Rect::new(0, 0, 40, 7);
     let mut compact_buffer = Buffer::filled(compact, Cell::new(" "));
-    render_room(compact, &mut compact_buffer, &snapshot);
+    render_room(compact, &mut compact_buffer, &snapshot, &default_frame());
     let compact_text = buffer_text(&compact_buffer, compact.width, compact.height);
     assert!(compact_text.contains("H "), "Compact status row missing");
 
     let minimal = Rect::new(0, 0, 40, 3);
     let mut minimal_buffer = Buffer::filled(minimal, Cell::new(" "));
-    render_room(minimal, &mut minimal_buffer, &snapshot);
+    render_room(minimal, &mut minimal_buffer, &snapshot, &default_frame());
     let minimal_text = buffer_text(&minimal_buffer, minimal.width, minimal.height);
     assert!(
         minimal_text.contains("CG "),
