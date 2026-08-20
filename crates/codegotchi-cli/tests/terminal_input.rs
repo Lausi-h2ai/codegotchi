@@ -487,6 +487,142 @@ fn food_drag_to_pet_feeds_and_other_drops_do_not() {
     );
 }
 
+/// A food drag remains captured after the pointer leaves the room, so its
+/// outside-room Drag/Up events cannot leak into the Codex PTY. Releasing
+/// outside cancels the drag without feeding.
+#[test]
+fn food_drag_captures_outside_room_until_release_then_cancels() {
+    let snapshot = base_snapshot();
+    let room = Rect::new(0, 0, 40, 14);
+    let geometry = room_geometry_with_frame(room, &snapshot, &default_frame());
+    let food = geometry.food_sources.first().expect("starter food target");
+    let mut input = RoomInputSession::default();
+    let food_point = Position::new(food.rect.x + 1, food.rect.y);
+
+    assert!(
+        input
+            .process(
+                room,
+                &snapshot,
+                &default_frame(),
+                &mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    food_point.x,
+                    food_point.y
+                ),
+            )
+            .is_empty()
+    );
+    assert!(input.has_active_capture());
+
+    let outside = Position::new(60, 30);
+    assert!(
+        input
+            .process(
+                room,
+                &snapshot,
+                &default_frame(),
+                &mouse(
+                    MouseEventKind::Drag(MouseButton::Left),
+                    outside.x,
+                    outside.y
+                ),
+            )
+            .is_empty()
+    );
+    assert!(input.has_active_capture());
+
+    let requests = input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(MouseEventKind::Up(MouseButton::Left), outside.x, outside.y),
+    );
+    assert!(
+        requests.is_empty(),
+        "outside release must cancel the food drag"
+    );
+    assert!(!input.has_active_capture());
+    assert!(input.active_drag().is_none());
+}
+
+/// A pet gesture remains captured after the pointer leaves the room, but an
+/// outside release cancels it instead of qualifying a pet or reaching Codex.
+#[test]
+fn pet_gesture_captures_outside_room_until_release_then_cancels() {
+    let snapshot = base_snapshot();
+    let room = Rect::new(0, 0, 40, 14);
+    let geometry = room_geometry_with_frame(room, &snapshot, &default_frame());
+    let pet = geometry.pet;
+    let start = Position::new(pet.x + 1, pet.y + 1);
+    let mut input = RoomInputSession::default();
+
+    let _ = input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(MouseEventKind::Down(MouseButton::Left), start.x, start.y),
+    );
+    assert!(input.has_active_capture());
+
+    let outside = Position::new(60, 30);
+    let _ = input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            outside.x,
+            outside.y,
+        ),
+    );
+    assert!(input.has_active_capture());
+
+    let requests = input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(MouseEventKind::Up(MouseButton::Left), outside.x, outside.y),
+    );
+    assert!(requests.is_empty(), "outside release must cancel petting");
+    assert!(!input.has_active_capture());
+    assert!(!input.petting_qualified());
+}
+
+/// When the wandering pet and a food source share a cell, the pet remains the
+/// primary target and a press starts petting rather than a food drag.
+#[test]
+fn overlapping_pet_and_food_hit_regions_prioritize_the_pet() {
+    let snapshot = base_snapshot();
+    let room = Rect::new(0, 0, 120, 14);
+    let frame = default_frame();
+    let geometry = room_geometry_with_frame(room, &snapshot, &frame);
+    let source = geometry
+        .food_sources
+        .iter()
+        .find(|source| {
+            (source.rect.x..source.rect.right()).any(|x| {
+                (source.rect.y..source.rect.bottom())
+                    .any(|y| geometry.pet.contains(Position::new(x, y)))
+            })
+        })
+        .expect("fixture must contain an overlapping food/pet cell");
+    let point = Position::new(
+        source.rect.x.max(geometry.pet.x),
+        source.rect.y.max(geometry.pet.y),
+    );
+    let mut input = RoomInputSession::default();
+    let _ = input.process(
+        room,
+        &snapshot,
+        &frame,
+        &mouse(MouseEventKind::Down(MouseButton::Left), point.x, point.y),
+    );
+
+    assert!(input.has_active_capture());
+    assert!(input.active_drag().is_none());
+}
+
 /// The cells actually occupied by rendered food/poop affordances must route to
 /// the same care requests as their geometry. This intentionally uses a large
 /// inventory count so a fixed-width rectangle cannot pass by accident.

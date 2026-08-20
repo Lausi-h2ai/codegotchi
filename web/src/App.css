@@ -892,6 +892,23 @@ h3 {
     left: var(--pet-x, 50%);
 }
 
+.pet[data-motion-mode="dozing"],
+.pet[data-motion-waypoint="floor_doze"] {
+    top: auto;
+    bottom: 22%;
+    left: 50%;
+    width: clamp(7rem, 16vw, 9rem);
+    height: clamp(7.8rem, 18vw, 10rem);
+    transform: translate(-50%, -100%) scale(0.94, 0.82);
+    transform-origin: 50% 100%;
+}
+
+.pet[data-motion-mode="dozing"] .pet-eye {
+    height: 0.22rem;
+    top: 31%;
+    border-radius: 0.15rem;
+}
+
 /* Semantic destinations stay clear of the room's interactive hit zones. */
 .pet[data-motion-mode="desk"],
 .pet[data-motion-waypoint="desk"] {

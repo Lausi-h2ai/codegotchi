@@ -18,6 +18,7 @@ export type SemanticMode =
     | "desk"
     | "thinking"
     | "free_time"
+    | "dozing"
     | "napping"
     | "critical"
     | "success"
@@ -28,6 +29,7 @@ export type Waypoint =
     | "desk"
     | "thinking"
     | "free_time"
+    | "floor_doze"
     | "hammock"
     | "critical"
     | "success"
@@ -147,8 +149,11 @@ export function semanticModeForSnapshot(
     snapshot: SimulationSnapshot,
     now = Date.now(),
 ): SemanticMode {
-    if (snapshot.behavior === "Sleeping" || isNapping(snapshot, now)) {
+    if (isNapping(snapshot, now)) {
         return "napping";
+    }
+    if (snapshot.behavior === "Sleeping") {
+        return "dozing";
     }
 
     const activityName = activeActivity(snapshot.activity) as string | null;
@@ -251,6 +256,8 @@ const defaultWaypointForMode: WaypointResolver = (mode) => {
     switch (mode) {
         case "napping":
             return "hammock";
+        case "dozing":
+            return "floor_doze";
         case "desk":
         case "thinking":
         case "free_time":
@@ -265,6 +272,7 @@ const actionForMode: Record<SemanticMode, TransientVisualAction> = {
     desk: "type",
     thinking: "think",
     free_time: "wander",
+    dozing: "sleep",
     napping: "sleep",
     critical: "shake",
     success: "celebrate",
@@ -275,6 +283,7 @@ const effectForMode: Record<SemanticMode, Effect> = {
     desk: "none",
     thinking: "none",
     free_time: "none",
+    dozing: "zzz",
     napping: "zzz",
     critical: "warning",
     success: "sparkle",

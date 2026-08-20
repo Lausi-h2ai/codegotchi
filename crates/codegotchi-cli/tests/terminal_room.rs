@@ -333,6 +333,100 @@ fn compact_room_keeps_window_decoration() {
     );
 }
 
+/// Minimal exposes exactly one deterministic stocked food source, regardless
+/// of which subset of the pantry is available, and never advertises an
+/// actionable zero-stock source.
+#[test]
+fn minimal_food_source_matches_every_nonempty_inventory_combination() {
+    let now = Utc::now();
+    let foods = [
+        FoodKind::Kibble,
+        FoodKind::Treat,
+        FoodKind::Fruit,
+        FoodKind::EnergyDrink,
+    ];
+    for mask in 1u8..(1u8 << foods.len()) {
+        let pet = Pet::with_inventory(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, now, {
+            let mut inventory = FoodInventory::new();
+            for (index, food) in foods.iter().copied().enumerate() {
+                if mask & (1 << index) != 0 {
+                    inventory.add(food, (index as u32 + 1) * 3);
+                }
+            }
+            inventory
+        });
+        let snapshot =
+            PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot();
+        let geometry = codegotchi_cli::terminal::room_geometry_with_frame(
+            Rect::new(0, 0, 40, 3),
+            &snapshot,
+            &default_frame(),
+        );
+        let expected = foods
+            .iter()
+            .copied()
+            .find(|food| {
+                mask & (1
+                    << foods
+                        .iter()
+                        .position(|candidate| candidate == food)
+                        .unwrap())
+                    != 0
+            })
+            .expect("nonempty mask has one stocked food");
+        assert_eq!(geometry.food_sources.len(), 1, "mask={mask:04b}");
+        assert_eq!(
+            geometry.food_sources[0].food_id,
+            expected.id(),
+            "mask={mask:04b}"
+        );
+        assert!(geometry.food_sources[0].count > 0, "mask={mask:04b}");
+    }
+}
+
+#[test]
+fn minimal_with_no_food_has_disabled_food_copy_and_no_hit_source() {
+    let now = Utc::now();
+    let pet = Pet::with_inventory(
+        Uuid::from_u128(1),
+        "Mochi",
+        PetSpecies::Cat,
+        now,
+        FoodInventory::new(),
+    );
+    let snapshot = PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot();
+    let area = Rect::new(0, 0, 40, 3);
+    let geometry =
+        codegotchi_cli::terminal::room_geometry_with_frame(area, &snapshot, &default_frame());
+    assert!(geometry.food_sources.is_empty());
+
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let text = buffer_text(&buffer, area.width, area.height);
+    assert!(
+        text.contains("FOOD none"),
+        "disabled food copy missing: {text}"
+    );
+    assert!(
+        !text.contains("x0"),
+        "zero-stock food must not look actionable: {text}"
+    );
+}
+
+#[test]
+fn wide_full_bed_has_one_visible_label() {
+    let snapshot = base_snapshot(Utc::now());
+    let area = Rect::new(0, 0, 120, 14);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let text = buffer_text(&buffer, area.width, area.height);
+    assert_eq!(
+        text.matches("BED").count(),
+        1,
+        "bed label duplicated: {text}"
+    );
+}
+
 /// Pending affection/snack demands are projected as care affordances in the
 /// Full room.
 #[test]

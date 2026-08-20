@@ -150,6 +150,22 @@ pub struct RoomInputSession {
 }
 
 impl RoomInputSession {
+    /// Whether a room interaction owns the pointer until it terminates or is
+    /// explicitly cancelled. The terminal session uses this to keep captured
+    /// mouse events out of the Codex PTY after the pointer leaves the room.
+    #[must_use]
+    pub fn has_active_capture(&self) -> bool {
+        self.gesture.is_some() || self.dragging_food.is_some()
+    }
+
+    /// Cancels an in-flight pet gesture or food drag without producing care.
+    /// Focus loss, resize, and invalid mouse termination all use this path.
+    pub fn cancel(&mut self) {
+        self.gesture = None;
+        self.dragging_food = None;
+        self.drag_position = None;
+    }
+
     /// Processes one mouse event inside the room rectangle and returns any
     /// completed care requests. `snapshot` is the latest authoritative state.
     #[must_use]
@@ -196,7 +212,7 @@ impl RoomInputSession {
                 if let Some(food_id) = self.dragging_food.take() {
                     // Every layout uses the same drag-to-pet interaction:
                     // dropping anywhere else cancels the drag.
-                    if geometry.pet.contains(point) {
+                    if room.contains(point) && geometry.pet.contains(point) {
                         requests.push(RoomCareRequest::Feed {
                             action_id: Uuid::new_v4(),
                             food_id: food_id.to_owned(),
@@ -205,6 +221,12 @@ impl RoomInputSession {
                     return requests;
                 }
                 if let Some(mut gesture) = self.gesture.take() {
+                    // A release outside the room is a cancellation, not a
+                    // pet. The session still captures that Up event so it
+                    // cannot be encoded and sent to Codex.
+                    if !room.contains(point) {
+                        return requests;
+                    }
                     // Include the pointer-up position as the final path point
                     // so quick drags without an intermediate Drag event still
                     // accumulate distance.
@@ -235,9 +257,19 @@ impl RoomInputSession {
                 }
                 requests
             }
-            MouseEventKind::Up(_)
-            | MouseEventKind::Down(_)
-            | MouseEventKind::Moved
+            MouseEventKind::Up(_) => {
+                // Any non-left release is an invalid termination for the
+                // captured left-button interaction.
+                self.cancel();
+                Vec::new()
+            }
+            MouseEventKind::Down(_) => {
+                // A second press is an invalid termination for the current
+                // left-button capture. Consume it rather than forwarding it.
+                self.cancel();
+                Vec::new()
+            }
+            MouseEventKind::Moved
             | MouseEventKind::ScrollLeft
             | MouseEventKind::ScrollRight
             | MouseEventKind::ScrollDown

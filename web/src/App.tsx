@@ -78,12 +78,15 @@ function App({ launchToken }: AppProps) {
     );
     const motionState = usePetMotion(snapshot);
     const blinking = useBlink(
-        snapshot !== null && motionState.semanticMode !== "napping",
+        snapshot !== null &&
+            motionState.semanticMode !== "napping" &&
+            motionState.semanticMode !== "dozing",
     );
 
     const activityLabel = snapshot ? presentationActivity(snapshot) : "Waiting";
     const behaviorLabel = snapshot ? presentationBehavior(snapshot) : "Waiting";
     const napping = snapshot ? isNapping(snapshot) : false;
+    const dozing = motionState.semanticMode === "dozing";
     const motionWaypoint =
         motionState.roomWaypoint?.id ?? motionState.destination;
     const motionRegion = motionState.roomRegion ?? "";
@@ -395,7 +398,7 @@ function App({ launchToken }: AppProps) {
                                         <span>✦</span>
                                     </span>
                                 ) : null}
-                                {napping ? (
+                                {napping || dozing ? (
                                     <span
                                         className="zzz"
                                         data-testid="zzz"

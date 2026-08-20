@@ -356,6 +356,20 @@ fn minimal_food_label(count: u32) -> String {
     format!("[FOOD x{count}]")
 }
 
+fn first_stocked_food(snapshot: &SimulationSnapshot) -> Option<(FoodKind, u32)> {
+    [
+        FoodKind::Kibble,
+        FoodKind::Treat,
+        FoodKind::Fruit,
+        FoodKind::EnergyDrink,
+    ]
+    .into_iter()
+    .find_map(|food| {
+        let count = snapshot.inventory.count(food);
+        (count > 0).then_some((food, count))
+    })
+}
+
 fn minimal_poop_x(index: usize) -> u16 {
     MINIMAL_POOP_X.saturating_add(index as u16 * MINIMAL_POOP_STEP)
 }
@@ -366,17 +380,21 @@ fn label_width(label: &str) -> u16 {
 
 fn minimal_geometry(area: Rect, snapshot: &SimulationSnapshot) -> RoomGeometry {
     let pet = Rect::new(area.x, area.y.saturating_add(2), 7, 1);
-    let food_label = minimal_food_label(snapshot.inventory.count(FoodKind::Kibble));
-    let food_sources = vec![FoodSource {
-        rect: Rect::new(
-            area.x.saturating_add(MINIMAL_FOOD_X),
-            area.y.saturating_add(MINIMAL_TARGET_ROW),
-            label_width(&food_label),
-            1,
-        ),
-        food_id: FoodKind::Kibble.id(),
-        count: snapshot.inventory.count(FoodKind::Kibble),
-    }];
+    let food_sources = first_stocked_food(snapshot)
+        .map(|(food, count)| {
+            let food_label = minimal_food_label(count);
+            vec![FoodSource {
+                rect: Rect::new(
+                    area.x.saturating_add(MINIMAL_FOOD_X),
+                    area.y.saturating_add(MINIMAL_TARGET_ROW),
+                    label_width(&food_label),
+                    1,
+                ),
+                food_id: food.id(),
+                count,
+            }]
+        })
+        .unwrap_or_default();
     let bed = Rect::new(
         area.x.saturating_add(MINIMAL_BED_X),
         area.y.saturating_add(MINIMAL_TARGET_ROW),
@@ -468,7 +486,7 @@ fn wide_food_sources(
         let count = snapshot.inventory.count(food);
         if count > 0 {
             let first = sources.is_empty();
-            sources.push(FoodSource {
+            let source = FoodSource {
                 rect: Rect::new(
                     area.x.saturating_add(next_x),
                     area.y.saturating_add(top),
@@ -477,10 +495,9 @@ fn wide_food_sources(
                 ),
                 food_id: food.id(),
                 count,
-            });
-        }
-        if let Some(source) = sources.last() {
+            };
             next_x = next_x.saturating_add(source.rect.width).saturating_add(2);
+            sources.push(source);
         }
     }
     sources
@@ -955,14 +972,6 @@ fn render_full_wide(
                 palette.cell_style(SemanticTone::Tone2),
             );
         }
-        put_text(
-            area,
-            buffer,
-            bed_x.saturating_add(5),
-            bed_y.saturating_add(6),
-            "BED",
-            palette.cell_style(SemanticTone::Tone3),
-        );
     }
 
     if !napping {
@@ -1120,14 +1129,6 @@ fn render_compact_wide(
         if !napping {
             put_sprite(area, buffer, &BED_COMPACT_WIDE, bed_x, bed_y, palette);
         }
-        put_text(
-            area,
-            buffer,
-            bed_x.saturating_add(8),
-            6,
-            "BED",
-            palette.cell_style(SemanticTone::Tone3),
-        );
     }
     render_food_sources_compact_wide(area, buffer, geometry, palette);
     render_poops_compact_wide(area, buffer, geometry, palette);
@@ -1168,7 +1169,6 @@ fn render_minimal(
         palette.cell_style(SemanticTone::Tone3),
     );
 
-    let stocked = snapshot.inventory.count(FoodKind::Kibble);
     let (affection, snack) = demand_counts(snapshot);
     put_text(
         area,
@@ -1178,18 +1178,25 @@ fn render_minimal(
         "◉ PET",
         palette.cell_style(SemanticTone::Tone2),
     );
-    let food = geometry
-        .food_sources
-        .first()
-        .expect("Minimal always exposes the starter food target");
-    put_text(
-        area,
-        buffer,
-        food.rect.x.saturating_sub(area.x),
-        MINIMAL_TARGET_ROW,
-        &minimal_food_label(stocked),
-        palette.cell_style(SemanticTone::Tone2),
-    );
+    if let Some(food) = geometry.food_sources.first() {
+        put_text(
+            area,
+            buffer,
+            food.rect.x.saturating_sub(area.x),
+            MINIMAL_TARGET_ROW,
+            &minimal_food_label(food.count),
+            palette.cell_style(SemanticTone::Tone2),
+        );
+    } else {
+        put_text(
+            area,
+            buffer,
+            MINIMAL_FOOD_X,
+            MINIMAL_TARGET_ROW,
+            "[FOOD none]",
+            palette.cell_style(SemanticTone::Tone1),
+        );
+    }
     if let Some(bed) = geometry.bed {
         put_text(
             area,
@@ -1239,12 +1246,17 @@ fn render_minimal(
             palette.cell_style(SemanticTone::Tone2),
         );
     }
+    let control_line = if geometry.food_sources.is_empty() {
+        "(=^.^=) PET   [BED] [POOP]"
+    } else {
+        "(=^.^=) PET   [FOOD] [BED] [POOP]"
+    };
     put_text(
         area,
         buffer,
         0,
         2,
-        "(=^.^=) PET   [FOOD] [BED] [POOP]",
+        control_line,
         palette.cell_style(SemanticTone::Tone3),
     );
     render_drag_ghost(area, buffer, drag, palette);
@@ -1727,6 +1739,13 @@ const PLANT_ACCENT: [&str; 4] = ["  ▄  ", " ▄█▄ ", "  █  ", " ▄▄�
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
+    use codegotchi_domain::{
+        DefaultNeedProgressionStrategy, FoodInventory, FoodKind, Pet, PetSimulation, PetSpecies,
+        SystemClock,
+    };
+    use uuid::Uuid;
+
     use super::*;
 
     /// Every sprite row must have the same width; a ragged row (like the old
@@ -1755,5 +1774,24 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn sparse_wide_food_sources_do_not_double_gap_after_empty_kind() {
+        let now = Utc::now();
+        let mut inventory = FoodInventory::new();
+        inventory.add(FoodKind::Kibble, 5);
+        inventory.add(FoodKind::Fruit, 7);
+        let pet = Pet::with_inventory(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, now, inventory);
+        let snapshot =
+            PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot();
+        let sources = wide_food_sources(Rect::new(0, 0, 120, 14), &snapshot, 32, 8, false);
+
+        assert_eq!(sources.len(), 2);
+        assert_eq!(
+            sources[1].rect.x,
+            sources[0].rect.right().saturating_add(2),
+            "an empty Treat source must not reserve a second gap"
+        );
     }
 }

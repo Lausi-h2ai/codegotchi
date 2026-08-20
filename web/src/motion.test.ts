@@ -180,10 +180,31 @@ describe("semantic mode override priority", () => {
         expect(semanticModeForSnapshot(snapshot(overrides))).toBe("failure");
     });
 
-    it("treats an authoritative sleeping behavior as napping", () => {
+    it("treats generic sleeping behavior as a harmless floor doze", () => {
         expect(
             semanticModeForSnapshot(snapshot({ behavior: "Sleeping" })),
+        ).toBe("dozing");
+    });
+
+    it("uses the hammock only while the authoritative nap deadline is future", () => {
+        expect(
+            semanticModeForSnapshot(
+                snapshot({
+                    behavior: "Sleeping",
+                    nappingUntil: new Date(1_001).toISOString(),
+                }),
+                1_000,
+            ),
         ).toBe("napping");
+        expect(
+            semanticModeForSnapshot(
+                snapshot({
+                    behavior: "Sleeping",
+                    nappingUntil: new Date(999).toISOString(),
+                }),
+                1_000,
+            ),
+        ).toBe("dozing");
     });
 
     it("expires success and failure presentation after five minutes", () => {

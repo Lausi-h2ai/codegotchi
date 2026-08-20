@@ -874,6 +874,7 @@ where
                                 .expect("compositor exists while session handles signals"),
                             &mut core,
                             &mut resources.child,
+                            &mut room_input,
                             signal,
                         )
                     {
@@ -1272,13 +1273,20 @@ where
     B: RatatuiBackend<Error = io::Error>,
 {
     if let Event::Resize(_, _) = event {
+        room_input.cancel();
         return resize_session(compositor, core, child.as_ref());
+    }
+    if matches!(event, Event::FocusLost) {
+        // Codex still receives the focus transition, but any room gesture is
+        // cancelled before the pointer can be reused after focus returns.
+        room_input.cancel();
     }
     if let Event::Mouse(mouse) = &event {
         let layout = core.layout();
         let point = Position::new(mouse.column, mouse.row);
-        if layout.room.contains(point) {
+        if room_input.has_active_capture() || layout.room.contains(point) {
             let Some(snapshot) = core.snapshot() else {
+                room_input.cancel();
                 return Ok(());
             };
             let requests =
@@ -1327,6 +1335,7 @@ fn handle_signal<B>(
     compositor: &mut Terminal<B>,
     core: &mut TerminalSessionCore,
     child: &mut Option<PtyCodexChild>,
+    room_input: &mut RoomInputSession,
     signal: TerminalSessionSignal,
 ) -> Result<(), TerminalSessionError>
 where
@@ -1346,6 +1355,7 @@ where
             finish_signal_delivery(child.terminate())?;
         }
         TerminalSessionSignal::WindowChange => {
+            room_input.cancel();
             resize_session(compositor, core, child.as_ref())?;
         }
     }
@@ -1454,7 +1464,7 @@ mod tests {
         Terminal, TerminalOptions, Viewport,
         backend::{Backend, ClearType, CrosstermBackend, TestBackend, WindowSize},
         buffer::{Buffer, Cell},
-        layout::Rect,
+        layout::{Position, Rect},
         style::{Color, Modifier},
     };
 
@@ -1894,6 +1904,262 @@ mod tests {
             writer_bytes.lock().expect("writer lock").is_empty(),
             "room mouse input must never be forwarded to the Codex PTY"
         );
+    }
+
+    #[test]
+    fn captured_food_drag_stays_out_of_codex_after_leaving_room() {
+        let mut compositor = fixed_test_compositor(80, 24);
+        let writer_bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut core = TerminalSessionCore::new(24, 80);
+        core.process_output(b"\x1b[?1000h\x1b[?1006h");
+        core.set_snapshot(test_snapshot());
+        let room = core.layout().room;
+        let geometry = super::super::room_geometry_with_frame(
+            room,
+            core.snapshot().expect("snapshot exists"),
+            &core.presentation_frame(),
+        );
+        let food = geometry.food_sources.first().expect("food source exists");
+        let mut writer = Some(Box::new(RecordingWriter {
+            bytes: Arc::clone(&writer_bytes),
+        }) as super::PtyWriter);
+        let mut room_input = RoomInputSession::default();
+
+        handle_event(
+            &mut compositor,
+            &mut core,
+            &mut None,
+            &mut writer,
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: food.rect.x + 1,
+                row: food.rect.y,
+                modifiers: KeyModifiers::NONE,
+            }),
+            None,
+            &mut room_input,
+            Duration::ZERO,
+        )
+        .expect("food press should start capture");
+        assert!(room_input.has_active_capture());
+
+        for kind in [
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            handle_event(
+                &mut compositor,
+                &mut core,
+                &mut None,
+                &mut writer,
+                Event::Mouse(MouseEvent {
+                    kind,
+                    column: 5,
+                    row: 2,
+                    modifiers: KeyModifiers::NONE,
+                }),
+                None,
+                &mut room_input,
+                Duration::ZERO,
+            )
+            .expect("captured outside event should be consumed");
+        }
+
+        assert!(!room_input.has_active_capture());
+        assert!(
+            writer_bytes.lock().expect("writer lock").is_empty(),
+            "captured outside food events must never reach Codex"
+        );
+    }
+
+    #[test]
+    fn captured_pet_gesture_stays_out_of_codex_after_leaving_room() {
+        let mut compositor = fixed_test_compositor(80, 24);
+        let writer_bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut core = TerminalSessionCore::new(24, 80);
+        core.process_output(b"\x1b[?1000h\x1b[?1006h");
+        core.set_snapshot(test_snapshot());
+        let room = core.layout().room;
+        let geometry = super::super::room_geometry_with_frame(
+            room,
+            core.snapshot().expect("snapshot exists"),
+            &core.presentation_frame(),
+        );
+        let pet = geometry.pet;
+        let mut writer = Some(Box::new(RecordingWriter {
+            bytes: Arc::clone(&writer_bytes),
+        }) as super::PtyWriter);
+        let mut room_input = RoomInputSession::default();
+
+        handle_event(
+            &mut compositor,
+            &mut core,
+            &mut None,
+            &mut writer,
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: pet.x + 1,
+                row: pet.y,
+                modifiers: KeyModifiers::NONE,
+            }),
+            None,
+            &mut room_input,
+            Duration::ZERO,
+        )
+        .expect("pet press should start capture");
+        assert!(room_input.has_active_capture());
+
+        handle_event(
+            &mut compositor,
+            &mut core,
+            &mut None,
+            &mut writer,
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Drag(MouseButton::Left),
+                column: 5,
+                row: 2,
+                modifiers: KeyModifiers::NONE,
+            }),
+            None,
+            &mut room_input,
+            Duration::ZERO,
+        )
+        .expect("outside pet drag should be captured");
+        assert!(room_input.has_active_capture());
+        handle_event(
+            &mut compositor,
+            &mut core,
+            &mut None,
+            &mut writer,
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Left),
+                column: 5,
+                row: 2,
+                modifiers: KeyModifiers::NONE,
+            }),
+            None,
+            &mut room_input,
+            Duration::ZERO,
+        )
+        .expect("outside pet release should cancel");
+
+        assert!(!room_input.has_active_capture());
+        assert!(
+            writer_bytes.lock().expect("writer lock").is_empty(),
+            "captured outside pet events must never reach Codex"
+        );
+    }
+
+    #[test]
+    fn focus_loss_cancels_both_room_capture_kinds() {
+        for food_capture in [true, false] {
+            let mut compositor = fixed_test_compositor(80, 24);
+            let writer_bytes = Arc::new(Mutex::new(Vec::new()));
+            let mut core = TerminalSessionCore::new(24, 80);
+            core.set_snapshot(test_snapshot());
+            let room = core.layout().room;
+            let geometry = super::super::room_geometry_with_frame(
+                room,
+                core.snapshot().expect("snapshot exists"),
+                &core.presentation_frame(),
+            );
+            let point = if food_capture {
+                let food = geometry.food_sources.first().expect("food source exists");
+                Position::new(food.rect.x + 1, food.rect.y)
+            } else {
+                Position::new(geometry.pet.x + 1, geometry.pet.y)
+            };
+            let mut writer = Some(Box::new(RecordingWriter {
+                bytes: Arc::clone(&writer_bytes),
+            }) as super::PtyWriter);
+            let mut room_input = RoomInputSession::default();
+            handle_event(
+                &mut compositor,
+                &mut core,
+                &mut None,
+                &mut writer,
+                Event::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: point.x,
+                    row: point.y,
+                    modifiers: KeyModifiers::NONE,
+                }),
+                None,
+                &mut room_input,
+                Duration::ZERO,
+            )
+            .expect("capture starts");
+            assert!(room_input.has_active_capture());
+
+            handle_event(
+                &mut compositor,
+                &mut core,
+                &mut None,
+                &mut writer,
+                Event::FocusLost,
+                None,
+                &mut room_input,
+                Duration::ZERO,
+            )
+            .expect("focus loss should cancel capture");
+            assert!(!room_input.has_active_capture());
+        }
+    }
+
+    #[test]
+    fn resize_cancels_both_room_capture_kinds() {
+        for food_capture in [true, false] {
+            let mut compositor = fixed_test_compositor(80, 24);
+            let writer_bytes = Arc::new(Mutex::new(Vec::new()));
+            let mut core = TerminalSessionCore::new(24, 80);
+            core.set_snapshot(test_snapshot());
+            let room = core.layout().room;
+            let geometry = super::super::room_geometry_with_frame(
+                room,
+                core.snapshot().expect("snapshot exists"),
+                &core.presentation_frame(),
+            );
+            let point = if food_capture {
+                let food = geometry.food_sources.first().expect("food source exists");
+                Position::new(food.rect.x + 1, food.rect.y)
+            } else {
+                Position::new(geometry.pet.x + 1, geometry.pet.y)
+            };
+            let mut writer = Some(Box::new(RecordingWriter {
+                bytes: Arc::clone(&writer_bytes),
+            }) as super::PtyWriter);
+            let mut room_input = RoomInputSession::default();
+            handle_event(
+                &mut compositor,
+                &mut core,
+                &mut None,
+                &mut writer,
+                Event::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: point.x,
+                    row: point.y,
+                    modifiers: KeyModifiers::NONE,
+                }),
+                None,
+                &mut room_input,
+                Duration::ZERO,
+            )
+            .expect("capture starts");
+            assert!(room_input.has_active_capture());
+
+            handle_event(
+                &mut compositor,
+                &mut core,
+                &mut None,
+                &mut writer,
+                Event::Resize(80, 24),
+                None,
+                &mut room_input,
+                Duration::ZERO,
+            )
+            .expect("resize should cancel capture");
+            assert!(!room_input.has_active_capture());
+        }
     }
 
     #[test]

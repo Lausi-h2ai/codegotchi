@@ -181,6 +181,21 @@ describe("CodeGotchi pet room", () => {
         ).toBeDisabled();
     });
 
+    it("keeps generic sleeping on the floor instead of claiming the hammock", () => {
+        renderApp({
+            snapshot: snapshot({ behavior: "Sleeping", nappingUntil: null }),
+            connectionStatus: "connected",
+        });
+
+        const pet = screen.getByTestId("pet");
+        expect(pet).toHaveAttribute("data-motion-mode", "dozing");
+        expect(pet).toHaveAttribute("data-motion-waypoint", "floor_doze");
+        expect(screen.getByTestId("zzz")).toBeVisible();
+        expect(
+            screen.getByRole("button", { name: /hammock nap/i }),
+        ).toBeEnabled();
+    });
+
     it("does not start a second nap while the first is still active", () => {
         const napDeadline = new Date(Date.now() + 10_000).toISOString();
         const nap = vi.fn().mockResolvedValue(undefined);
@@ -806,6 +821,15 @@ describe("CodeGotchi motion presentation adapter", () => {
                 nappingUntil: "2026-08-05T12:00:10Z",
                 expectedMode: "napping",
                 expectedWaypoint: "hammock",
+            },
+        ],
+        [
+            "generic dozing",
+            {
+                behavior: "Sleeping" as const,
+                nappingUntil: null,
+                expectedMode: "dozing",
+                expectedWaypoint: "floor_doze",
             },
         ],
         [
