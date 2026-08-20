@@ -1382,8 +1382,13 @@ mod tests {
         SimulationSnapshot, SystemClock,
     };
     use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-    use crossterm::style::{Colored, force_color_output};
-    use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect};
+    use ratatui::{
+        Terminal, TerminalOptions, Viewport,
+        backend::{Backend, ClearType, CrosstermBackend, TestBackend, WindowSize},
+        buffer::{Buffer, Cell},
+        layout::Rect,
+        style::{Color, Modifier},
+    };
 
     use super::{
         ReaderMessage, ReaderThreadGuard, RoomInputSession, SessionResources, TerminalSessionCore,
@@ -1597,16 +1602,6 @@ mod tests {
         }
     }
 
-    struct ColorOutputRestore {
-        was_disabled: bool,
-    }
-
-    impl Drop for ColorOutputRestore {
-        fn drop(&mut self) {
-            force_color_output(!self.was_disabled);
-        }
-    }
-
     #[test]
     fn writer_seam_delivers_exact_encoded_bytes() {
         let bytes = Arc::new(Mutex::new(Vec::new()));
@@ -1633,6 +1628,94 @@ mod tests {
             },
         )
         .expect("fixed compositor should initialize")
+    }
+
+    struct InMemoryBackend {
+        backend: TestBackend,
+    }
+
+    impl InMemoryBackend {
+        fn new(columns: u16, rows: u16) -> Self {
+            Self {
+                backend: TestBackend::new(columns, rows),
+            }
+        }
+
+        fn buffer(&self) -> &Buffer {
+            self.backend.buffer()
+        }
+
+        fn resize(&mut self, columns: u16, rows: u16) {
+            self.backend.resize(columns, rows);
+        }
+    }
+
+    fn infallible_to_io(error: std::convert::Infallible) -> io::Error {
+        match error {}
+    }
+
+    impl Backend for InMemoryBackend {
+        type Error = io::Error;
+
+        fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+        where
+            I: Iterator<Item = (u16, u16, &'a Cell)>,
+        {
+            self.backend.draw(content).map_err(infallible_to_io)
+        }
+
+        fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+            self.backend.hide_cursor().map_err(infallible_to_io)
+        }
+
+        fn show_cursor(&mut self) -> Result<(), Self::Error> {
+            self.backend.show_cursor().map_err(infallible_to_io)
+        }
+
+        fn get_cursor_position(&mut self) -> Result<ratatui::layout::Position, Self::Error> {
+            self.backend.get_cursor_position().map_err(infallible_to_io)
+        }
+
+        fn set_cursor_position<P: Into<ratatui::layout::Position>>(
+            &mut self,
+            position: P,
+        ) -> Result<(), Self::Error> {
+            self.backend
+                .set_cursor_position(position)
+                .map_err(infallible_to_io)
+        }
+
+        fn clear(&mut self) -> Result<(), Self::Error> {
+            self.backend.clear().map_err(infallible_to_io)
+        }
+
+        fn clear_region(&mut self, clear_type: ClearType) -> Result<(), Self::Error> {
+            self.backend
+                .clear_region(clear_type)
+                .map_err(infallible_to_io)
+        }
+
+        fn size(&self) -> Result<ratatui::layout::Size, Self::Error> {
+            self.backend.size().map_err(infallible_to_io)
+        }
+
+        fn window_size(&mut self) -> Result<WindowSize, Self::Error> {
+            self.backend.window_size().map_err(infallible_to_io)
+        }
+
+        fn flush(&mut self) -> Result<(), Self::Error> {
+            self.backend.flush().map_err(infallible_to_io)
+        }
+    }
+
+    fn fixed_test_compositor(columns: u16, rows: u16) -> Terminal<InMemoryBackend> {
+        Terminal::with_options(
+            InMemoryBackend::new(columns, rows),
+            TerminalOptions {
+                viewport: Viewport::Fixed(Rect::new(0, 0, columns, rows)),
+            },
+        )
+        .expect("fixed test compositor should initialize")
     }
 
     fn apply_new_output(
@@ -1675,34 +1758,37 @@ mod tests {
 
     #[test]
     fn persistent_compositor_resize_clears_stale_style_from_default_cells() {
-        let was_disabled = Colored::ansi_color_disabled_memoized();
-        force_color_output(true);
-        let _restore = ColorOutputRestore { was_disabled };
-        let bytes = Arc::new(Mutex::new(Vec::new()));
-        let mut compositor = fixed_compositor(Arc::clone(&bytes), 6, 24);
-        let mut parser = vt100::Parser::new(24, 6, 0);
-        let mut offset = 0;
+        let mut compositor = fixed_test_compositor(6, 24);
         let mut core = TerminalSessionCore::new(24, 6);
         core.process_output(b"\x1b[31;44;1mSTALE");
 
         draw_frame(&mut compositor, &core, None).expect("styled frame should render");
-        apply_new_output(&bytes, &mut offset, &mut parser);
-        let styled = parser.screen().cell(0, 0).expect("cell exists");
-        assert_eq!(styled.fgcolor(), vt100::Color::Idx(1));
-        assert_eq!(styled.bgcolor(), vt100::Color::Idx(4));
-        assert!(styled.bold());
+        let styled = compositor
+            .backend()
+            .buffer()
+            .cell((0, 0))
+            .expect("cell exists");
+        assert_eq!(styled.fg, Color::Red);
+        assert_eq!(styled.bg, Color::Blue);
+        assert!(styled.modifier.contains(Modifier::BOLD));
 
         core.process_output(b"\x1b[0m\x1b[2J\x1b[H");
+        compositor.backend_mut().resize(6, 4);
         resize_compositor(&mut compositor, &mut core, 4, 6, None)
             .expect("resize/default frame should render");
-        parser.screen_mut().set_size(1, 6);
-        apply_new_output(&bytes, &mut offset, &mut parser);
 
-        let cleared = parser.screen().cell(0, 0).expect("cell exists");
-        assert_eq!(cleared.contents(), " ");
-        assert_eq!(cleared.fgcolor(), vt100::Color::Default);
-        assert_eq!(cleared.bgcolor(), vt100::Color::Default);
-        assert!(!cleared.bold(), "default cell must not retain stale style");
+        let cleared = compositor
+            .backend()
+            .buffer()
+            .cell((0, 0))
+            .expect("cell exists");
+        assert_eq!(cleared.symbol(), " ");
+        assert_eq!(cleared.fg, Color::Reset);
+        assert_eq!(cleared.bg, Color::Reset);
+        assert!(
+            cleared.modifier.is_empty(),
+            "default cell must not retain stale style"
+        );
     }
 
     #[test]
