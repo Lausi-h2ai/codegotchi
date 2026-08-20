@@ -242,6 +242,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     test("feeds with drag and drop and keeps the authoritative result after reload", async ({
         page,
     }) => {
+        await resetFixture(page, "default");
         await page.goto(launchUrl);
         const food = page.getByTestId("food-treat");
         const feedTarget = page.getByRole("button", {
@@ -264,6 +265,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     test("drinks an energy drink and keeps the authoritative count after reload", async ({
         page,
     }) => {
+        await resetFixture(page, "default");
         await page.goto(launchUrl);
         const drink = page.getByTestId("food-energy_drink");
         const feedTarget = page.getByRole("button", {
@@ -284,6 +286,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     });
 
     test("takes a five-second hammock nap, then wakes up", async ({ page }) => {
+        await resetFixture(page, "default");
         await page.goto(launchUrl);
         const hammock = page.getByRole("button", { name: "Hammock nap" });
 
@@ -305,6 +308,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     });
 
     test("does not send an invalid food drop", async ({ page }) => {
+        await resetFixture(page, "default");
         await page.goto(launchUrl);
         const food = page.getByTestId("food-treat");
         const before = await food.locator("strong").textContent();
@@ -319,6 +323,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     test("does not clean a poop dragged directly to trash", async ({
         page,
     }) => {
+        await resetFixture(page, "default");
         await page.goto(launchUrl);
         const poops = page.locator("[data-poop-id]");
         const before = await poops.count();
@@ -331,6 +336,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     });
 
     test("presents a real backend care error", async ({ page }) => {
+        await resetFixture(page, "default");
         await page.goto(launchUrl);
         const emptyFood = page.getByTestId("food-kibble");
 
@@ -344,6 +350,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     test("cleans a poop only after shovel, poop, and trash, then persists removal", async ({
         page,
     }) => {
+        await resetFixture(page, "default");
         await page.goto(launchUrl);
         const poops = page.locator("[data-poop-id]");
         const before = await poops.count();
@@ -363,6 +370,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     test("recovers from a disconnected stream and accepts the replacement snapshot", async ({
         page,
     }) => {
+        await resetFixture(page, "default");
         let connectionCount = 0;
         let disconnect: (() => Promise<void>) | undefined;
 
@@ -377,6 +385,13 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
 
         await page.goto(launchUrl);
         await expect(page.getByText("Connected")).toBeVisible();
+        await sendHookEvent(page, {
+            kind: "turn_started",
+            activity: "thinking",
+        });
+        await expect(page.getByTestId("activity-label")).toContainText(
+            "Thinking",
+        );
         await expect.poll(() => connectionCount).toBe(1);
         expect(disconnect).toBeDefined();
 
@@ -399,6 +414,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         page,
     }) => {
         test.setTimeout(40_000);
+        await resetFixture(page, "default");
         await page.goto(launchUrl);
         await expect(petLocator(page)).toBeVisible();
 
@@ -520,6 +536,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     test("maps searching and editing events to interruptible thinking and desk poses", async ({
         page,
     }) => {
+        await resetFixture(page, "default");
         await page.goto(launchUrl);
         await expect(petLocator(page)).toBeVisible();
         await sendHookEvent(page, {
@@ -679,6 +696,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     test("keeps semantic poses static when reduced motion is requested", async ({
         page,
     }) => {
+        await resetFixture(page, "default");
         await page.emulateMedia({ reducedMotion: "reduce" });
         await page.goto(launchUrl);
         await expect(petLocator(page)).toBeVisible();
@@ -732,6 +750,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     test("keeps care controls authoritative while free-time motion is traveling", async ({
         page,
     }) => {
+        await resetFixture(page, "default");
         await page.goto(launchUrl);
         await expect(petLocator(page)).toBeVisible();
         await sendHookEvent(page, {
