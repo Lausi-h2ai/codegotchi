@@ -784,6 +784,66 @@ fn rendered_care_extents_are_inside_their_hit_regions() {
 }
 
 #[test]
+fn rendered_food_labels_do_not_overlap_poops_in_wide_layouts() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot
+        .pending_poops
+        .push(Poop::new(Uuid::from_u128(12), now));
+
+    for area in [Rect::new(0, 0, 120, 14), Rect::new(0, 0, 120, 7)] {
+        let geometry = codegotchi_cli::terminal::room_geometry(area, &snapshot);
+        let mut buffer = Buffer::filled(area, Cell::new(" "));
+        render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+        for (index, source) in geometry.food_sources.iter().enumerate() {
+            let label = if area.height >= 14 {
+                format!(
+                    "FOOD {} x{}",
+                    match source.food_id {
+                        "kibble" => "KIB",
+                        "treat" => "TRT",
+                        "fruit" => "FRT",
+                        "energy_drink" => "ENE",
+                        other => panic!("unexpected food id {other}"),
+                    },
+                    source.count
+                )
+            } else if index == 0 {
+                format!("FOOD x{}", source.count)
+            } else {
+                format!(
+                    "{}x{}",
+                    match source.food_id {
+                        "kibble" => "KIB",
+                        "treat" => "TRT",
+                        "fruit" => "FRT",
+                        "energy_drink" => "ENE",
+                        other => panic!("unexpected food id {other}"),
+                    },
+                    source.count
+                )
+            };
+            let row_offset = if area.height >= 14 || index == 0 {
+                3
+            } else {
+                2
+            };
+            let row = source.rect.y + row_offset;
+            for (offset, symbol) in label.chars().enumerate() {
+                assert_eq!(
+                    buffer
+                        .cell((source.rect.x + u16::try_from(offset).unwrap(), row))
+                        .expect("food label cell")
+                        .symbol(),
+                    symbol.to_string(),
+                    "wide food label must remain visible beside poop: area={area:?} source={source:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn minimal_care_labels_start_inside_their_hit_regions() {
     let now = Utc::now();
     let mut snapshot = base_snapshot(now);
