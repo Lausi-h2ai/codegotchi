@@ -118,16 +118,21 @@ terminal acceptance evidence is Linux/WSL-first. Native Windows is not part of
 the current terminal target. Browser mode remains available wherever the
 launcher can print the loopback URL and a browser can reach it.
 
-Named terminal theme presets are planned, rendering-only options. The planned
-surface is:
+Terminal theme presets are rendering-only options. Select one before the `--`
+separator; `auto` is the default when the option is omitted:
 
-```text
---terminal-theme auto|mono|soft-green|amber|night
+```sh
+codegotchi run --terminal-theme auto -- codex ...
+codegotchi run --ui terminal --terminal-theme mono -- codex ...
+codegotchi run --ui terminal --terminal-theme=soft-green -- codex ...
+codegotchi run --ui both --terminal-theme amber -- codex ...
+codegotchi run --ui terminal --terminal-theme night -- codex ...
 ```
 
-The current launcher accepts the `--ui` modes above and uses the terminal's
-default/Auto semantic palette; it does not yet accept `--terminal-theme` or
-the named presets. Selecting a future preset will not change pet state.
+The accepted values are exactly `auto`, `mono`, `soft-green`, `amber`, and
+`night`. `auto` follows the terminal's own foreground/background; the named
+presets select fixed palettes for the room. The option is presentation-only and
+does not change pet state.
 
 ## State, runtime files, and cleanup
 
