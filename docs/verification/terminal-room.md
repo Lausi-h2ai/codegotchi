@@ -1,25 +1,26 @@
 # Terminal Room Final Verification
 
-Status: **PASS — ready for merge**
+Status: **FAIL — Task 8 release gate remains blocked**
 
-Task 7 Fix Round 1 is tied to renderer commit
-`992e5b6833c41757169c9ee69615d170e933b561`; the evidence commit is recorded
-in the final report. The six inspected PNGs and exact capture mappings are in
-[terminal-room evidence](terminal-room/README.md).
+Task 7's visual acceptance is retained as historical evidence only. Task 8's
+final source head is `bc8d288db6f23f14420d61a95772922de8343aee` (on top of
+`86dc27509fbf5b34e2b23ed61779e8445e790cad`). The existing six PNGs were
+inspected, but were captured against the older Task 7 renderer and were not
+re-captured after the Task 8 geometry fix; they therefore cannot close the
+final visual gate.
 
 | Requirement | Result |
 |---|---|
-| Deterministic Full care state | PASS — explicit bottom-aligned fixture seeds three poops plus Affection/Snack demands; light/dark/bed/doze frames visibly show them. |
-| Full 120x45 light/default | PASS — complete room composition and seeded care state. |
-| Full 120x45 dark | PASS — seeded care state remains readable in night contrast. |
-| Compact 120x30 | PASS — widened bowl/poop targets and labels survive with pet/bed. |
-| Minimal 120x21 | PASS — visible FOOD/BED/POOP controls start exactly at their hit rectangles. |
-| Wide hit regions | PASS — focused tests cover object-width/height regions in Full and Compact. |
-| Bed sleep vs floor doze | PASS — covered bed pet versus horizontal open-floor curl, same Full framing. |
-| Automated tests | PASS — 70 library tests and 17 terminal-room integration tests. |
+| Deterministic Full care state | HISTORICAL PASS — Task 7 fixture images were inspected; no final-SHA recapture. |
+| Full 120x45 light/default | BLOCKED — final-SHA visual recapture was not run. |
+| Full 120x45 dark | BLOCKED — final-SHA visual recapture was not run. |
+| Compact 120x30 | BLOCKED — final-SHA visual recapture was not run. |
+| Minimal 120x21 | PASS — regression tests prove rendered controls and edge clicks align. |
+| Wide hit regions | PASS — rendered food/poop extents are asserted in Full and Compact; edge clicks dispatch care. |
+| Bed sleep vs floor doze | HISTORICAL PASS — no final-SHA recapture. |
+| Automated tests | PASS on final rerun — fmt, clippy, workspace tests, web tests/lint/format/build, embed, and 17 Playwright tests. |
 
-Remaining differences are non-blocking ANSI abstraction and the pre-existing
-duplicate `BED BED` wide-bed label. No scoped Important blocker remains.
+Task 8's final blockers are listed at the end of this document.
 
 ## Task 5 platform/Codex verification (historical record retained)
 
@@ -119,3 +120,43 @@ Checklist status at the Task 5 checkpoint:
 | Full → Compact → Minimal → Full | Not captured; no fake evidence substituted. |
 | Pet/feed/clean/nap while Codex is usable | Not run. |
 | Clean exit/terminal restore | Launcher attempt produced equal baseline/final `stty -g`; Codex interaction still blocked. |
+
+## Task 8 final release-gate disposition
+
+Final source/evidence head: `bc8d288db6f23f14420d61a95772922de8343aee`.
+The prior hit-region fix is `86dc27509fbf5b34e2b23ed61779e8445e790cad`.
+
+The carried Important gap is closed by TDD. `rendered_care_extents_are_inside_their_hit_regions`
+checks every rendered food/poop cell against its actual Full and Compact hit
+region; `rendered_food_and_poop_edges_dispatch_care_requests` clicks rendered
+edge cells and verifies Feed/Clean/Nap behavior, including Minimal alignment.
+The follow-up `rendered_food_labels_do_not_overlap_poops_in_wide_layouts`
+regression test led to the final label/poop spacing fix.
+
+Final automated evidence:
+
+```text
+cargo fmt --all -- --check                                      PASS
+cargo clippy --workspace --all-targets --all-features -- -D warnings PASS
+cargo test --workspace                                        PASS on final rerun
+corepack pnpm test (web)                                      PASS (120 tests)
+corepack pnpm lint                                             PASS
+corepack pnpm format:check                                     PASS
+corepack pnpm build                                            PASS
+node web/scripts/embed-web.mjs                                 PASS
+corepack pnpm playwright:test                                  PASS (17 tests)
+```
+
+The first workspace invocation had a transient `full_vertical_flow` failure
+that reproduced on baseline `edc0968`; the completed rerun at this final SHA
+passed all workspace targets. This is retained as a flake note, not hidden.
+
+Blocking external/manual gates remain: hosted Ubuntu/macOS GitHub Actions
+results for this SHA are unavailable locally; the final-SHA six-image visual
+recapture was not run after the geometry fix; and the real Codex checklist
+(approval/tool flow, bracketed paste/focus, mouse care, and Full → Compact →
+Minimal → Full) was not observed in this bounded run. Existing Task 5/7
+captures are historical and do not substitute for those gates.
+
+Status: **FAIL — final release gate is blocked by the explicit external/manual
+items above.**

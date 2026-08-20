@@ -1,10 +1,10 @@
 # Terminal Room Visual Acceptance Evidence
 
-Status: **ACCEPTED** (Task 7 Fix Round 1, 2026-08-20)
+Status: **HISTORICAL ONLY — Task 8 final visual gate is BLOCKED**
 
-Renderer/code commit: `992e5b6833c41757169c9ee69615d170e933b561`.
-Every final frame below was opened as a raster image after the last fix and
-compared with `docs/mockups/terminal-room/`.
+Renderer/code commit for the frames below: `992e5b6833c41757169c9ee69615d170e933b561`.
+These Task 7 frames were opened as raster images, but they are not final-SHA
+evidence for Task 8's `bc8d288db6f23f14420d61a95772922de8343aee` renderer.
 
 | File | Cells | Pixels | State/theme | Result |
 |---|---:|---:|---|---|
@@ -15,7 +15,7 @@ compared with `docs/mockups/terminal-room/`.
 | [full-120x45-bed-sleep.png](full-120x45-bed-sleep.png) | 120x45 | 1324x904 | Seeded authoritative bed sleep | Covered pet is on the bed with `z z z`; seeded poop/care state remains visible. |
 | [full-120x45-floor-doze.png](full-120x45-floor-doze.png) | 120x45 | 1324x904 | Seeded generic floor doze | Clearly horizontal/curling floor pet with `z`, same bottom-aligned Full framing, empty bed. |
 
-## Fix-round review
+## Historical Fix-round review
 
 - The wide food regions now cover the bowl, label, and count rows; wide poop
   regions cover the four-row object width/height. Focused geometry tests assert
@@ -32,10 +32,10 @@ compared with `docs/mockups/terminal-room/`.
   explicit debug command; no wildcard runtime selection is part of the final
   mapping.
 
-Remaining non-blocking differences are abstract ANSI art versus the raster
-references, the bounded Codex pane/terminal background above integrated
-Compact/Minimal captures, and the existing duplicate `BED BED` label in the
-wide bed projection. No scoped Important blocker remains.
+Remaining differences are abstract ANSI art versus the raster references, the
+bounded Codex pane/terminal background above integrated Compact/Minimal
+captures, and the existing duplicate `BED BED` label in the wide bed
+projection. These historical frames do not close Task 8's final visual gate.
 
 ## Capture environment and exact commands
 
@@ -87,7 +87,7 @@ wide bed projection. No scoped Important blocker remains.
 Screenshots were taken with `import -window <window-id> <file>` after settle.
 No video tool was available; bed/doze are the ordered state frames.
 
-## Automated verification
+## Historical automated verification
 
 ```text
 cargo fmt --all -- --check                         PASS
@@ -96,7 +96,18 @@ cargo test -p codegotchi-cli --lib                 PASS (70 passed)
 git diff --check                                   PASS
 ```
 
-Reviewer/process: fresh implementer read the independent review, wrote
+Reviewer/process: the Task 7 implementer read the independent review, wrote
 focused failing tests, verified the red failures, implemented the scoped fix,
-ran the green focused/full suites, and inspected all six final PNGs after the
+ran the green focused/full suites, and inspected all six Task 7 PNGs after the
 last recapture.
+
+## Task 8 disposition
+
+The Task 8 hit-region gap is closed in source and tests at
+`bc8d288db6f23f14420d61a95772922de8343aee`; see
+[`terminal-room.md`](../terminal-room.md) for the full matrix and blocker
+record. Final-SHA visual recapture, hosted Ubuntu/macOS CI evidence, and the
+remaining real-Codex interaction checklist are still outstanding.
+
+Status: **FAIL — historical images only; final visual/manual gates remain
+open.**
