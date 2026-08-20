@@ -4,7 +4,7 @@ Status: **HISTORICAL ONLY — Task 8 final visual gate is BLOCKED**
 
 Renderer/code commit for the frames below: `992e5b6833c41757169c9ee69615d170e933b561`.
 These Task 7 frames were opened as raster images, but they are not final-SHA
-evidence for Task 8's `bc8d288db6f23f14420d61a95772922de8343aee` renderer.
+evidence for Task 8's `8f5184b34b94d877617440030aa46f635579b47b` renderer.
 
 | File | Cells | Pixels | State/theme | Result |
 |---|---:|---:|---|---|
@@ -104,10 +104,12 @@ last recapture.
 ## Task 8 disposition
 
 The Task 8 hit-region gap is closed in source and tests at
-`bc8d288db6f23f14420d61a95772922de8343aee`; see
+`8f5184b34b94d877617440030aa46f635579b47b`; see
 [`terminal-room.md`](../terminal-room.md) for the full matrix and blocker
-record. Final-SHA visual recapture, hosted Ubuntu/macOS CI evidence, and the
-remaining real-Codex interaction checklist are still outstanding.
+record. Fix Round 1 also proves all three normal Full poop targets stay out of
+the bed hitbox and that a bed click dispatches Nap. Final-SHA visual
+recapture, hosted Ubuntu/macOS CI evidence, and the remaining real-Codex
+interaction checklist are still outstanding.
 
 Status: **FAIL — historical images only; final visual/manual gates remain
 open.**

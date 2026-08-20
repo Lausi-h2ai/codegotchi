@@ -3,8 +3,8 @@
 Status: **FAIL — Task 8 release gate remains blocked**
 
 Task 7's visual acceptance is retained as historical evidence only. Task 8's
-final source head is `bc8d288db6f23f14420d61a95772922de8343aee` (on top of
-`86dc27509fbf5b34e2b23ed61779e8445e790cad`). The existing six PNGs were
+final tested source head is `8f5184b34b94d877617440030aa46f635579b47b` (on top
+of `bc8d288db6f23f14420d61a95772922de8343aee`). The existing six PNGs were
 inspected, but were captured against the older Task 7 renderer and were not
 re-captured after the Task 8 geometry fix; they therefore cannot close the
 final visual gate.
@@ -123,7 +123,8 @@ Checklist status at the Task 5 checkpoint:
 
 ## Task 8 final release-gate disposition
 
-Final source/evidence head: `bc8d288db6f23f14420d61a95772922de8343aee`.
+Final tested source head: `8f5184b34b94d877617440030aa46f635579b47b`.
+Evidence documentation commit: `31362fe`.
 The prior hit-region fix is `86dc27509fbf5b34e2b23ed61779e8445e790cad`.
 
 The carried Important gap is closed by TDD. `rendered_care_extents_are_inside_their_hit_regions`
@@ -132,6 +133,10 @@ region; `rendered_food_and_poop_edges_dispatch_care_requests` clicks rendered
 edge cells and verifies Feed/Clean/Nap behavior, including Minimal alignment.
 The follow-up `rendered_food_labels_do_not_overlap_poops_in_wide_layouts`
 regression test led to the final label/poop spacing fix.
+
+Fix Round 1 additionally keeps all three normal Full poop targets disjoint
+from the bed and proves a bed click dispatches Nap in
+`full_three_poop_slots_stay_outside_bed_and_bed_click_naps`.
 
 Final automated evidence:
 
