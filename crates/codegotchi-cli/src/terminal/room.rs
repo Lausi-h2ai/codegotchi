@@ -9,11 +9,63 @@ use uuid::Uuid;
 use super::behavior::{
     PetPose, PresentationActivity, PresentationFrame, has_authoritative_nap, presentation_activity,
 };
-use super::sprites::{draw_sprite, pet_sprite, pet_sprite_compact};
-use super::theme::{SemanticTone, auto_style};
+use super::sprites::{draw_sprite_with_palette, pet_sprite, pet_sprite_compact};
+use super::theme::{ResolvedPalette, SemanticTone, TerminalThemePreset};
 
 const FULL_ROOM_HEIGHT: u16 = 14;
 const COMPACT_ROOM_HEIGHT: u16 = 7;
+
+/// Presentation-only sky state for the Full room window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RoomAmbience {
+    /// Bright skyline/window treatment.
+    #[default]
+    Day,
+    /// Dark skyline/window treatment.
+    Night,
+}
+
+/// Resolved presentation inputs shared by every room draw site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RoomRenderOptions {
+    palette: ResolvedPalette,
+    ambience: RoomAmbience,
+}
+
+impl Default for RoomRenderOptions {
+    fn default() -> Self {
+        Self::for_theme(TerminalThemePreset::Auto, RoomAmbience::Day)
+    }
+}
+
+impl RoomRenderOptions {
+    /// Creates options from a named terminal theme and presentation ambience.
+    #[must_use]
+    pub fn for_theme(theme: TerminalThemePreset, ambience: RoomAmbience) -> Self {
+        Self {
+            palette: theme.resolve(),
+            ambience,
+        }
+    }
+
+    /// Creates options from an already-resolved palette.
+    #[must_use]
+    pub const fn new(palette: ResolvedPalette, ambience: RoomAmbience) -> Self {
+        Self { palette, ambience }
+    }
+
+    /// Returns the resolved style mapping used by the room and sprites.
+    #[must_use]
+    pub const fn palette(self) -> ResolvedPalette {
+        self.palette
+    }
+
+    /// Returns the presentation-only Full-room ambience.
+    #[must_use]
+    pub const fn ambience(self) -> RoomAmbience {
+        self.ambience
+    }
+}
 
 /// One draggable food source rendered from authoritative inventory counts.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,10 +157,33 @@ pub fn render_room(
     frame: &PresentationFrame,
     drag: Option<(&str, Position)>,
 ) {
+    render_room_with_options(
+        area,
+        buffer,
+        snapshot,
+        frame,
+        RoomRenderOptions::default(),
+        drag,
+    );
+}
+
+/// Renders the room using one resolved palette and presentation ambience.
+///
+/// All status, furniture, sprite, and affordance draw sites consume the same
+/// options. This prevents a selected terminal theme from being partially
+/// applied when one private renderer is updated later.
+pub fn render_room_with_options(
+    area: Rect,
+    buffer: &mut Buffer,
+    snapshot: &SimulationSnapshot,
+    frame: &PresentationFrame,
+    options: RoomRenderOptions,
+    drag: Option<(&str, Position)>,
+) {
     if area.is_empty() {
         return;
     }
-    reset_area(area, buffer);
+    reset_area(area, buffer, options.palette());
 
     let activity = presentation_activity(snapshot);
     let napping = has_authoritative_nap(snapshot);
@@ -116,13 +191,33 @@ pub fn render_room(
 
     match room_mode(area.height) {
         RoomMode::Full => render_full(
-            area, buffer, snapshot, activity, napping, frame, &geometry, drag,
+            area, buffer, snapshot, activity, napping, frame, &geometry, options, drag,
         ),
         RoomMode::Compact => render_compact(
-            area, buffer, snapshot, activity, napping, frame, &geometry, drag,
+            area, buffer, snapshot, activity, napping, frame, &geometry, options, drag,
         ),
-        RoomMode::Minimal => render_minimal(area, buffer, snapshot, napping, drag),
+        RoomMode::Minimal => render_minimal(area, buffer, snapshot, napping, options, drag),
     }
+}
+
+/// Convenience entry point for callers that already resolved a palette.
+pub fn render_room_with_palette(
+    area: Rect,
+    buffer: &mut Buffer,
+    snapshot: &SimulationSnapshot,
+    frame: &PresentationFrame,
+    palette: ResolvedPalette,
+    ambience: RoomAmbience,
+    drag: Option<(&str, Position)>,
+) {
+    render_room_with_options(
+        area,
+        buffer,
+        snapshot,
+        frame,
+        RoomRenderOptions::new(palette, ambience),
+        drag,
+    );
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -315,11 +410,12 @@ fn offset_rect(rect: Rect, offset: (i16, i16), area: Rect) -> Rect {
     Rect::new(x as u16, y as u16, rect.width, rect.height)
 }
 
-fn reset_area(area: Rect, buffer: &mut Buffer) {
+fn reset_area(area: Rect, buffer: &mut Buffer, palette: ResolvedPalette) {
     for y in area.y..area.y.saturating_add(area.height) {
         for x in area.x..area.x.saturating_add(area.width) {
             if let Some(cell) = buffer.cell_mut(Position { x, y }) {
-                cell.reset();
+                cell.set_symbol(" ")
+                    .set_style(palette.cell_style(SemanticTone::Tone0));
             }
         }
     }
@@ -376,8 +472,10 @@ fn render_full(
     napping: bool,
     frame: &PresentationFrame,
     geometry: &RoomGeometry,
+    options: RoomRenderOptions,
     drag: Option<(&str, Position)>,
 ) {
+    let palette = options.palette();
     let needs = snapshot.needs;
     let status_lines = [
         format!("Hunger {:8}", need_bar(needs.hunger())),
@@ -391,7 +489,7 @@ fn render_full(
             buffer,
             u16::try_from(index).unwrap_or(u16::MAX),
             line,
-            auto_style(SemanticTone::Tone3),
+            palette.cell_style(SemanticTone::Tone3),
         );
     }
     put_text(
@@ -400,53 +498,74 @@ fn render_full(
         20,
         0,
         &format!("{:?}", activity),
-        auto_style(SemanticTone::Tone2),
+        palette.cell_style(SemanticTone::Tone2),
     );
-    render_furniture_full(area, buffer);
+    render_furniture_full(area, buffer, palette, options.ambience());
 
     if let Some(bed) = geometry.bed {
         let bed_x = bed.x.saturating_sub(area.x);
         let bed_y = bed.y.saturating_sub(area.y);
-        put_sprite(area, buffer, &BED_FULL, bed_x, bed_y);
+        put_sprite(area, buffer, &BED_FULL, bed_x, bed_y, palette);
     }
     if napping {
         if let Some(bed) = geometry.bed {
             let bed_x = bed.x.saturating_sub(area.x);
             let bed_y = bed.y.saturating_sub(area.y);
-            draw_sprite(area, buffer, pet_sprite(PetPose::Sleep), bed_x, bed_y);
+            draw_sprite_with_palette(
+                area,
+                buffer,
+                pet_sprite(PetPose::Sleep),
+                bed_x,
+                bed_y,
+                palette,
+            );
             put_line(
                 area,
                 buffer,
                 bed_y.saturating_add(4),
                 "z z z",
-                auto_style(SemanticTone::Tone2),
+                palette.cell_style(SemanticTone::Tone2),
             );
         }
     } else {
         let pet_x = geometry.pet.x.saturating_sub(area.x);
         let pet_y = geometry.pet.y.saturating_sub(area.y);
         if snapshot.behavior == PetBehavior::Sleeping {
-            draw_sprite(area, buffer, pet_sprite(PetPose::Doze), pet_x, pet_y);
+            draw_sprite_with_palette(
+                area,
+                buffer,
+                pet_sprite(PetPose::Doze),
+                pet_x,
+                pet_y,
+                palette,
+            );
             put_line(
                 area,
                 buffer,
                 pet_y.saturating_add(5),
                 "z",
-                auto_style(SemanticTone::Tone2),
+                palette.cell_style(SemanticTone::Tone2),
             );
         } else {
-            draw_sprite(area, buffer, pet_sprite(frame.pose), pet_x, pet_y);
+            draw_sprite_with_palette(area, buffer, pet_sprite(frame.pose), pet_x, pet_y, palette);
         }
     }
 
-    render_food_sources(area, buffer, geometry, true);
-    render_pending_demands_full(area, buffer, snapshot);
+    render_food_sources(area, buffer, geometry, true, palette);
+    render_pending_demands_full(area, buffer, snapshot, palette);
     for (_, rect) in &geometry.poops {
         let x = rect.x.saturating_sub(area.x);
         let y = rect.y.saturating_sub(area.y);
-        put(area, buffer, x, y, "●", auto_style(SemanticTone::Tone1));
+        put(
+            area,
+            buffer,
+            x,
+            y,
+            "●",
+            palette.cell_style(SemanticTone::Tone1),
+        );
     }
-    render_drag_ghost(area, buffer, drag);
+    render_drag_ghost(area, buffer, drag, palette);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -458,8 +577,10 @@ fn render_compact(
     napping: bool,
     frame: &PresentationFrame,
     geometry: &RoomGeometry,
+    options: RoomRenderOptions,
     drag: Option<(&str, Position)>,
 ) {
+    let palette = options.palette();
     let needs = snapshot.needs;
     let status_line = format!(
         "H {} E {} P {} C {}",
@@ -473,7 +594,7 @@ fn render_compact(
         buffer,
         0,
         &status_line,
-        auto_style(SemanticTone::Tone3),
+        palette.cell_style(SemanticTone::Tone3),
     );
     let (affection, snack) = demand_counts(snapshot);
     let activity_line = if affection > 0 || snack > 0 {
@@ -486,64 +607,80 @@ fn render_compact(
         buffer,
         1,
         &activity_line,
-        auto_style(SemanticTone::Tone2),
+        palette.cell_style(SemanticTone::Tone2),
     );
-    render_furniture_compact(area, buffer);
+    render_furniture_compact(area, buffer, palette);
 
     if let Some(bed) = geometry.bed {
         let bed_x = bed.x.saturating_sub(area.x);
         let bed_y = bed.y.saturating_sub(area.y);
-        put_sprite(area, buffer, &BED_COMPACT, bed_x, bed_y);
+        put_sprite(area, buffer, &BED_COMPACT, bed_x, bed_y, palette);
     }
     if napping {
         if let Some(bed) = geometry.bed {
             let bed_x = bed.x.saturating_sub(area.x);
             let bed_y = bed.y.saturating_sub(area.y);
-            draw_sprite(
+            draw_sprite_with_palette(
                 area,
                 buffer,
                 pet_sprite_compact(PetPose::Sleep),
                 bed_x,
                 bed_y,
+                palette,
             );
             put_line(
                 area,
                 buffer,
                 bed_y.saturating_add(2),
                 "z z z",
-                auto_style(SemanticTone::Tone2),
+                palette.cell_style(SemanticTone::Tone2),
             );
         }
     } else {
         let pet_x = geometry.pet.x.saturating_sub(area.x);
         let pet_y = geometry.pet.y.saturating_sub(area.y);
         if snapshot.behavior == PetBehavior::Sleeping {
-            draw_sprite(
+            draw_sprite_with_palette(
                 area,
                 buffer,
                 pet_sprite_compact(PetPose::Doze),
                 pet_x,
                 pet_y,
+                palette,
             );
             put_line(
                 area,
                 buffer,
                 pet_y.saturating_add(3),
                 "z",
-                auto_style(SemanticTone::Tone2),
+                palette.cell_style(SemanticTone::Tone2),
             );
         } else {
-            draw_sprite(area, buffer, pet_sprite_compact(frame.pose), pet_x, pet_y);
+            draw_sprite_with_palette(
+                area,
+                buffer,
+                pet_sprite_compact(frame.pose),
+                pet_x,
+                pet_y,
+                palette,
+            );
         }
     }
 
-    render_food_sources(area, buffer, geometry, false);
+    render_food_sources(area, buffer, geometry, false, palette);
     for (_, rect) in &geometry.poops {
         let x = rect.x.saturating_sub(area.x);
         let y = rect.y.saturating_sub(area.y);
-        put(area, buffer, x, y, "●", auto_style(SemanticTone::Tone1));
+        put(
+            area,
+            buffer,
+            x,
+            y,
+            "●",
+            palette.cell_style(SemanticTone::Tone1),
+        );
     }
-    render_drag_ghost(area, buffer, drag);
+    render_drag_ghost(area, buffer, drag, palette);
 }
 
 fn render_minimal(
@@ -551,8 +688,10 @@ fn render_minimal(
     buffer: &mut Buffer,
     snapshot: &SimulationSnapshot,
     napping: bool,
+    options: RoomRenderOptions,
     drag: Option<(&str, Position)>,
 ) {
+    let palette = options.palette();
     let needs = snapshot.needs;
     let state = if napping {
         "SLEEP"
@@ -569,7 +708,13 @@ fn render_minimal(
         need_percent(needs.happiness()),
         need_percent(needs.cleanliness()),
     );
-    put_line(area, buffer, 0, &line, auto_style(SemanticTone::Tone3));
+    put_line(
+        area,
+        buffer,
+        0,
+        &line,
+        palette.cell_style(SemanticTone::Tone3),
+    );
 
     let stocked = snapshot.inventory.count(FoodKind::Kibble);
     let mut affordances = format!("FOOD x{stocked}  BED");
@@ -588,9 +733,9 @@ fn render_minimal(
         buffer,
         1,
         &affordances,
-        auto_style(SemanticTone::Tone2),
+        palette.cell_style(SemanticTone::Tone2),
     );
-    render_drag_ghost(area, buffer, drag);
+    render_drag_ghost(area, buffer, drag, palette);
 }
 
 /// Short terminal labels for the authoritative food kinds.
@@ -605,7 +750,13 @@ fn food_label(food_id: &str) -> &'static str {
 }
 
 /// Renders every stocked drag source with its authoritative count.
-fn render_food_sources(area: Rect, buffer: &mut Buffer, geometry: &RoomGeometry, verbose: bool) {
+fn render_food_sources(
+    area: Rect,
+    buffer: &mut Buffer,
+    geometry: &RoomGeometry,
+    verbose: bool,
+    palette: ResolvedPalette,
+) {
     for source in &geometry.food_sources {
         let x = source.rect.x.saturating_sub(area.x);
         let y = source.rect.y.saturating_sub(area.y);
@@ -614,7 +765,14 @@ fn render_food_sources(area: Rect, buffer: &mut Buffer, geometry: &RoomGeometry,
         } else {
             format!("{} x{}", food_label(source.food_id), source.count)
         };
-        put_text(area, buffer, x, y, &label, auto_style(SemanticTone::Tone2));
+        put_text(
+            area,
+            buffer,
+            x,
+            y,
+            &label,
+            palette.cell_style(SemanticTone::Tone2),
+        );
     }
 }
 
@@ -630,7 +788,12 @@ fn demand_counts(snapshot: &SimulationSnapshot) -> (u32, u32) {
 }
 
 /// Full layout projects pending affection/snack demands as care affordances.
-fn render_pending_demands_full(area: Rect, buffer: &mut Buffer, snapshot: &SimulationSnapshot) {
+fn render_pending_demands_full(
+    area: Rect,
+    buffer: &mut Buffer,
+    snapshot: &SimulationSnapshot,
+    palette: ResolvedPalette,
+) {
     let (affection, snack) = demand_counts(snapshot);
     if affection == 0 && snack == 0 {
         return;
@@ -648,13 +811,18 @@ fn render_pending_demands_full(area: Rect, buffer: &mut Buffer, snapshot: &Simul
         2,
         area.height.saturating_sub(1),
         &line,
-        auto_style(SemanticTone::Tone3),
+        palette.cell_style(SemanticTone::Tone3),
     );
 }
 
 /// Draws the dragged-food ghost at the current pointer cell (room-relative
 /// clamp applied by the caller's coordinate subtraction).
-fn render_drag_ghost(area: Rect, buffer: &mut Buffer, drag: Option<(&str, Position)>) {
+fn render_drag_ghost(
+    area: Rect,
+    buffer: &mut Buffer,
+    drag: Option<(&str, Position)>,
+    palette: ResolvedPalette,
+) {
     let Some((food_id, position)) = drag else {
         return;
     };
@@ -669,18 +837,27 @@ fn render_drag_ghost(area: Rect, buffer: &mut Buffer, drag: Option<(&str, Positi
         x,
         y,
         food_label(food_id),
-        auto_style(SemanticTone::Tone3),
+        palette.cell_style(SemanticTone::Tone3),
     );
 }
 
-fn put_sprite(area: Rect, buffer: &mut Buffer, sprite: &[&str], x: u16, y: u16) {
+fn put_sprite(
+    area: Rect,
+    buffer: &mut Buffer,
+    sprite: &[&str],
+    x: u16,
+    y: u16,
+    palette: ResolvedPalette,
+) {
     for (row, line) in sprite.iter().enumerate() {
         let row = u16::try_from(row).unwrap_or(u16::MAX);
         for (offset, ch) in line.chars().enumerate() {
             let style = match ch {
-                '█' | '▀' | '▄' => auto_style(SemanticTone::Tone1),
-                '┌' | '┐' | '└' | '┘' | '─' | '│' => auto_style(SemanticTone::Tone2),
-                _ => auto_style(SemanticTone::Tone3),
+                '█' | '▀' | '▄' => palette.cell_style(SemanticTone::Tone1),
+                '┌' | '┐' | '└' | '┘' | '─' | '│' => {
+                    palette.cell_style(SemanticTone::Tone2)
+                }
+                _ => palette.cell_style(SemanticTone::Tone3),
             };
             put(
                 area,
@@ -697,19 +874,28 @@ fn put_sprite(area: Rect, buffer: &mut Buffer, sprite: &[&str], x: u16, y: u16) 
 /// Decorative bedroom furniture for the Full layout. Deterministic simple
 /// silhouettes; VISUAL_FIDELITY_UNVERIFIED. Placement deliberately avoids the
 /// status bars, pet home, bed, food tray, and poop slots.
-fn render_furniture_full(area: Rect, buffer: &mut Buffer) {
-    put_sprite(area, buffer, &WINDOW_FULL, 22, 1);
-    put_sprite(area, buffer, &SHELF_FULL, 40, 2);
-    put_sprite(area, buffer, &WARDROBE_FULL, 62, 3);
-    put_sprite(area, buffer, &DESK_FULL, 42, 7);
-    put_sprite(area, buffer, &PLANTS_FULL, 22, 7);
+fn render_furniture_full(
+    area: Rect,
+    buffer: &mut Buffer,
+    palette: ResolvedPalette,
+    ambience: RoomAmbience,
+) {
+    let window = match ambience {
+        RoomAmbience::Day => &WINDOW_FULL_DAY,
+        RoomAmbience::Night => &WINDOW_FULL_NIGHT,
+    };
+    put_sprite(area, buffer, window, 22, 1, palette);
+    put_sprite(area, buffer, &SHELF_FULL, 40, 2, palette);
+    put_sprite(area, buffer, &WARDROBE_FULL, 62, 3, palette);
+    put_sprite(area, buffer, &DESK_FULL, 42, 7, palette);
+    put_sprite(area, buffer, &PLANTS_FULL, 22, 7, palette);
 }
 
 /// Minimal decoration for the Compact layout: decoration disappears before
 /// care functionality.
-fn render_furniture_compact(area: Rect, buffer: &mut Buffer) {
-    put_sprite(area, buffer, &WINDOW_COMPACT, 22, 0);
-    put_sprite(area, buffer, &PLANTS_COMPACT, 34, 4);
+fn render_furniture_compact(area: Rect, buffer: &mut Buffer, palette: ResolvedPalette) {
+    put_sprite(area, buffer, &WINDOW_COMPACT, 22, 0, palette);
+    put_sprite(area, buffer, &PLANTS_COMPACT, 34, 4, palette);
 }
 
 fn need_bar(value: f32) -> String {
@@ -724,10 +910,17 @@ fn need_percent(value: f32) -> u8 {
     value.clamp(0.0, 100.0).round() as u8
 }
 
-const WINDOW_FULL: [&str; 4] = [
+const WINDOW_FULL_DAY: [&str; 4] = [
     "┌────────────┐",
-    "│▀▀▀▀▀▀▀▀▀▀▀▀│",
+    "│   ☀   ·    │",
     "│▄▄▄▄▄▄▄▄▄▄▄▄│",
+    "└────────────┘",
+];
+
+const WINDOW_FULL_NIGHT: [&str; 4] = [
+    "┌────────────┐",
+    "│  ·  ☾  ·   │",
+    "│  ·    ·   ·│",
     "└────────────┘",
 ];
 
@@ -775,7 +968,8 @@ mod tests {
         let sprites: &[&[&str]] = &[
             &BED_FULL,
             &BED_COMPACT,
-            &WINDOW_FULL,
+            &WINDOW_FULL_DAY,
+            &WINDOW_FULL_NIGHT,
             &SHELF_FULL,
             &WARDROBE_FULL,
             &DESK_FULL,

@@ -30,4 +30,4 @@ pub use runtime::{
     AuthoritativeRuntime, EventIngestReceipt, MutationReceipt, RuntimeError, RuntimeInitial,
 };
 pub use server::{MAX_REQUEST_BODY_BYTES, RunningServer, ServerError};
-pub use terminal::{PtyCodexChild, PtyCodexError};
+pub use terminal::{PtyCodexChild, PtyCodexError, TerminalThemePreset};

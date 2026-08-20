@@ -1,7 +1,8 @@
 use chrono::{Duration, Utc};
 use codegotchi_cli::terminal::{
-    PresentationActivity, PresentationFrame, SemanticTone, auto_style, has_authoritative_nap,
-    presentation_activity, render_room,
+    PresentationActivity, PresentationFrame, RoomAmbience, RoomRenderOptions, SemanticTone,
+    TerminalThemePreset, auto_style, has_authoritative_nap, presentation_activity, render_room,
+    render_room_with_options,
 };
 use codegotchi_domain::{
     ActivityKind, AgentActivityState, DefaultNeedProgressionStrategy, FoodInventory, Pet,
@@ -448,4 +449,139 @@ fn auto_theme_maps_semantic_tones_to_defaults_and_gray_steps() {
         Some(Color::Reset),
         "Tone3 resets to the foreground"
     );
+}
+
+#[test]
+fn every_terminal_theme_preset_parses_and_resolves_all_semantic_tones() {
+    let values = [
+        ("auto", TerminalThemePreset::Auto),
+        ("mono", TerminalThemePreset::Mono),
+        ("soft-green", TerminalThemePreset::SoftGreen),
+        ("amber", TerminalThemePreset::Amber),
+        ("night", TerminalThemePreset::Night),
+    ];
+
+    for (value, expected) in values {
+        let parsed = value
+            .parse::<TerminalThemePreset>()
+            .unwrap_or_else(|error| panic!("{value} should parse: {error}"));
+        assert_eq!(parsed, expected, "parsed preset for {value}");
+        assert_eq!(parsed.to_string(), value, "displayed preset for {value}");
+
+        let palette = parsed.resolve();
+        for tone in [
+            SemanticTone::Tone0,
+            SemanticTone::Tone1,
+            SemanticTone::Tone2,
+            SemanticTone::Tone3,
+        ] {
+            let style = palette.style(tone);
+            assert!(
+                style.fg.is_some() || style.bg.is_some(),
+                "{value} must resolve a concrete style for {tone:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn selected_palette_reaches_room_background_furniture_and_sprite_cells() {
+    let snapshot = base_snapshot(Utc::now());
+    let area = Rect::new(0, 0, 120, 14);
+    let options = RoomRenderOptions::for_theme(TerminalThemePreset::SoftGreen, RoomAmbience::Day);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room_with_options(
+        area,
+        &mut buffer,
+        &snapshot,
+        &default_frame(),
+        options,
+        None,
+    );
+
+    assert_eq!(
+        buffer.cell((119, 13)).expect("background cell").style().bg,
+        Some(Color::Rgb(7, 15, 12)),
+        "empty room cells use the selected background"
+    );
+    assert_eq!(
+        buffer.cell((22, 1)).expect("window border cell").style().fg,
+        Some(Color::Rgb(96, 166, 112)),
+        "furniture borders use the selected Tone2 style"
+    );
+    assert_eq!(
+        buffer.cell((22, 1)).expect("window border cell").style().bg,
+        Some(Color::Rgb(7, 15, 12)),
+        "foreground cells retain the selected room background"
+    );
+    assert!(
+        buffer
+            .content
+            .iter()
+            .any(|cell| matches!(cell.symbol(), "█" | "▀" | "▄")
+                && cell.style().fg == Some(Color::Rgb(166, 220, 177))),
+        "packed pet/furniture pixels use the selected Tone3 style"
+    );
+}
+
+#[test]
+fn full_window_ambience_is_deterministic_and_does_not_change_care_projection() {
+    let snapshot = base_snapshot(Utc::now());
+    let before = snapshot.clone();
+    let area = Rect::new(0, 0, 120, 14);
+    let mut day = Buffer::filled(area, Cell::new(" "));
+    let mut night = Buffer::filled(area, Cell::new(" "));
+    render_room_with_options(
+        area,
+        &mut day,
+        &snapshot,
+        &default_frame(),
+        RoomRenderOptions::for_theme(TerminalThemePreset::SoftGreen, RoomAmbience::Day),
+        None,
+    );
+    render_room_with_options(
+        area,
+        &mut night,
+        &snapshot,
+        &default_frame(),
+        RoomRenderOptions::for_theme(TerminalThemePreset::SoftGreen, RoomAmbience::Night),
+        None,
+    );
+
+    let day_text = buffer_text(&day, area.width, area.height);
+    let night_text = buffer_text(&night, area.width, area.height);
+    assert!(day_text.contains('☀'), "day window should show a sun");
+    assert!(night_text.contains('☾'), "night window should show a moon");
+    assert_ne!(
+        day_text, night_text,
+        "day and night must be visibly distinct"
+    );
+    assert_eq!(snapshot, before, "ambience must not mutate care state");
+
+    for height in [7, 3] {
+        let area = Rect::new(0, 0, 120, height);
+        let mut day = Buffer::filled(area, Cell::new(" "));
+        let mut night = Buffer::filled(area, Cell::new(" "));
+        render_room_with_options(
+            area,
+            &mut day,
+            &snapshot,
+            &default_frame(),
+            RoomRenderOptions::for_theme(TerminalThemePreset::SoftGreen, RoomAmbience::Day),
+            None,
+        );
+        render_room_with_options(
+            area,
+            &mut night,
+            &snapshot,
+            &default_frame(),
+            RoomRenderOptions::for_theme(TerminalThemePreset::SoftGreen, RoomAmbience::Night),
+            None,
+        );
+        assert_eq!(
+            buffer_text(&day, area.width, area.height),
+            buffer_text(&night, area.width, area.height),
+            "Compact/Minimal care projections do not depend on Full ambience"
+        );
+    }
 }

@@ -30,7 +30,8 @@ use crate::runtime_metadata::{read_metadata, remove_metadata, write_metadata};
 use crate::server::RunningServer;
 use crate::terminal::{
     TerminalSessionError, TerminalSessionSignal, TerminalSessionSignalReceiver,
-    TerminalSessionSignalSender, run_terminal_session_with_spawn_guard_and_initialization_recovery,
+    TerminalSessionSignalSender, TerminalThemePreset,
+    run_terminal_session_with_spawn_guard_and_initialization_recovery_with_theme,
     terminal_session_signal_channel,
 };
 
@@ -161,6 +162,7 @@ pub struct ValidatedLaunch {
     pub codex_path: PathBuf,
     pub codegotchi_executable: PathBuf,
     pub ui_mode: UiMode,
+    pub terminal_theme: TerminalThemePreset,
     pub trailing_arguments: Vec<OsString>,
 }
 
@@ -175,6 +177,7 @@ pub enum UiMode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LaunchRequest {
     pub ui_mode: UiMode,
+    pub terminal_theme: TerminalThemePreset,
     pub trailing_codex_arguments: Vec<OsString>,
 }
 
@@ -272,6 +275,7 @@ pub fn validate(
         codex_path,
         codegotchi_executable,
         ui_mode: request.ui_mode,
+        terminal_theme: request.terminal_theme,
         trailing_arguments: request.trailing_codex_arguments,
     })
 }
@@ -456,10 +460,11 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
             let room_runtime = std::sync::Arc::clone(&runtime);
             async {
                 let result =
-                    run_terminal_session_with_spawn_guard_and_initialization_recovery(
+                    run_terminal_session_with_spawn_guard_and_initialization_recovery_with_theme(
                         &invocation,
                         receiver,
                         Some(room_runtime),
+                        validated.terminal_theme,
                         || {
                             profile_guard
                                 .verify_before_spawn()
@@ -650,7 +655,7 @@ where
     I: IntoIterator<Item = A>,
     A: AsRef<OsStr>,
 {
-    const SUPPORTED_FORM: &str = "supported command form: `codegotchi run [--ui auto|terminal|browser|both] -- codex [arguments...]`";
+    const SUPPORTED_FORM: &str = "supported command form: `codegotchi run [--ui auto|terminal|browser|both] [--terminal-theme auto|mono|soft-green|amber|night] -- codex [arguments...]`";
 
     let arguments = arguments
         .into_iter()
@@ -667,6 +672,8 @@ where
 
     let mut ui_mode = UiMode::Auto;
     let mut saw_ui = false;
+    let mut terminal_theme = TerminalThemePreset::Auto;
+    let mut saw_terminal_theme = false;
     let mut index = 0;
     while index < separator_index {
         let argument = &arguments[index];
@@ -712,8 +719,53 @@ where
             continue;
         }
 
+        if argument == OsStr::new("--terminal-theme") {
+            if saw_terminal_theme {
+                return Err(LauncherError::message(format!(
+                    "duplicate `--terminal-theme` option before the separator; {SUPPORTED_FORM}"
+                )));
+            }
+            let value = arguments.get(index + 1).ok_or_else(|| {
+                LauncherError::message(format!(
+                    "`--terminal-theme` requires one of `auto`, `mono`, `soft-green`, `amber`, or `night`; {SUPPORTED_FORM}"
+                ))
+            })?;
+            if value == OsStr::new("--")
+                || value == OsStr::new("--ui")
+                || value == OsStr::new("--terminal-theme")
+            {
+                return Err(LauncherError::message(format!(
+                    "`--terminal-theme` requires one of `auto`, `mono`, `soft-green`, `amber`, or `night`; {SUPPORTED_FORM}"
+                )));
+            }
+            terminal_theme = parse_terminal_theme(value, SUPPORTED_FORM)?;
+            saw_terminal_theme = true;
+            index += 2;
+            continue;
+        }
+
+        if let Some(value) = argument
+            .to_str()
+            .and_then(|argument| argument.strip_prefix("--terminal-theme="))
+        {
+            if saw_terminal_theme {
+                return Err(LauncherError::message(format!(
+                    "duplicate `--terminal-theme` option before the separator; {SUPPORTED_FORM}"
+                )));
+            }
+            if value.is_empty() {
+                return Err(LauncherError::message(format!(
+                    "`--terminal-theme` requires one of `auto`, `mono`, `soft-green`, `amber`, or `night`; {SUPPORTED_FORM}"
+                )));
+            }
+            terminal_theme = parse_terminal_theme(OsStr::new(value), SUPPORTED_FORM)?;
+            saw_terminal_theme = true;
+            index += 1;
+            continue;
+        }
+
         return Err(LauncherError::message(format!(
-            "unexpected pre-separator argument `{}`; CodeGotchi accepts only `--ui auto|terminal|browser|both` before the separator; {SUPPORTED_FORM}",
+            "unexpected pre-separator argument `{}`; CodeGotchi accepts only `--ui auto|terminal|browser|both` and `--terminal-theme auto|mono|soft-green|amber|night` before the separator; {SUPPORTED_FORM}",
             argument.to_string_lossy()
         )));
     }
@@ -745,6 +797,7 @@ where
 
     Ok(LaunchRequest {
         ui_mode,
+        terminal_theme,
         trailing_codex_arguments,
     })
 }
@@ -760,6 +813,22 @@ fn parse_ui_mode(value: &OsStr, supported_form: &str) -> Result<UiMode, Launcher
             value.to_string_lossy()
         ))),
     }
+}
+
+fn parse_terminal_theme(
+    value: &OsStr,
+    supported_form: &str,
+) -> Result<TerminalThemePreset, LauncherError> {
+    value
+        .to_str()
+        .unwrap_or_default()
+        .parse::<TerminalThemePreset>()
+        .map_err(|_| {
+            LauncherError::message(format!(
+                "unsupported `--terminal-theme` value `{}`; choose `auto|mono|soft-green|amber|night`; {supported_form}",
+                value.to_string_lossy()
+            ))
+        })
 }
 
 fn is_profile_conflict(argument: &OsString) -> bool {
@@ -1437,6 +1506,7 @@ mod tests {
         InheritedSignalSource, LaunchRequest, LauncherError, TerminalAttemptError, UiMode,
         execute_ui_route, parse_launch_request,
     };
+    use crate::terminal::TerminalThemePreset;
     use std::ffi::OsString;
 
     use crate::terminal::{
@@ -1458,6 +1528,7 @@ mod tests {
             parsed,
             LaunchRequest {
                 ui_mode: UiMode::Terminal,
+                terminal_theme: TerminalThemePreset::Auto,
                 trailing_codex_arguments: os(&["--model", "gpt-5.6"]),
             }
         );
@@ -1468,6 +1539,7 @@ mod tests {
         let parsed = parse_launch_request(os(&["--", "codex", "--search"])).unwrap();
 
         assert_eq!(parsed.ui_mode, UiMode::Auto);
+        assert_eq!(parsed.terminal_theme, TerminalThemePreset::Auto);
         assert_eq!(parsed.trailing_codex_arguments, os(&["--search"]));
     }
 
@@ -1505,6 +1577,40 @@ mod tests {
     }
 
     #[test]
+    fn parses_terminal_theme_before_separator_and_keeps_ui_semantics() {
+        for (option, expected) in [
+            ("auto", TerminalThemePreset::Auto),
+            ("mono", TerminalThemePreset::Mono),
+            ("soft-green", TerminalThemePreset::SoftGreen),
+            ("amber", TerminalThemePreset::Amber),
+            ("night", TerminalThemePreset::Night),
+        ] {
+            let parsed = parse_launch_request(os(&[
+                "--ui",
+                "both",
+                "--terminal-theme",
+                option,
+                "--",
+                "codex",
+                "--ui",
+                "browser",
+            ]))
+            .unwrap_or_else(|error| panic!("--terminal-theme {option}: {error}"));
+            assert_eq!(parsed.ui_mode, UiMode::Both);
+            assert_eq!(parsed.terminal_theme, expected);
+            assert_eq!(parsed.trailing_codex_arguments, os(&["--ui", "browser"]));
+
+            let equals = parse_launch_request([
+                OsString::from(format!("--terminal-theme={option}")),
+                OsString::from("--"),
+                OsString::from("codex"),
+            ])
+            .unwrap_or_else(|error| panic!("--terminal-theme={option}: {error}"));
+            assert_eq!(equals.terminal_theme, expected);
+        }
+    }
+
+    #[test]
     fn rejects_duplicate_pre_separator_ui_options() {
         let error = parse_launch_request(os(&["--ui", "terminal", "--ui=browser", "--", "codex"]))
             .unwrap_err()
@@ -1525,6 +1631,42 @@ mod tests {
             "{error}"
         );
         assert!(error.contains("auto|terminal|browser|both"), "{error}");
+    }
+
+    #[test]
+    fn rejects_unknown_missing_and_duplicate_terminal_theme_options() {
+        let unknown = parse_launch_request(os(&["--terminal-theme", "violet", "--", "codex"]))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            unknown.contains("unsupported `--terminal-theme` value `violet`"),
+            "{unknown}"
+        );
+
+        for arguments in [
+            os(&["--terminal-theme", "--", "codex"]),
+            os(&["--terminal-theme=", "--", "codex"]),
+        ] {
+            let error = parse_launch_request(arguments).unwrap_err().to_string();
+            assert!(
+                error.contains("`--terminal-theme` requires one of"),
+                "{error}"
+            );
+        }
+
+        let duplicate = parse_launch_request(os(&[
+            "--terminal-theme",
+            "mono",
+            "--terminal-theme=night",
+            "--",
+            "codex",
+        ]))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            duplicate.contains("duplicate `--terminal-theme`"),
+            "{duplicate}"
+        );
     }
 
     #[test]

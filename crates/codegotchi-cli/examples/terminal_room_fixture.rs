@@ -1,31 +1,87 @@
-//! Deterministic terminal-room renderer fixture.
+//! Deterministic terminal-room compositor fixture.
 //!
-//! Renders the Full / Compact / Minimal room projections with a drained pet
-//! snapshot and steps the seeded presentation clock so the pet visibly moves.
-//! This is the production renderer, not a fork of it, and is intended for
-//! human/vision review (VISUAL_FIDELITY_UNVERIFIED).
+//! This uses the same Ratatui compositor and room renderer as the production
+//! terminal session. It is intentionally bounded and Codex-free, making it
+//! safe to launch in an xterm for screenshot review.
 
-use std::time::Duration;
+use std::{error::Error, io, thread, time::Duration};
 
 use chrono::Utc;
-use codegotchi_cli::terminal::{PresentationState, render_room};
+use codegotchi_cli::terminal::{
+    CrosstermTerminal, PresentationFrame, RoomAmbience, RoomRenderOptions, TerminalBackend,
+    TerminalGuard, TerminalRunError, TerminalThemePreset, render_room_with_options,
+};
 use codegotchi_domain::{
-    DefaultNeedProgressionStrategy, FoodInventory, Pet, PetSimulation, PetSpecies, SystemClock,
+    DefaultNeedProgressionStrategy, FoodInventory, Pet, PetBehavior, PetSimulation, PetSpecies,
+    SystemClock,
 };
-use ratatui::{
-    buffer::{Buffer, Cell},
-    layout::Rect,
-};
+use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
 use uuid::Uuid;
 
 fn main() {
-    // Optional per-frame hold so a screen capture can catch a specific
-    // layout (e.g. `CG_FIXTURE_PAUSE_MS=20000` under xterm + import).
+    if let Err(error) = run_fixture() {
+        eprintln!("terminal_room_fixture: {error}");
+        std::process::exit(1);
+    }
+}
+
+fn run_fixture() -> Result<(), Box<dyn Error>> {
+    // Screenshots are visual proof and must retain preset colors even when the
+    // caller's environment sets NO_COLOR.
+    crossterm::style::force_color_output(true);
+    let theme = parse_theme()?;
+    let ambience = match std::env::var("CG_FIXTURE_TIME_OF_DAY")
+        .unwrap_or_else(|_| String::from("day"))
+        .as_str()
+    {
+        "night" => RoomAmbience::Night,
+        "day" => RoomAmbience::Day,
+        value => {
+            return Err(format!("CG_FIXTURE_TIME_OF_DAY must be day|night, got {value}").into());
+        }
+    };
+    let layout = std::env::var("CG_FIXTURE_LAYOUT").unwrap_or_else(|_| String::from("full"));
     let pause_ms = std::env::var("CG_FIXTURE_PAUSE_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(0);
+        .unwrap_or(3_000);
 
+    let result = TerminalGuard::run_with(CrosstermTerminal::new(), |guard| {
+        draw_fixture(guard, &layout, theme, ambience, pause_ms)
+            .map_err(|error| io::Error::other(error.to_string()))
+    });
+
+    match result {
+        Ok(()) => Ok(()),
+        Err(TerminalRunError::Initialization(error)) => Err(Box::new(error)),
+        Err(TerminalRunError::Body { error, restoration }) => {
+            if let Some(restoration) = restoration {
+                Err(Box::new(io::Error::other(format!(
+                    "fixture failed: {error}; restoration failed: {restoration}"
+                ))))
+            } else {
+                Err(Box::new(error))
+            }
+        }
+        Err(TerminalRunError::Restoration(error)) => Err(Box::new(error)),
+    }
+}
+
+fn parse_theme() -> Result<TerminalThemePreset, Box<dyn Error>> {
+    let value = std::env::var("CG_FIXTURE_THEME").unwrap_or_else(|_| String::from("auto"));
+    value.parse::<TerminalThemePreset>().map_err(|error| {
+        format!("CG_FIXTURE_THEME must be auto|mono|soft-green|amber|night: {error}").into()
+    })
+}
+
+fn draw_fixture(
+    guard: &mut TerminalGuard<CrosstermTerminal>,
+    layout: &str,
+    theme: TerminalThemePreset,
+    ambience: RoomAmbience,
+    pause_ms: u64,
+) -> Result<(), Box<dyn Error>> {
+    let (columns, rows) = guard.backend_mut().size()?;
     let now = Utc::now();
     let pet = Pet::with_inventory(
         Uuid::from_u128(1),
@@ -36,61 +92,61 @@ fn main() {
     );
     let simulation = PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy);
     let mut snapshot = simulation.snapshot();
-    // Drained pet: starving, exhausted, lonely, dirty.
+    // Keep care/status content visually representative and deterministic.
     snapshot.needs.set_hunger(100.0);
     snapshot.needs.set_energy(0.0);
     snapshot.needs.set_happiness(0.0);
     snapshot.needs.set_cleanliness(0.0);
-
-    let mut presentation = PresentationState::new(7);
-    for (name, area, times) in [
-        (
-            "FULL",
-            Rect::new(0, 0, 120, 14),
-            &[
-                Duration::from_secs(5),
-                Duration::from_secs(20),
-                Duration::from_secs(45),
-            ][..],
-        ),
-        (
-            "COMPACT",
-            Rect::new(0, 0, 120, 7),
-            &[Duration::from_secs(5), Duration::from_secs(25)][..],
-        ),
-        (
-            "MINIMAL",
-            Rect::new(0, 0, 120, 3),
-            &[Duration::from_secs(5)][..],
-        ),
-    ] {
-        let total = times.last().copied().unwrap_or_default();
-        let mut tick_ms = 0u64;
-        while Duration::from_millis(tick_ms) <= total {
-            tick_ms += 250;
-            let _ = presentation.tick(Duration::from_millis(tick_ms), Some(&snapshot), area);
-            if !times.contains(&Duration::from_millis(tick_ms)) {
-                continue;
-            }
-            let frame = presentation.frame();
-            let mut buffer = Buffer::filled(area, Cell::new(" "));
-            render_room(area, &mut buffer, &snapshot, &frame, None);
-            println!(
-                "==== {name} at t={}ms pose={:?} offset={:?} ====",
-                tick_ms, frame.pose, frame.offset
-            );
-            for y in 0..area.height {
-                let mut row = String::new();
-                for x in 0..area.width {
-                    if let Some(cell) = buffer.cell((x, y)) {
-                        row.push_str(cell.symbol());
-                    }
-                }
-                println!("{row}");
-            }
-            if pause_ms > 0 {
-                std::thread::sleep(Duration::from_millis(pause_ms));
-            }
+    match std::env::var("CG_FIXTURE_SLEEP").as_deref() {
+        Ok("bed") => {
+            snapshot.behavior = PetBehavior::Sleeping;
+            snapshot.napping_until = Some(now + chrono::Duration::minutes(30));
+        }
+        Ok("doze") => {
+            snapshot.behavior = PetBehavior::Sleeping;
+            snapshot.napping_until = None;
+        }
+        Ok("awake") | Err(_) => {}
+        Ok(value) => {
+            return Err(format!("CG_FIXTURE_SLEEP must be awake|bed|doze, got {value}").into());
         }
     }
+
+    let room_height = match layout {
+        "full" => 14,
+        "compact" => 7,
+        "minimal" => 3,
+        "all" => 14,
+        value => {
+            return Err(
+                format!("CG_FIXTURE_LAYOUT must be full|compact|minimal|all, got {value}").into(),
+            );
+        }
+    };
+    let options = RoomRenderOptions::for_theme(theme, ambience);
+    let backend = CrosstermBackend::new(guard.writer_mut());
+    let mut terminal = Terminal::new(backend)?;
+    let layouts: &[u16] = match layout {
+        "all" => &[14, 7, 3],
+        _ => &[room_height],
+    };
+    for &height in layouts {
+        terminal.clear()?;
+        terminal.draw(|frame| {
+            let area = Rect::new(0, 0, columns, height.min(rows));
+            render_room_with_options(
+                area,
+                frame.buffer_mut(),
+                &snapshot,
+                &PresentationFrame::default(),
+                options,
+                None,
+            );
+        })?;
+        if pause_ms > 0 {
+            thread::sleep(Duration::from_millis(pause_ms));
+        }
+    }
+    drop(terminal);
+    Ok(())
 }

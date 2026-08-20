@@ -37,10 +37,11 @@ use crate::runtime::{AuthoritativeRuntime, RuntimeError};
 use super::behavior::{PresentationFrame, PresentationState};
 use super::pty::PtyWriter;
 use super::{
-    CareGateway, CodexScreen, CrosstermTerminal, PtyCodexChild, PtyCodexError, RoomCareRequest,
-    RoomInputSession, TerminalBackend, TerminalEntryError, TerminalGuard, TerminalLayout,
-    TerminalRestoreError, choose_layout, encode_focus_event, encode_key_event, encode_mouse_event,
-    encode_paste, render_codex, render_room,
+    CareGateway, CodexScreen, CrosstermTerminal, PtyCodexChild, PtyCodexError, RoomAmbience,
+    RoomCareRequest, RoomInputSession, RoomRenderOptions, TerminalBackend, TerminalEntryError,
+    TerminalGuard, TerminalLayout, TerminalRestoreError, TerminalThemePreset, choose_layout,
+    encode_focus_event, encode_key_event, encode_mouse_event, encode_paste, render_codex,
+    render_room_with_options,
 };
 
 impl CareGateway for AuthoritativeRuntime {
@@ -264,6 +265,8 @@ pub struct TerminalSessionCore {
     layout: TerminalLayout,
     snapshot: Option<SimulationSnapshot>,
     presentation: PresentationState,
+    terminal_theme: TerminalThemePreset,
+    room_options: RoomRenderOptions,
 }
 
 impl TerminalSessionCore {
@@ -276,12 +279,41 @@ impl TerminalSessionCore {
     /// Creates a session core with a deterministic presentation seed.
     #[must_use]
     pub fn with_seed(rows: u16, columns: u16, seed: u64) -> Self {
+        Self::with_seed_and_theme(rows, columns, seed, TerminalThemePreset::Auto)
+    }
+
+    /// Creates a session core with a deterministic presentation seed and
+    /// explicit terminal theme. The palette is resolved once for the session
+    /// and remains independent of the authoritative snapshot.
+    #[must_use]
+    pub fn with_seed_and_theme(
+        rows: u16,
+        columns: u16,
+        seed: u64,
+        terminal_theme: TerminalThemePreset,
+    ) -> Self {
         Self {
             screen: CodexScreen::new(rows, columns),
             layout: choose_layout(Rect::new(0, 0, columns, rows), None),
             snapshot: None,
             presentation: PresentationState::new(seed),
+            terminal_theme,
+            room_options: RoomRenderOptions::for_theme(terminal_theme, RoomAmbience::Day),
         }
+    }
+
+    /// Returns the selected terminal theme.
+    #[must_use]
+    pub const fn terminal_theme(&self) -> TerminalThemePreset {
+        self.terminal_theme
+    }
+
+    /// Returns production room presentation options. Production currently
+    /// defaults to deterministic day ambience; fixtures can call the room
+    /// renderer directly when they need to force night.
+    #[must_use]
+    pub const fn room_options(&self) -> RoomRenderOptions {
+        self.room_options
     }
 
     /// Returns the production virtual screen used by the renderer.
@@ -421,6 +453,7 @@ where
         signals,
         &mut events,
         runtime,
+        TerminalThemePreset::Auto,
         || Ok(()),
     )
     .await;
@@ -437,6 +470,28 @@ pub async fn run_terminal_session_with_spawn_guard_and_initialization_recovery<F
     invocation: &CodexInvocation,
     signals: TerminalSessionSignalReceiver,
     runtime: Option<Arc<AuthoritativeRuntime>>,
+    before_spawn: F,
+) -> Result<portable_pty::ExitStatus, TerminalSessionStartError>
+where
+    F: FnOnce() -> Result<(), TerminalSessionError>,
+{
+    run_terminal_session_with_spawn_guard_and_initialization_recovery_with_theme(
+        invocation,
+        signals,
+        runtime,
+        TerminalThemePreset::Auto,
+        before_spawn,
+    )
+    .await
+}
+
+/// Runs the production terminal session with a selected room theme while
+/// preserving the launcher's pre-spawn initialization recovery seam.
+pub async fn run_terminal_session_with_spawn_guard_and_initialization_recovery_with_theme<F>(
+    invocation: &CodexInvocation,
+    signals: TerminalSessionSignalReceiver,
+    runtime: Option<Arc<AuthoritativeRuntime>>,
+    terminal_theme: TerminalThemePreset,
     before_spawn: F,
 ) -> Result<portable_pty::ExitStatus, TerminalSessionStartError>
 where
@@ -463,6 +518,7 @@ where
             .expect("terminal signal receiver is moved after successful entry"),
         &mut events,
         runtime,
+        terminal_theme,
         before_spawn,
     )
     .await;
@@ -616,6 +672,7 @@ async fn run_session_after_entry<F>(
     signals: TerminalSessionSignalReceiver,
     events: &mut impl TerminalSessionEventSource,
     runtime: Option<Arc<AuthoritativeRuntime>>,
+    terminal_theme: TerminalThemePreset,
     before_spawn: F,
 ) -> Result<portable_pty::ExitStatus, TerminalSessionError>
 where
@@ -625,7 +682,12 @@ where
         .backend_mut()
         .size()
         .map_err(TerminalSessionError::Input)?;
-    let mut core = TerminalSessionCore::new(rows, columns);
+    let mut core = TerminalSessionCore::with_seed_and_theme(
+        rows,
+        columns,
+        DEFAULT_BEHAVIOR_SEED,
+        terminal_theme,
+    );
     // Normalize the virtual screen and pane split to the Codex rectangle
     // before the child exists, so the spawned PTY, the virtual screen, and
     // the rendered upper pane always agree on dimensions. Without this the
@@ -1352,11 +1414,12 @@ where
             let layout = core.layout();
             let cursor = render_codex(core.screen(), layout.codex, frame.buffer_mut());
             if let Some(snapshot) = core.snapshot() {
-                render_room(
+                render_room_with_options(
                     layout.room,
                     frame.buffer_mut(),
                     snapshot,
                     &core.presentation_frame(),
+                    core.room_options(),
                     drag,
                 );
             }

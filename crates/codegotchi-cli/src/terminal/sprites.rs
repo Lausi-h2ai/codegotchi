@@ -13,7 +13,7 @@ use ratatui::{
 };
 
 use super::behavior::PetPose;
-use super::theme::{SemanticTone, auto_style};
+use super::theme::{ResolvedPalette, SemanticTone, TerminalThemePreset};
 
 /// Maps a sprite character to a semantic tone.
 /// `' '` = background, `'.'` = Tone1, `'o'` = Tone2, `'#'` = Tone3.
@@ -29,7 +29,27 @@ fn tone_for(character: char) -> SemanticTone {
 /// Draws a logical-pixel sprite at room-relative `(x, y)`.
 ///
 /// Packing always uses two vertical logical pixels per terminal row.
+#[allow(dead_code)]
 pub fn draw_sprite<R: AsRef<str>>(area: Rect, buffer: &mut Buffer, sprite: &[R], x: u16, y: u16) {
+    draw_sprite_with_palette(
+        area,
+        buffer,
+        sprite,
+        x,
+        y,
+        TerminalThemePreset::Auto.resolve(),
+    );
+}
+
+/// Draws a logical-pixel sprite using the caller's resolved semantic palette.
+pub fn draw_sprite_with_palette<R: AsRef<str>>(
+    area: Rect,
+    buffer: &mut Buffer,
+    sprite: &[R],
+    x: u16,
+    y: u16,
+    palette: ResolvedPalette,
+) {
     let height = sprite.len();
     let mut logical_row = 0usize;
     while logical_row < height {
@@ -54,6 +74,7 @@ pub fn draw_sprite<R: AsRef<str>>(area: Rect, buffer: &mut Buffer, sprite: &[R],
                 y.saturating_add(u16::try_from(logical_row / 2).unwrap_or(u16::MAX)),
                 top,
                 bottom,
+                palette,
             );
         }
         logical_row += 2;
@@ -68,6 +89,7 @@ fn put_packed(
     y: u16,
     top: SemanticTone,
     bottom: SemanticTone,
+    palette: ResolvedPalette,
 ) {
     if x >= area.width || y >= area.height {
         return;
@@ -78,14 +100,18 @@ fn put_packed(
     }) else {
         return;
     };
-    let (symbol, style) = packed_cell(top, bottom);
+    let (symbol, style) = packed_cell_with_palette(top, bottom, palette);
     cell.set_symbol(symbol).set_style(style);
 }
 
-/// Resolves the half-block glyph and style for two stacked logical pixels.
-fn packed_cell(top: SemanticTone, bottom: SemanticTone) -> (&'static str, Style) {
-    let top_style = auto_style(top);
-    let bottom_style = auto_style(bottom);
+/// Resolves the half-block glyph and style using one concrete room palette.
+fn packed_cell_with_palette(
+    top: SemanticTone,
+    bottom: SemanticTone,
+    palette: ResolvedPalette,
+) -> (&'static str, Style) {
+    let top_style = palette.cell_style(top);
+    let bottom_style = palette.cell_style(bottom);
     match (top, bottom) {
         (SemanticTone::Tone0, SemanticTone::Tone0) => (" ", top_style),
         (SemanticTone::Tone0, _) => ("▄", bottom_style),
