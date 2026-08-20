@@ -167,6 +167,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     test("loads embedded production bytes and follows authoritative activity", async ({
         page,
     }) => {
+        await resetFixture(page, "default");
         let initialStateAborted = false;
         await page.route(/\/api\/v1\/state(?:\?|$)/, async (route) => {
             if (!initialStateAborted) {
@@ -784,6 +785,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     test("resolves an affection demand with a real sustained petting gesture", async ({
         page,
     }) => {
+        await page.emulateMedia({ reducedMotion: "reduce" });
         await resetFixture(page, "affection");
         await page.goto(launchUrl);
 
@@ -804,13 +806,56 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
 
         const startX = box.x + box.width / 2;
         const startY = box.y + box.height / 2;
-        await page.mouse.move(startX, startY);
+        const petRequestPromise = page
+            .waitForRequest(
+                (request) =>
+                    request.method() === "POST" &&
+                    /\/api\/v1\/care\/pet(?:\?|$)/.test(request.url()),
+                { timeout: 5_000 },
+            )
+            .catch(() => null);
+        const petResponsePromise = page
+            .waitForResponse(
+                (response) =>
+                    response.request().method() === "POST" &&
+                    /\/api\/v1\/care\/pet(?:\?|$)/.test(response.url()),
+                { timeout: 5_000 },
+            )
+            .catch(() => null);
+        await pet.hover();
         await page.mouse.down();
-        await page.waitForTimeout(800);
-        await page.mouse.move(startX + 70, startY, { steps: 20 });
-        await page.waitForTimeout(800);
-        await page.mouse.move(startX + 70, startY + 70, { steps: 20 });
+        await page.waitForTimeout(900);
+        await page.mouse.move(startX + 96, startY, { steps: 16 });
+        await page.waitForTimeout(900);
+        await page.mouse.move(startX + 96, startY + 96, { steps: 16 });
         await page.mouse.up();
+
+        const [petRequest, petResponse] = await Promise.all([
+            petRequestPromise,
+            petResponsePromise,
+        ]);
+        expect(petRequest).not.toBeNull();
+        expect(petResponse).not.toBeNull();
+        if (petRequest === null || petResponse === null) {
+            return;
+        }
+        const requestBody = petRequest?.postDataJSON() as
+            { interactionMs?: number; pointerDistance?: number } | undefined;
+        expect(petResponse.status()).toBe(200);
+        const responseBody = (await petResponse.json()) as FixtureState;
+        const authoritativeAfterGesture = await fetchAuthoritativeState(page);
+        expect(requestBody?.interactionMs).toBeGreaterThanOrEqual(1_500);
+        expect(requestBody?.pointerDistance).toBeGreaterThanOrEqual(120);
+        expect(
+            responseBody.pendingDemands.some(
+                (demand) => demand.kind === "affection",
+            ),
+        ).toBe(false);
+        expect(
+            authoritativeAfterGesture.pendingDemands.some(
+                (demand) => demand.kind === "affection",
+            ),
+        ).toBe(false);
 
         await expect(page.getByText("Needs attention")).toHaveCount(0, {
             timeout: 5_000,
