@@ -97,14 +97,14 @@ Codex the usable pane first while retaining the pet and essential care.
   an authoritative five-second energy-recovery action; ordinary idle dozing is
   only presentation and never recovers energy.
 
-Minimal mode keeps the condensed `CG` need row, a one-line kibble `FOOD x<count>`
-tray, `BED`, visible `POOP` slots, and `AFF`/`SNACK` demand markers. The tray is
-shown even when kibble is empty (`FOOD x0`); dragging that empty tray submits
-the normal authoritative feed request, which is rejected as out of stock and
-does not change state. Drag stocked food to the pet, click the bed, and click a
-poop just as in the larger layouts. Full and Compact expose every stocked food
-kind; use the browser projection or a larger terminal when a Minimal tray does
-not show the item you need.
+Minimal mode keeps the condensed `CG` need row, a one-line tray for the first
+stocked food kind (`[FOOD x<count>]`), `BED`, visible `POOP` slots, and
+`AFF`/`SNACK` demand markers. Empty inventory renders a disabled `[FOOD none]`
+label and no food hit region, so the room never presents an actionable zero-stock
+source. Drag the stocked tray to the pet, click the bed, and click a poop just as
+in the larger layouts. Full and Compact expose every stocked food kind; use the
+browser projection when a Minimal session has no food or when you need a kind
+other than its deterministic first stocked source.
 
 The browser remains an optional fallback and second projection of the same
 runtime. Use `--ui browser` when a terminal host is unavailable, `--ui both` to

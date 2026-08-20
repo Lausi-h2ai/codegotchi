@@ -1,167 +1,109 @@
 # Terminal Room Final Verification
 
-Status: **FAIL — Task 8 release gate remains blocked**
+Status: **FAIL — implementation fixes are complete, but visual acceptance, the unconstrained workspace gate, hosted CI, and the real-Codex interaction gate remain open**
 
-Task 7's visual acceptance is retained as historical evidence only. Task 8's
-final tested source head is `8f5184b34b94d877617440030aa46f635579b47b` (on top
-of `bc8d288db6f23f14420d61a95772922de8343aee`). The existing six PNGs were
-inspected, but were captured against the older Task 7 renderer and were not
-re-captured after the Task 8 geometry fix; they therefore cannot close the
-final visual gate.
+Final integrated source SHA: `a611202729bcbcc37beb2c5498bede8002f3cdc0`.
+The preceding implementation SHA is
+`8a1feffb627a3b05c9edc56b3b2383fcb2857da2`; `a611202` is a bundle-only
+follow-up that refreshes `crates/codegotchi-cli/web-dist` from the passing web
+build. The six final-candidate images and their exact hashes are recorded in
+[`terminal-room/README.md`](terminal-room/README.md).
 
-| Requirement | Result |
-|---|---|
-| Deterministic Full care state | HISTORICAL PASS — Task 7 fixture images were inspected; no final-SHA recapture. |
-| Full 120x45 light/default | BLOCKED — final-SHA visual recapture was not run. |
-| Full 120x45 dark | BLOCKED — final-SHA visual recapture was not run. |
-| Compact 120x30 | BLOCKED — final-SHA visual recapture was not run. |
-| Minimal 120x21 | PASS — regression tests prove rendered controls and edge clicks align. |
-| Wide hit regions | PASS — rendered food/poop extents are asserted in Full and Compact; edge clicks dispatch care. |
-| Bed sleep vs floor doze | HISTORICAL PASS — no final-SHA recapture. |
-| Automated tests | PASS on final rerun — fmt, clippy, workspace tests, web tests/lint/format/build, embed, and 17 Playwright tests. |
+## Final fix wave summary
 
-Task 8's final blockers are listed at the end of this document.
+- Terminal room input now has explicit capture/cancel behavior. Captured pet
+  and food gestures remain owned by the room while the pointer leaves the
+  room, are suppressed from Codex, and cancel on outside release, focus loss,
+  resize, or invalid termination. Pet release also requires the pointer to
+  be inside both room and pet hit regions; pet priority wins an overlap.
+- Minimal selects the deterministic first stocked food kind (Kibble, Treat,
+  Fruit, then EnergyDrink), omits a zero-stock hit region, and renders a
+  disabled `[FOOD none]` label when inventory is empty. Full/Compact emit only
+  stocked sources and no longer reserve sparse-food gaps.
+- Browser generic `Sleeping` is now floor doze. Only a future
+  `napping_until` deadline selects authoritative hammock/bed napping; expired
+  deadlines and generic sleeping do not.
+- The wide bed overlay no longer adds a second label, and the rendered
+  food/poop spacing and pet-vs-food overlap behavior have regression coverage.
 
-## Task 5 platform/Codex verification (historical record retained)
+## Automated evidence
 
-Task 5 snapshot status: **FAIL — blocking items at that checkpoint: real Codex
-fidelity checklist was incomplete; macOS CI had not run on a hosted runner; and
-final resize/interaction visual evidence was missing.** The detailed PTY/mode
-record remains in [`terminal-room-codex-pty.md`](terminal-room-codex-pty.md).
-This historical record is retained alongside the later Task 7 visual PASS; it
-does not replace the final visual status above.
+| Command | Result | Provenance/notes |
+|---|---|---|
+| `cargo fmt --all -- --check` | PASS | Fresh at final SHA `a611202`. |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | PASS | Fresh at final SHA `a611202`. |
+| `cargo test --workspace` | **FAIL / blocker** | Fresh unconstrained run on the implementation tree (`8a1feff`, before the bundle-only `a611202` commit) reached `strict_flow` and first failed with a fail-open JSON `null`; an isolated reproduction failed earlier with loopback `HTTP transport failed: Resource temporarily unavailable (os error 11)`. The existing strict-flow harness passed once with `--test-threads=1`. It was not rerun after the bundle-only commit under the bounded recovery instruction; no Rust source changed between those SHAs. |
+| `cargo test -p codegotchi-cli --test terminal_input --test terminal_room -- --nocapture` | PASS | 15 input tests and 21 room tests, including all 15 nonempty inventory masks, no-stock rendering, sparse spacing, overlap, and one-BED checks. |
+| `cargo test -p codegotchi-cli --lib cancels_both_room_capture_kinds -- --nocapture` | PASS | 2 focus/resize cancellation tests. |
+| `cargo test -p codegotchi-cli terminal::session::tests::captured_ -- --nocapture` | PASS | 2 captured pet/food outside-room suppression tests. |
+| `pnpm test` | PASS | 5 files, 123 tests. |
+| `pnpm lint` | PASS | Clean. |
+| `pnpm format:check` | PASS | Clean. |
+| `pnpm build` | PASS | Vite production build. |
+| `node web/scripts/embed-web.mjs` | PASS | Produced the bundle committed by `a611202`. |
+| `pnpm playwright:test` | PASS | 17 production-embedded Playwright tests; 57.7 seconds. |
+| `cargo build -p codegotchi-cli --example terminal_room_fixture` | PASS | Built the production renderer fixture at final source SHA. |
 
-Candidate source SHA for the run: `a7d04c3497bb` (Task 5 changes were made
-after this source checkout). Official Codex: `codex-cli 0.147.0`, installed
-temporarily as `@openai/codex@0.147.0`; the host-global `0.148.0` was not used.
-Environment: WSL2 Linux, xterm 390, Xvfb `:99`, Noto Sans Mono 10, outer
-terminal 120×45 (1324×904 pixels).
+The focused browser suite was red before the semantic change (four old
+sleeping/napping expectations), then green after the deadline-only projection
+was implemented. The Rust capture tests were likewise written and run red
+before the corresponding production APIs/behavior, then green. The sparse
+food test was explicitly observed red before the gap fix and green afterward.
 
-### Automated coverage
+The unconstrained workspace failure is retained as evidence, not hidden. Its
+error is an environment/timing symptom already seen in the repository's
+strict-flow history; the source changes in this wave do not touch the Codex
+hook/server transport. The single-threaded strict-flow run passed, but that is
+not substituted for a passing unconstrained workspace gate.
 
-The virtual-screen and production-seam tests are mode-driven: they feed VT
-control bytes and assert encoded bytes/events from `CodexScreen::input_modes()`.
-They do not parse visible Codex text.
+## Visual evidence
 
-| Requirement | Test evidence |
-|---|---|
-| Application cursor enabled/disabled | Existing `terminal_screen::input_modes_track_vt_controls_and_split_focus_without_visible_text`, `mode_fixtures_enable_and_disable_each_protocol_without_precedence_masking`, and `key_encoding_follows_application_mode_and_common_codex_keys`; production seam coverage in `production_session_core_uses_negotiated_modes_for_every_input_kind`. |
-| Bracketed paste enabled/disabled | Existing screen fixture and `paste_and_focus_encoding_are_strictly_mode_driven`; production seam coverage in `production_session_core_uses_negotiated_modes_for_every_input_kind`. |
-| Focus reporting enabled/disabled | Existing split-sequence/RIS screen fixtures and production seam coverage in `production_session_core_uses_negotiated_modes_for_every_input_kind`. |
-| Mouse tracking changes | `production_session_core_encodes_every_negotiated_mouse_tracking_level` covers Press, PressRelease, ButtonMotion, and AnyMotion; disabled mode remains covered by `mouse_disabled_mode_emits_no_bytes_even_through_core_seam`. |
-| Mouse encoding changes | `production_session_core_encodes_every_negotiated_mouse_coordinate_encoding` covers Default, UTF-8, and SGR. |
-| Unsupported-mode isolation | `unsupported_mouse_modes_only_leave_safe_encoding_fallback_and_active_tracking` sends unsupported `?1015`/`?1016` and proves unrelated flags and event bytes survive. |
+All six canonical implementation captures were recaptured after the final
+integrated source SHA using the real `terminal_room_fixture` production
+compositor and inspected directly against all nine supplied reference assets.
+The evidence directory is [`terminal-room/README.md`](terminal-room/README.md).
 
-Commands and results from the focused cycle:
+Verdict: **PENDING_VISION_REVIEW**. The captures are recognizable, legible,
+and state-correct (including one visible BED label, authoritative bed sleep,
+and floor doze), but the ANSI projection is materially sparser and less
+pixel-art-detailed than the supplied references. The reference manifest was
+updated to enumerate the two composition references and seven component
+reference sheets with their actual roles. No visual PASS is claimed.
 
-```text
-cargo test -p codegotchi-cli --test terminal_screen unsupported_mouse_modes_only_leave_safe_encoding_fallback_and_active_tracking -- --nocapture
-  1 passed; 0 failed
-cargo test -p codegotchi-cli --test terminal_session production_session_core_encodes_every_negotiated_mouse -- --nocapture
-  2 passed; 0 failed
-cargo fmt --all -- --check
-  pass
-```
+## Bounded real-Codex/browser/care checklist attempt
 
-The CI change adds a secondary `rust-macos` job running exactly:
-
-```text
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace
-```
-
-The direct PTY lifecycle suite remains platform-neutral where possible and
-already covers resize, exit status, SIGINT/SIGTERM/escalation, descendant
-cleanup, and blocked-reader unblocking on Unix. The hosted macOS result was
-pending at this checkpoint; it was not represented as local evidence.
-
-### Real Codex and visual gate at the Task 5 checkpoint
-
-The official Codex was launched through the production command:
+One bounded live attempt was made with optional apps disabled; no second live
+retry was made. Availability checks observed `codex-cli 0.148.0`, `xterm`,
+`xdotool`, and ImageMagick `import`. The run used a private temporary
+`CODEX_HOME` containing the local auth file, `CODEGOTCHI_BROWSER=none`, and:
 
 ```text
-codegotchi run --ui terminal -- codex --ask-for-approval never --sandbox danger-full-access --dangerously-bypass-hook-trust
+target/debug/codegotchi run --ui terminal --terminal-theme soft-green -- codex \
+  --disable apps --ask-for-approval never --sandbox read-only \
+  --dangerously-bypass-hook-trust
 ```
 
-The disposable authenticated profile was scoped to a unique run directory.
-The TUI loaded at Full size and the room rendered below it. The transcript
-records the trust prompt, model panel, and the sent prompt
-`Reply with exactly READY and no tools.`; the prompt text reached the hosted
-PTY. A later bounded run remained at `Booting MCP server: codex_apps` and did
-not return a model reply. Sending `/exit` and Ctrl-C bytes did not interrupt
-that startup, so the exact run-owned launcher/process groups were terminated
-after printing their PID/PPID/PGID/TTY records. The active session Codex
-process was not matched or signalled.
+The official TUI trust screen and the production room rendered at 120x45.
+The attempt then blocked before prompt/model/tool interaction: the shared
+Xvfb host had no active-window manager, `_NET_ACTIVE_WINDOW` activation was
+unsupported, and targeted `xdotool` key delivery ended in the X-server
+`BadWindow`/focus error. The bounded process timed out at 50 seconds. Thus
+the following are **not claimed** from this attempt: model response, tool or
+approval flow, bracketed paste, observable focus, mouse care, resize
+Full → Compact → Minimal → Full, pet/feed/clean/nap actions during a usable
+Codex session, or clean terminal restoration. The run-owned xterm process
+ended with the timeout; no broad process cleanup was performed.
 
-Reviewed captures:
+Browser behavior is covered by the passing production Playwright suite and
+the focused motion/App tests; this does not turn the blocked live Codex TUI
+checklist into a manual PASS.
 
-| Artifact | Finding |
-|---|---|
-| `docs/verification/terminal-room/task5-a7d04c3497bb-full-120x45-codex-start.png` | Official Codex 0.147.0 startup/model panel, Full room, status bars, furniture, food affordances, and pet are visible. |
-| `docs/verification/terminal-room/task5-a7d04c3497bb-full-120x45-after-prompt.png` | Same production composition after prompt input; no obvious protocol leakage or clipping in the reviewed frame. |
+Hosted Ubuntu/macOS CI results and PR metadata are external to this local
+workspace and remain unavailable. No claim is made for those gates.
 
-Those PNGs were inspected directly. No GIF/video or resize frame was claimed:
-`ffmpeg`/`wf-recorder` was unavailable, and the xterm window detached while
-the external `codex_apps` MCP startup was pending. The Task 5 README status
-therefore remained `PENDING_VISION_REVIEW` at that checkpoint.
+## Historical records
 
-Checklist status at the Task 5 checkpoint:
-
-| Item | Result |
-|---|---|
-| Prompt entry | Partial pass — prompt reached the PTY and was echoed. |
-| Model reply | Blocked by `codex_apps` MCP startup. |
-| Keyboard navigation | Automated byte proof only; real run blocked. |
-| Bracketed paste | Not run; no clipboard helper installed. |
-| Focus reporting | Not observable before the blocker. |
-| Codex mouse scroll/click | Not run. |
-| Slash command / tool approval | Not run. |
-| Full → Compact → Minimal → Full | Not captured; no fake evidence substituted. |
-| Pet/feed/clean/nap while Codex is usable | Not run. |
-| Clean exit/terminal restore | Launcher attempt produced equal baseline/final `stty -g`; Codex interaction still blocked. |
-
-## Task 8 final release-gate disposition
-
-Final tested source head: `8f5184b34b94d877617440030aa46f635579b47b`.
-Evidence documentation commit: `31362fe`.
-The prior hit-region fix is `86dc27509fbf5b34e2b23ed61779e8445e790cad`.
-
-The carried Important gap is closed by TDD. `rendered_care_extents_are_inside_their_hit_regions`
-checks every rendered food/poop cell against its actual Full and Compact hit
-region; `rendered_food_and_poop_edges_dispatch_care_requests` clicks rendered
-edge cells and verifies Feed/Clean/Nap behavior, including Minimal alignment.
-The follow-up `rendered_food_labels_do_not_overlap_poops_in_wide_layouts`
-regression test led to the final label/poop spacing fix.
-
-Fix Round 1 additionally keeps all three normal Full poop targets disjoint
-from the bed and proves a bed click dispatches Nap in
-`full_three_poop_slots_stay_outside_bed_and_bed_click_naps`.
-
-Final automated evidence:
-
-```text
-cargo fmt --all -- --check                                      PASS
-cargo clippy --workspace --all-targets --all-features -- -D warnings PASS
-cargo test --workspace                                        PASS on final rerun
-corepack pnpm test (web)                                      PASS (120 tests)
-corepack pnpm lint                                             PASS
-corepack pnpm format:check                                     PASS
-corepack pnpm build                                            PASS
-node web/scripts/embed-web.mjs                                 PASS
-corepack pnpm playwright:test                                  PASS (17 tests)
-```
-
-The first workspace invocation had a transient `full_vertical_flow` failure
-that reproduced on baseline `edc0968`; the completed rerun at this final SHA
-passed all workspace targets. This is retained as a flake note, not hidden.
-
-Blocking external/manual gates remain: hosted Ubuntu/macOS GitHub Actions
-results for this SHA are unavailable locally; the final-SHA six-image visual
-recapture was not run after the geometry fix; and the real Codex checklist
-(approval/tool flow, bracketed paste/focus, mouse care, and Full → Compact →
-Minimal → Full) was not observed in this bounded run. Existing Task 5/7
-captures are historical and do not substitute for those gates.
-
-Status: **FAIL — final release gate is blocked by the explicit external/manual
-items above.**
+Earlier Task 5/7/8 records remain in
+[`terminal-room-codex-pty.md`](terminal-room-codex-pty.md) and the prior git
+history. Their old SHAs and captures are intentionally not presented as
+evidence for `a611202`.

@@ -1,18 +1,31 @@
 # Terminal Room Visual Reference Manifest
 
-**Status as of 2026-08-13 hardening pass:** the `docs/terminal-room-design` branch does not currently contain the binary room mockups or sprite-reference images. PR #2 explicitly notes that the binary mock renders were left out of the documentation PR.
+**Status as of 2026-08-20:** the supplied raster references are present and
+were inspected directly. This directory is the canonical repository location
+for the visual references used by terminal-room implementation agents. The
+terminal captures under `docs/verification/terminal-room/` are implementation
+evidence, not canonical art references.
 
-This directory is the canonical repository location for visual references used by terminal-room implementation agents.
+## Audited reference inventory
 
-## Before Milestone B visual work
-
-Add the supplied planning references to this directory, then replace this status note with an inventory table containing:
-
-| File | Role | Normative details |
+| File | Primary role | Visual guidance |
 |---|---|---|
-| `<full-room reference>` | Overall Full-room composition | Two-pane hierarchy, bedroom composition, pet scale, furniture balance, status-bar placement |
-| `<sprite reference(s)>` | Pet visual language | Silhouette, face, proportions, pose/animation direction |
-| `<compact/minimal reference(s)>` | Responsive direction, if supplied | What survives when vertical space shrinks |
+| `9904EC37-0833-4E23-86D1-BBA5634D8EE6.jpeg` | Full composition; palette/theme | Two-pane Codex + framed room, large round pet, window/desk left, shelf, wardrobe, bed right, floor care objects, bottom status strip; strongest room-level soft-green reference. |
+| `a4835b9b-53d0-467f-8189-a708eea397eb.png` | Compact direction; dark host/theme | Explicit Compact hierarchy with pet, vignette, status/care panel, and dark terminal chrome; use structure, not its historical pet art. |
+| `ChatGPT Image 13. Aug. 2026, 22_43_21 (1).png` | Pet silhouette/poses; sleep/doze | Round mascot language, face/ears/feet, walk/reaction poses, and curled floor doze poses. Floor doze is distinct from bed sleep. |
+| `ChatGPT Image 13. Aug. 2026, 22_43_21 (2).png` | Room surfaces; palette/theme | Green four-tone walls, shelves, windows, floors, and separable room layers for Full composition. |
+| `ChatGPT Image 13. Aug. 2026, 22_43_21 (3).png` | Furniture balance; component states | Desk/laptop/lamp, shelves/books, plants, storage and relative scale. |
+| `ChatGPT Image 13. Aug. 2026, 22_43_21 (4).png` | Bed/wardrobe states | Closed/open wardrobes, made/rumpled beds, and the authoritative pet-in-bed sleep state. |
+| `ChatGPT Image 13. Aug. 2026, 22_43_21 (5).png` | Care/decor states; palette/theme | Food bowls, poop states, plants, rugs, lamps, and lived-in room vocabulary. |
+| `ChatGPT Image 13. Aug. 2026, 22_43_21 (6).png` | Status/care readability | Title/banner, HUNGER/ENERGY/HAPPY/CLEAN bars, compact controls, and segmented fill states. |
+| `ChatGPT Image 13. Aug. 2026, 22_43_21 (7).png` | Effects/affordances | Hearts, alerts, droplets, steam, Z particles, pointers, moons, foliage, and feedback cues. |
+
+The current acceptance mapping is: Full light uses `9904...jpeg` plus `(2)–(6)`;
+Full dark also uses `a483...png`; Compact uses `a483...png` plus `(1)` and
+`(6)`; Minimal uses `(1)`, `(5)`, `(6)`, and `(7)` because no dedicated
+Minimal bitmap exists; bed sleep uses `(4)` and `(7)`; floor doze uses `(1)` and
+`(7)`. The complete role notes and dimensions are recorded in the SDD visual
+audit at `.superpowers/sdd/2026-08-16-terminal-room-completion/visual-reference-audit.md`.
 
 Agents must inspect every listed reference before authoring room/sprite visuals. They must not invent replacement visual direction because an expected binary file is missing.
 

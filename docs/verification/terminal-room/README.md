@@ -1,115 +1,58 @@
 # Terminal Room Visual Acceptance Evidence
 
-Status: **HISTORICAL ONLY — Task 8 final visual gate is BLOCKED**
+Status: **PENDING_VISION_REVIEW — final-candidate captures were recaptured and inspected; visual acceptance remains open**
 
-Renderer/code commit for the frames below: `992e5b6833c41757169c9ee69615d170e933b561`.
-These Task 7 frames were opened as raster images, but they are not final-SHA
-evidence for Task 8's `8f5184b34b94d877617440030aa46f635579b47b` renderer.
+Renderer/source commit for these six frames: `a611202729bcbcc37beb2c5498bede8002f3cdc0`.
+The source commit contains the terminal-room fixes and the refreshed embedded
+web bundle. These images were captured after that commit with the production
+Rust room renderer; they are not synthetic mockups.
 
-| File | Cells | Pixels | State/theme | Result |
-|---|---:|---:|---|---|
-| [full-120x45-light.png](full-120x45-light.png) | 120x45 | 1324x904 | Seeded Full, SoftGreen/day | Poop objects and Affection/Snack care state are visibly present in the complete room. |
-| [full-120x45-dark.png](full-120x45-dark.png) | 120x45 | 1324x904 | Seeded Full, Night | Same seeded care state remains readable against the dark palette. |
-| [compact-120x30-light.png](compact-120x30-light.png) | 120x30 | 1324x604 | Bounded production run, one generated poop | Widened bowl/poop targets and labels remain visible with the compact pet and bed. |
-| [minimal-120x21-light.png](minimal-120x21-light.png) | 120x21 | 1324x424 | Bounded production run, one generated poop | `[FOOD x47]`, `[BED]`, and `[POOP]` are visible controls at their geometry starts. |
-| [full-120x45-bed-sleep.png](full-120x45-bed-sleep.png) | 120x45 | 1324x904 | Seeded authoritative bed sleep | Covered pet is on the bed with `z z z`; seeded poop/care state remains visible. |
-| [full-120x45-floor-doze.png](full-120x45-floor-doze.png) | 120x45 | 1324x904 | Seeded generic floor doze | Clearly horizontal/curling floor pet with `z`, same bottom-aligned Full framing, empty bed. |
+## Final-candidate captures
 
-## Historical Fix-round review
+| File | Cells | Pixels | Fixture state | SHA-256 | Inspection result |
+|---|---:|---:|---|---|---|
+| [full-120x45-light.png](full-120x45-light.png) | 120x45 | 1324x904 | Full, SoftGreen/day, awake | `edff240b2758847beff22febdf949bf1f553f334ac4788a6bd014353b11be664` | Room, pet, stocked food, poop, bed, demands, and status strip visible; abstract/sparse versus reference. |
+| [full-120x45-dark.png](full-120x45-dark.png) | 120x45 | 1324x904 | Full, Night/night, awake | `d88a5af6f8d8574a745cbe8406838a984bb4d86def2ff4d45fe0b0cb7a141a4c` | Dark palette remains legible; same visual gap remains. |
+| [compact-120x30-light.png](compact-120x30-light.png) | 120x30 | 1324x604 | Compact, SoftGreen/day, awake | `1ed20105ce0eb5c61c933d7cc441f336cbed3cd051bde20dda6446e079f48929` | Compact pet/status/care targets are visible and separated; it is not a pixel-art reference match. |
+| [minimal-120x21-light.png](minimal-120x21-light.png) | 120x21 | 1324x424 | Minimal, SoftGreen/day, awake | `70d02d3545652cddb192bc19ec5cf802adef15a6aa0f5606bfe42595452423c6` | Condensed need row, stocked `[FOOD x50]`, bed, poop, and demand controls are visible. |
+| [full-120x45-bed-sleep.png](full-120x45-bed-sleep.png) | 120x45 | 1324x904 | Full, SoftGreen/night, future authoritative nap | `5b7404aa95882716f8bed4f564dfbad1f7ff49e181a81592acc28f641de5ead7` | Pet is on the bed with `z z z`; bed label is rendered once. |
+| [full-120x45-floor-doze.png](full-120x45-floor-doze.png) | 120x45 | 1324x904 | Full, SoftGreen/day, generic `Sleeping` without deadline | `5fe41414e634758b5447acd278d6d6475de9301e13fa1458e5f9c2bff8f1f215` | Curled floor doze and one `z` are visible; the bed remains empty. |
 
-- The wide food regions now cover the bowl, label, and count rows; wide poop
-  regions cover the four-row object width/height. Focused geometry tests assert
-  those bounds in both Full and Compact.
-- Minimal renders controls at the same x/y as `RoomGeometry`: `◉ PET` at x0,
-  `[FOOD xN]` at x7, `[BED]` at x19, and each `[POOP]` at x27 + 8n on row 1.
-  The cat mark remains on row 2.
-- The floor-doze sprite is a horizontal curl rather than an upright blob. The
-  seeded doze and bed frames share the same bottom room placement, so the
-  context comparison is like-for-like.
-- Full deterministic frames are seeded by the bounded fixture, which calls
-  the production renderer and explicitly adds three poops plus Affection and
-  Snack demands. Compact/Minimal use explicit named runtime metadata and an
-  explicit debug command; no wildcard runtime selection is part of the final
-  mapping.
+## Inspection verdict
 
-Remaining differences are abstract ANSI art versus the raster references, the
-bounded Codex pane/terminal background above integrated Compact/Minimal
-captures, and the existing duplicate `BED BED` label in the wide bed
-projection. These historical frames do not close Task 8's final visual gate.
+All six files were opened directly after capture and compared with every
+listed canonical reference in `docs/mockups/terminal-room/`. The captures
+prove the production projection and the required state distinctions:
 
-## Capture environment and exact commands
+- Full frames include the window, shelf, wardrobe, desk, pet, stocked food,
+  poop objects, bed, demand markers, and status strip; the dark frame remains
+  readable.
+- Compact and Minimal retain care controls at their constrained dimensions.
+- Authoritative bed sleep places the pet on the bed, while generic sleeping
+  is a curled floor doze with an empty bed.
+- The wide bed has one visible `BED` label, and sparse food sources do not
+  reserve an extra gap.
 
-- Ubuntu workspace, `xterm 390`, `Noto Sans Mono` 10 pt, `Xvfb :99 -screen 0
-  1400x1000x24`, `DISPLAY=:99`.
-- Full seeded frames used the same bottom-aligned fixture command, varying only
-  title/theme/day-night/sleep state:
+The result is still **PENDING_VISION_REVIEW**, not a visual PASS: the supplied
+references show detailed pixel-art sprites, layered furniture, richer status
+icons, and a much larger round mascot, while the terminal renderer remains a
+deliberately simplified ANSI projection. The exact gap is recorded rather
+than converted into an acceptance claim.
 
-  ```bash
-  DISPLAY=:99 xterm -title CGTask7FixtureFullSeededLight -geometry 120x45+0+0 \
-    -fa "Noto Sans Mono" -fs 10 -e sh -c \
-    'cd /home/laurent/codegotchi-task7 && exec env NO_COLOR= TERM=xterm-256color \
-    CG_FIXTURE_LAYOUT=full CG_FIXTURE_THEME=soft-green CG_FIXTURE_TIME_OF_DAY=day \
-    CG_FIXTURE_SLEEP=awake CG_FIXTURE_BOTTOM=1 CG_FIXTURE_PAUSE_MS=30000 \
-    CODEGOTCHI_BROWSER=none target/debug/examples/terminal_room_fixture'
-  ```
+## Capture provenance
 
-  Dark used `-bg black -fg white`, `CG_FIXTURE_THEME=night`, and
-  `CG_FIXTURE_TIME_OF_DAY=night`; bed used `CG_FIXTURE_SLEEP=bed`; doze used
-  `CG_FIXTURE_SLEEP=doze`. All four used fresh xterm processes and the same
-  explicit `CG_FIXTURE_BOTTOM=1` framing.
-
-- Compact used runtime metadata
-  `/tmp/codegotchi-task7-runtime-r1-compact/codegotchi/session-1801520e-52cf-45a2-9a5c-a14a2e71cead.json`
-  with state root `/tmp/codegotchi-task7-state-r1-compact` and:
-
-  ```bash
-  DISPLAY=:99 xterm -title CGTask7IntegratedCompactR1 -geometry 120x30+0+0 \
-    -fa "Noto Sans Mono" -fs 10 -e sh -c 'cd /home/laurent/codegotchi-task7 && exec env \
-    NO_COLOR= TERM=xterm-256color XDG_STATE_HOME=/tmp/codegotchi-task7-state-r1-compact \
-    XDG_RUNTIME_DIR=/tmp/codegotchi-task7-runtime-r1-compact \
-    CODEX_HOME=/tmp/codegotchi-task7-codex-r1-compact CODEGOTCHI_BROWSER=none \
-    CODEGOTCHI_REAL_CODEX=/tmp/cg-task7-fake-codex.sh FAKE_COMPOSED_HOLD_SECONDS=120 \
-    target/debug/codegotchi run --ui terminal --terminal-theme soft-green -- codex'
-  CODEGOTCHI_SESSION_FILE=/tmp/codegotchi-task7-runtime-r1-compact/codegotchi/session-1801520e-52cf-45a2-9a5c-a14a2e71cead.json \
-    CODEGOTCHI_ENABLE_DEBUG=1 target/debug/codegotchi debug generate-poop
-  ```
-
-- Minimal used runtime metadata
-  `/tmp/codegotchi-task7-runtime-r1-minimal/codegotchi/session-7d515d05-d7f1-4163-8316-fad0e4d73f19.json`
-  with state root `/tmp/codegotchi-task7-state-r1-minimal`, the same command
-  at geometry 120x21, and this explicit poop seed:
-
-  ```bash
-  CODEGOTCHI_SESSION_FILE=/tmp/codegotchi-task7-runtime-r1-minimal/codegotchi/session-7d515d05-d7f1-4163-8316-fad0e4d73f19.json \
-    CODEGOTCHI_ENABLE_DEBUG=1 target/debug/codegotchi debug generate-poop
-  ```
-
-Screenshots were taken with `import -window <window-id> <file>` after settle.
-No video tool was available; bed/doze are the ordered state frames.
-
-## Historical automated verification
+The fixture was built from the source commit above:
 
 ```text
-cargo fmt --all -- --check                         PASS
-cargo test -p codegotchi-cli --test terminal_room  PASS (17 passed)
-cargo test -p codegotchi-cli --lib                 PASS (70 passed)
-git diff --check                                   PASS
+cargo build -p codegotchi-cli --example terminal_room_fixture
 ```
 
-Reviewer/process: the Task 7 implementer read the independent review, wrote
-focused failing tests, verified the red failures, implemented the scoped fix,
-ran the green focused/full suites, and inspected all six Task 7 PNGs after the
-last recapture.
+Each frame used a fresh private Xvfb display, `xterm` with Noto Sans Mono at
+the listed cell size, `CG_FIXTURE_BOTTOM=1`, and
+`target/debug/examples/terminal_room_fixture`. Full light/dark, Compact,
+Minimal, future-deadline bed sleep, and no-deadline floor doze were captured
+as separate fixture states. The fixture calls the same
+`render_room_with_options` production compositor used by the terminal host.
 
-## Task 8 disposition
-
-The Task 8 hit-region gap is closed in source and tests at
-`8f5184b34b94d877617440030aa46f635579b47b`; see
-[`terminal-room.md`](../terminal-room.md) for the full matrix and blocker
-record. Fix Round 1 also proves all three normal Full poop targets stay out of
-the bed hitbox and that a bed click dispatches Nap. Final-SHA visual
-recapture, hosted Ubuntu/macOS CI evidence, and the remaining real-Codex
-interaction checklist are still outstanding.
-
-Status: **FAIL — historical images only; final visual/manual gates remain
-open.**
+The older `task5-*` and `task7` images in this directory remain historical
+records; they are not evidence for the source commit above.
