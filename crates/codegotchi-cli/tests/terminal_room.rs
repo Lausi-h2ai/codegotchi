@@ -6,7 +6,7 @@ use codegotchi_cli::terminal::{
 };
 use codegotchi_domain::{
     ActivityKind, AgentActivityState, DefaultNeedProgressionStrategy, FoodInventory, Pet,
-    PetBehavior, PetDemand, PetDemandKind, PetSimulation, PetSpecies, SimulationSnapshot,
+    PetBehavior, PetDemand, PetDemandKind, PetSimulation, PetSpecies, Poop, SimulationSnapshot,
     SystemClock,
 };
 use ratatui::{
@@ -605,8 +605,9 @@ fn full_pet_bed_and_sleep_markers_stay_within_their_contexts() {
     render_room(area, &mut buffer, &snapshot, &default_frame(), None);
     assert_ne!(buffer.cell((0, 12)).expect("room cell").symbol(), "z");
     assert!(
-        (bed.x..bed.x.saturating_add(bed.width))
-            .any(|x| buffer.cell((x, bed.y.saturating_sub(1))).is_some_and(|cell| cell.symbol() == "z")),
+        (bed.x..bed.x.saturating_add(bed.width)).any(|x| buffer
+            .cell((x, bed.y.saturating_sub(1)))
+            .is_some_and(|cell| cell.symbol() == "z")),
         "bed sleep markers should sit immediately above the bed"
     );
 }
@@ -619,6 +620,63 @@ fn minimal_keeps_a_pet_and_recognizable_care_affordance_icons() {
     render_room(area, &mut buffer, &snapshot, &default_frame(), None);
     let text = buffer_text(&buffer, area.width, area.height);
     for marker in ["◉ PET", "FOOD", "BED", "POOP", "AFF"] {
-        assert!(text.contains(marker), "Minimal affordance missing {marker}: {text}");
+        assert!(
+            text.contains(marker),
+            "Minimal affordance missing {marker}: {text}"
+        );
     }
+}
+
+/// Wide production layouts must expose visible object-shaped care targets,
+/// rather than reducing the room to counters and placeholder dots.
+#[test]
+fn wide_room_keeps_named_targets_and_minimal_keeps_a_pet_mark() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot
+        .pending_poops
+        .push(Poop::new(Uuid::from_u128(9), now));
+
+    let full = Rect::new(0, 0, 120, 14);
+    let mut full_buffer = Buffer::filled(full, Cell::new(" "));
+    render_room(full, &mut full_buffer, &snapshot, &default_frame(), None);
+    let full_text = buffer_text(&full_buffer, full.width, full.height);
+    for marker in ["PET", "FOOD", "BED", "POOP"] {
+        assert!(
+            full_text.contains(marker),
+            "wide Full affordance missing {marker}: {full_text}"
+        );
+    }
+
+    let compact = Rect::new(0, 0, 120, 7);
+    let mut compact_buffer = Buffer::filled(compact, Cell::new(" "));
+    render_room(
+        compact,
+        &mut compact_buffer,
+        &snapshot,
+        &default_frame(),
+        None,
+    );
+    let compact_text = buffer_text(&compact_buffer, compact.width, compact.height);
+    for marker in ["PET", "FOOD", "BED", "POOP"] {
+        assert!(
+            compact_text.contains(marker),
+            "wide Compact affordance missing {marker}: {compact_text}"
+        );
+    }
+
+    let minimal = Rect::new(0, 0, 120, 3);
+    let mut minimal_buffer = Buffer::filled(minimal, Cell::new(" "));
+    render_room(
+        minimal,
+        &mut minimal_buffer,
+        &snapshot,
+        &default_frame(),
+        None,
+    );
+    let minimal_text = buffer_text(&minimal_buffer, minimal.width, minimal.height);
+    assert!(
+        minimal_text.contains("(=^.^=)"),
+        "Minimal must retain a visible pet mark: {minimal_text}"
+    );
 }

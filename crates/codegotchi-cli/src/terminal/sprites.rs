@@ -178,15 +178,15 @@ pub fn pet_sprite_compact(pose: PetPose) -> &'static [&'static str] {
 // renders as the room background.
 
 const PET_IDLE: [&str; 10] = [
-    "          ",
+    "   ## ##  ",
     "  ######  ",
-    " #  ## ## ",
-    " #  ## ## ",
+    " #  oo  # ",
+    " #  ..   #",
     " #       #",
-    " #  ##   #",
+    " #  oo   #",
     " #      # ",
     " ######## ",
-    "  ######  ",
+    "  ##  ##  ",
     "          ",
 ];
 
@@ -244,26 +244,26 @@ const PET_SIT: [&str; 10] = [
 
 const PET_DOZE: [&str; 10] = [
     "          ",
+    "    ..    ",
     "   ####   ",
     "  ######  ",
-    " ######## ",
-    " ## ## ## ",
+    " ## o  ## ",
     " ######## ",
     "  ######  ",
     "   ####   ",
-    "          ",
+    "    ##    ",
     "          ",
 ];
 
 const PET_SLEEP: [&str; 10] = [
     "          ",
-    "  ######  ",
+    "  ##  ##  ",
     " ######## ",
-    " ######## ",
-    " ######## ",
+    " ## .. ## ",
     " ######## ",
     "  ########",
-    "   ###### ",
+    " ######## ",
+    "  ######  ",
     "          ",
     "          ",
 ];
@@ -338,7 +338,7 @@ const PET_PETTED: [&str; 10] = [
 // Compact sprites: 6 logical rows (3 terminal rows) x 7 logical columns.
 
 const PET_IDLE_C: [&str; 6] = [
-    "       ", " ##### ", "# ## ##", "# ## ##", " ##### ", "       ",
+    "  # #  ", " ##### ", "# oo ##", "# ..  #", " ##### ", "  # #  ",
 ];
 
 const PET_BLINK_C: [&str; 6] = [
@@ -358,11 +358,11 @@ const PET_SIT_C: [&str; 6] = [
 ];
 
 const PET_DOZE_C: [&str; 6] = [
-    "       ", "       ", " ##### ", "#######", " ##### ", "       ",
+    "       ", "  . .  ", " ##### ", "## o ##", " ##### ", "  ###  ",
 ];
 
 const PET_SLEEP_C: [&str; 6] = [
-    "       ", " ##### ", "#######", "#######", " ##### ", "       ",
+    "       ", " ## ## ", "#######", "## ..##", "#######", " ##### ",
 ];
 
 const PET_YAWN_C: [&str; 6] = [
@@ -464,11 +464,11 @@ mod tests {
         assert_eq!(
             packed,
             [
-                "  ▄▄▄▄▄▄  ",
-                " █  ██ ██ ",
+                "  ▄██▄██  ",
+                " █  ▀▀  ▀▄",
                 " █  ▄▄   █",
                 " █▄▄▄▄▄▄█ ",
-                "  ▀▀▀▀▀▀  ",
+                "  ▀▀  ▀▀  ",
             ]
         );
     }
@@ -496,6 +496,30 @@ mod tests {
             pet_sprite_compact(PetPose::Doze),
             pet_sprite_compact(PetPose::Sleep),
             "Compact floor doze and bed sleep need distinct visual contexts"
+        );
+    }
+
+    #[test]
+    fn sleep_states_keep_face_and_blanket_detail() {
+        let doze = pet_sprite(PetPose::Doze).concat();
+        let sleep = pet_sprite(PetPose::Sleep).concat();
+        assert!(
+            doze.contains('o'),
+            "floor doze should retain a mid-tone curled-face detail"
+        );
+        assert!(
+            sleep.contains('.'),
+            "bed sleep should retain a dark-tone blanket/face detail"
+        );
+    }
+
+    #[test]
+    fn idle_sprite_keeps_ears_eyes_and_feet_details() {
+        let idle = pet_sprite(PetPose::Idle).concat();
+        assert!(idle.contains('o'), "idle face should contain mid-tone eyes");
+        assert!(
+            idle.contains('.'),
+            "idle silhouette should contain dark details"
         );
     }
 }

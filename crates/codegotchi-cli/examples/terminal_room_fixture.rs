@@ -12,8 +12,8 @@ use codegotchi_cli::terminal::{
     TerminalGuard, TerminalRunError, TerminalThemePreset, render_room_with_options,
 };
 use codegotchi_domain::{
-    DefaultNeedProgressionStrategy, FoodInventory, Pet, PetBehavior, PetSimulation, PetSpecies,
-    SystemClock,
+    DefaultNeedProgressionStrategy, FoodInventory, Pet, PetBehavior, PetDemand, PetDemandKind,
+    PetSimulation, PetSpecies, Poop, SystemClock,
 };
 use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
 use uuid::Uuid;
@@ -97,6 +97,21 @@ fn draw_fixture(
     snapshot.needs.set_energy(0.0);
     snapshot.needs.set_happiness(0.0);
     snapshot.needs.set_cleanliness(0.0);
+    for index in 0..3_u128 {
+        snapshot
+            .pending_poops
+            .push(Poop::new(Uuid::from_u128(0x7000 + index), now));
+    }
+    snapshot.pending_demands.push(PetDemand::new(
+        Uuid::from_u128(0xaffec7),
+        PetDemandKind::Affection,
+        now,
+    ));
+    snapshot.pending_demands.push(PetDemand::new(
+        Uuid::from_u128(0x5ac9),
+        PetDemandKind::Snack,
+        now,
+    ));
     match std::env::var("CG_FIXTURE_SLEEP").as_deref() {
         Ok("bed") => {
             snapshot.behavior = PetBehavior::Sleeping;
