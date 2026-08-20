@@ -585,3 +585,40 @@ fn full_window_ambience_is_deterministic_and_does_not_change_care_projection() {
         );
     }
 }
+
+#[test]
+fn full_pet_bed_and_sleep_markers_stay_within_their_contexts() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot.behavior = PetBehavior::Sleeping;
+    snapshot.napping_until = Some(now + Duration::minutes(30));
+    let area = Rect::new(0, 0, 120, 14);
+    let geometry = codegotchi_cli::terminal::room_geometry(area, &snapshot);
+    let bed = geometry.bed.expect("Full always has a bed");
+    assert!(
+        geometry.pet.x < 80 && bed.x < 100,
+        "Full pet should remain on open floor left of the bed: pet={:?} bed={bed:?}",
+        geometry.pet
+    );
+
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    assert_ne!(buffer.cell((0, 12)).expect("room cell").symbol(), "z");
+    assert!(
+        (bed.x..bed.x.saturating_add(bed.width))
+            .any(|x| buffer.cell((x, bed.y.saturating_sub(1))).is_some_and(|cell| cell.symbol() == "z")),
+        "bed sleep markers should sit immediately above the bed"
+    );
+}
+
+#[test]
+fn minimal_keeps_a_pet_and_recognizable_care_affordance_icons() {
+    let snapshot = base_snapshot(Utc::now());
+    let area = Rect::new(0, 0, 120, 3);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let text = buffer_text(&buffer, area.width, area.height);
+    for marker in ["◉ PET", "FOOD", "BED", "POOP", "AFF"] {
+        assert!(text.contains(marker), "Minimal affordance missing {marker}: {text}");
+    }
+}

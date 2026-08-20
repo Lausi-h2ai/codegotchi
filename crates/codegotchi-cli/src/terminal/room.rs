@@ -238,7 +238,7 @@ fn room_mode(height: u16) -> RoomMode {
 }
 
 fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) -> RoomGeometry {
-    let pet_x = area.width.saturating_sub(34).max(2);
+    let pet_x = area.width.saturating_sub(52).max(2);
     let pet = offset_rect(
         Rect::new(
             area.x.saturating_add(pet_x),
@@ -249,7 +249,13 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
         offset,
         area,
     );
-    let bed_x = area.width.saturating_sub(16).max(4);
+    // Keep the compact fixture's legacy 40-column bed anchor while leaving
+    // enough right margin in the production-width room for the whole sprite.
+    let bed_x = if area.width <= 64 {
+        area.width.saturating_sub(16).max(4)
+    } else {
+        area.width.saturating_sub(28).max(4)
+    };
     let bed = Rect::new(
         area.x.saturating_add(bed_x),
         area.y.saturating_add(8),
@@ -268,7 +274,7 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
 }
 
 fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) -> RoomGeometry {
-    let pet_x = area.width.saturating_sub(26).max(2);
+    let pet_x = area.width.saturating_sub(52).max(2);
     let pet = offset_rect(
         Rect::new(
             area.x.saturating_add(pet_x),
@@ -279,7 +285,7 @@ fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16
         offset,
         area,
     );
-    let bed_x = area.width.saturating_sub(12).max(4);
+    let bed_x = area.width.saturating_sub(28).max(4);
     let bed = Rect::new(
         area.x.saturating_add(bed_x),
         area.y.saturating_add(3),
@@ -519,13 +525,7 @@ fn render_full(
                 bed_y,
                 palette,
             );
-            put_line(
-                area,
-                buffer,
-                bed_y.saturating_add(4),
-                "z z z",
-                palette.cell_style(SemanticTone::Tone2),
-            );
+            put_text(area, buffer, bed_x.saturating_add(2), bed_y.saturating_sub(1), "z z z", palette.cell_style(SemanticTone::Tone2));
         }
     } else {
         let pet_x = geometry.pet.x.saturating_sub(area.x);
@@ -539,13 +539,7 @@ fn render_full(
                 pet_y,
                 palette,
             );
-            put_line(
-                area,
-                buffer,
-                pet_y.saturating_add(5),
-                "z",
-                palette.cell_style(SemanticTone::Tone2),
-            );
+            put_text(area, buffer, pet_x.saturating_add(8), pet_y.saturating_sub(1), "z", palette.cell_style(SemanticTone::Tone2));
         } else {
             draw_sprite_with_palette(area, buffer, pet_sprite(frame.pose), pet_x, pet_y, palette);
         }
@@ -628,13 +622,7 @@ fn render_compact(
                 bed_y,
                 palette,
             );
-            put_line(
-                area,
-                buffer,
-                bed_y.saturating_add(2),
-                "z z z",
-                palette.cell_style(SemanticTone::Tone2),
-            );
+            put_text(area, buffer, bed_x.saturating_add(1), bed_y.saturating_sub(1), "z z z", palette.cell_style(SemanticTone::Tone2));
         }
     } else {
         let pet_x = geometry.pet.x.saturating_sub(area.x);
@@ -648,13 +636,7 @@ fn render_compact(
                 pet_y,
                 palette,
             );
-            put_line(
-                area,
-                buffer,
-                pet_y.saturating_add(3),
-                "z",
-                palette.cell_style(SemanticTone::Tone2),
-            );
+            put_text(area, buffer, pet_x.saturating_add(6), pet_y.saturating_sub(1), "z", palette.cell_style(SemanticTone::Tone2));
         } else {
             draw_sprite_with_palette(
                 area,
@@ -717,14 +699,12 @@ fn render_minimal(
     );
 
     let stocked = snapshot.inventory.count(FoodKind::Kibble);
-    let mut affordances = format!("FOOD x{stocked}  BED");
+    let mut affordances = format!("◉ PET  FOOD x{stocked}  BED  POOP");
     for _ in &snapshot.pending_poops {
         affordances.push_str("  POOP");
     }
     let (affection, snack) = demand_counts(snapshot);
-    if affection > 0 {
-        affordances.push_str("  AFF");
-    }
+    affordances.push_str(&format!("  AFF x{affection}"));
     if snack > 0 {
         affordances.push_str("  SNACK");
     }
@@ -735,6 +715,7 @@ fn render_minimal(
         &affordances,
         palette.cell_style(SemanticTone::Tone2),
     );
+    put_text(area, buffer, 0, 2, "◉   ▣   BED   ●   ♥", palette.cell_style(SemanticTone::Tone3));
     render_drag_ghost(area, buffer, drag, palette);
 }
 

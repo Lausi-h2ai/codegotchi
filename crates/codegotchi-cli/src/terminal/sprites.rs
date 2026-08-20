@@ -244,27 +244,27 @@ const PET_SIT: [&str; 10] = [
 
 const PET_DOZE: [&str; 10] = [
     "          ",
+    "   ####   ",
     "  ######  ",
-    " #  ## ## ",
-    " #       #",
-    " #       #",
-    " #  ##   #",
-    " #      # ",
+    " ######## ",
+    " ## ## ## ",
     " ######## ",
     "  ######  ",
+    "   ####   ",
+    "          ",
     "          ",
 ];
 
 const PET_SLEEP: [&str; 10] = [
     "          ",
     "  ######  ",
-    " #  ## ## ",
-    " #       #",
-    " #       #",
-    " #  ##   #",
-    " #      # ",
     " ######## ",
-    "  ######  ",
+    " ######## ",
+    " ######## ",
+    " ######## ",
+    "  ########",
+    "   ###### ",
+    "          ",
     "          ",
 ];
 
@@ -358,11 +358,11 @@ const PET_SIT_C: [&str; 6] = [
 ];
 
 const PET_DOZE_C: [&str; 6] = [
-    "       ", " ##### ", "# ## ##", "#     #", " ##### ", "       ",
+    "       ", "       ", " ##### ", "#######", " ##### ", "       ",
 ];
 
 const PET_SLEEP_C: [&str; 6] = [
-    "       ", " ##### ", "#     #", "#     #", " ##### ", "       ",
+    "       ", " ##### ", "#######", "#######", " ##### ", "       ",
 ];
 
 const PET_YAWN_C: [&str; 6] = [
@@ -483,5 +483,19 @@ mod tests {
         draw_sprite(area, &mut buffer, &sprite, 0, 0);
         assert_eq!(buffer.cell((0, 0)).expect("cell").symbol(), "▀");
         assert_eq!(buffer.cell((1, 0)).expect("cell").symbol(), "▀");
+    }
+
+    #[test]
+    fn floor_doze_and_bed_sleep_use_distinct_sprite_grids() {
+        assert_ne!(
+            pet_sprite(PetPose::Doze),
+            pet_sprite(PetPose::Sleep),
+            "floor doze and bed sleep need distinct visual contexts"
+        );
+        assert_ne!(
+            pet_sprite_compact(PetPose::Doze),
+            pet_sprite_compact(PetPose::Sleep),
+            "Compact floor doze and bed sleep need distinct visual contexts"
+        );
     }
 }
