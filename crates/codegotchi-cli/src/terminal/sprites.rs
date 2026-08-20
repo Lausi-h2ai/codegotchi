@@ -244,13 +244,13 @@ const PET_SIT: [&str; 10] = [
 
 const PET_DOZE: [&str; 10] = [
     "          ",
-    "    ..    ",
-    "   ####   ",
-    "  ######  ",
-    " ## o  ## ",
+    "          ",
+    "  ..      ",
+    " ####     ",
+    "## o ###  ",
+    "########  ",
     " ######## ",
     "  ######  ",
-    "   ####   ",
     "    ##    ",
     "          ",
 ];
@@ -358,7 +358,7 @@ const PET_SIT_C: [&str; 6] = [
 ];
 
 const PET_DOZE_C: [&str; 6] = [
-    "       ", "  . .  ", " ##### ", "## o ##", " ##### ", "  ###  ",
+    "       ", "       ", " . .   ", "###    ", "## o###", "#######",
 ];
 
 const PET_SLEEP_C: [&str; 6] = [
@@ -496,6 +496,26 @@ mod tests {
             pet_sprite_compact(PetPose::Doze),
             pet_sprite_compact(PetPose::Sleep),
             "Compact floor doze and bed sleep need distinct visual contexts"
+        );
+    }
+
+    #[test]
+    fn floor_doze_uses_a_horizontal_curl_pose() {
+        assert_eq!(
+            pet_sprite(PetPose::Doze),
+            &[
+                "          ",
+                "          ",
+                "  ..      ",
+                " ####     ",
+                "## o ###  ",
+                "########  ",
+                " ######## ",
+                "  ######  ",
+                "    ##    ",
+                "          ",
+            ],
+            "floor doze should be a horizontal curled pose"
         );
     }
 

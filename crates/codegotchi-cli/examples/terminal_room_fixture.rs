@@ -141,6 +141,7 @@ fn draw_fixture(
     let options = RoomRenderOptions::for_theme(theme, ambience);
     let backend = CrosstermBackend::new(guard.writer_mut());
     let mut terminal = Terminal::new(backend)?;
+    let bottom = std::env::var("CG_FIXTURE_BOTTOM").ok().as_deref() == Some("1");
     let layouts: &[u16] = match layout {
         "all" => &[14, 7, 3],
         _ => &[room_height],
@@ -148,7 +149,13 @@ fn draw_fixture(
     for &height in layouts {
         terminal.clear()?;
         terminal.draw(|frame| {
-            let area = Rect::new(0, 0, columns, height.min(rows));
+            let room_height = height.min(rows);
+            let top = if bottom {
+                rows.saturating_sub(room_height)
+            } else {
+                0
+            };
+            let area = Rect::new(0, top, columns, room_height);
             render_room_with_options(
                 area,
                 frame.buffer_mut(),

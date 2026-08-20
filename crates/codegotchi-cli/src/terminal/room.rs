@@ -196,7 +196,9 @@ pub fn render_room_with_options(
         RoomMode::Compact => render_compact(
             area, buffer, snapshot, activity, napping, frame, &geometry, options, drag,
         ),
-        RoomMode::Minimal => render_minimal(area, buffer, snapshot, napping, options, drag),
+        RoomMode::Minimal => {
+            render_minimal(area, buffer, snapshot, napping, options, drag, &geometry)
+        }
     }
 }
 
@@ -244,9 +246,9 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
             offset,
             area,
         );
-        let bed = Rect::new(area.x.saturating_add(94), area.y.saturating_add(5), 23, 7);
-        let food_sources = food_sources(area, snapshot, 34, 10, 9, 13);
-        let poops = poop_slots(area, snapshot, 84, 10, 3);
+        let bed = Rect::new(area.x.saturating_add(97), area.y.saturating_add(5), 23, 7);
+        let food_sources = wide_food_sources(area, snapshot, 32, 8, 12, 5, 13);
+        let poops = wide_poop_slots(area, snapshot, 82, 8, 3, 5, 4, 5);
         return RoomGeometry {
             pet,
             bed: Some(bed),
@@ -298,8 +300,8 @@ fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16
             area,
         );
         let bed = Rect::new(area.x.saturating_add(91), area.y.saturating_add(2), 23, 4);
-        let food_sources = food_sources(area, snapshot, 34, 5, 9, 11);
-        let poops = poop_slots(area, snapshot, 76, 5, 2);
+        let food_sources = wide_food_sources(area, snapshot, 34, 3, 10, 4, 11);
+        let poops = wide_poop_slots(area, snapshot, 78, 3, 2, 5, 4, 6);
         return RoomGeometry {
             pet,
             bed: Some(bed),
@@ -337,14 +339,46 @@ fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16
     }
 }
 
+const MINIMAL_TARGET_ROW: u16 = 1;
+const MINIMAL_FOOD_X: u16 = 7;
+const MINIMAL_BED_X: u16 = 19;
+const MINIMAL_POOP_X: u16 = 27;
+const MINIMAL_POOP_STEP: u16 = 8;
+const MINIMAL_BED_LABEL: &str = "[BED]";
+const MINIMAL_POOP_LABEL: &str = "[POOP]";
+const MINIMAL_AFF_X: u16 = 52;
+
+fn minimal_food_label(count: u32) -> String {
+    format!("[FOOD x{count}]")
+}
+
+fn minimal_poop_x(index: usize) -> u16 {
+    MINIMAL_POOP_X.saturating_add(index as u16 * MINIMAL_POOP_STEP)
+}
+
+fn label_width(label: &str) -> u16 {
+    u16::try_from(label.chars().count()).unwrap_or(u16::MAX)
+}
+
 fn minimal_geometry(area: Rect, snapshot: &SimulationSnapshot) -> RoomGeometry {
     let pet = Rect::new(area.x, area.y.saturating_add(2), 7, 1);
+    let food_label = minimal_food_label(snapshot.inventory.count(FoodKind::Kibble));
     let food_sources = vec![FoodSource {
-        rect: Rect::new(area.x, area.y.saturating_add(1), 7, 1),
+        rect: Rect::new(
+            area.x.saturating_add(MINIMAL_FOOD_X),
+            area.y.saturating_add(MINIMAL_TARGET_ROW),
+            label_width(&food_label),
+            1,
+        ),
         food_id: FoodKind::Kibble.id(),
         count: snapshot.inventory.count(FoodKind::Kibble),
     }];
-    let bed = Rect::new(area.x.saturating_add(9), area.y.saturating_add(1), 4, 1);
+    let bed = Rect::new(
+        area.x.saturating_add(MINIMAL_BED_X),
+        area.y.saturating_add(MINIMAL_TARGET_ROW),
+        label_width(MINIMAL_BED_LABEL),
+        1,
+    );
     let poops = snapshot
         .pending_poops
         .iter()
@@ -354,9 +388,9 @@ fn minimal_geometry(area: Rect, snapshot: &SimulationSnapshot) -> RoomGeometry {
             (
                 poop.id(),
                 Rect::new(
-                    area.x.saturating_add(15 + index as u16 * 5),
-                    area.y.saturating_add(1),
-                    5,
+                    area.x.saturating_add(minimal_poop_x(index)),
+                    area.y.saturating_add(MINIMAL_TARGET_ROW),
+                    label_width(MINIMAL_POOP_LABEL),
                     1,
                 ),
             )
@@ -409,6 +443,42 @@ fn food_sources(
     .collect()
 }
 
+/// Builds wide-layout food hit regions around the entire bowl, label, and
+/// count projection. The narrow renderer keeps its historical anchor because
+/// its input tests and text-only projection intentionally use that row.
+fn wide_food_sources(
+    area: Rect,
+    snapshot: &SimulationSnapshot,
+    x: u16,
+    top: u16,
+    width: u16,
+    height: u16,
+    spacing: u16,
+) -> Vec<FoodSource> {
+    [
+        FoodKind::Kibble,
+        FoodKind::Treat,
+        FoodKind::Fruit,
+        FoodKind::EnergyDrink,
+    ]
+    .into_iter()
+    .enumerate()
+    .filter_map(|(index, food)| {
+        let count = snapshot.inventory.count(food);
+        (count > 0).then(|| FoodSource {
+            rect: Rect::new(
+                area.x.saturating_add(x + index as u16 * spacing),
+                area.y.saturating_add(top),
+                width,
+                height,
+            ),
+            food_id: food.id(),
+            count,
+        })
+    })
+    .collect()
+}
+
 fn poop_slots(
     area: Rect,
     snapshot: &SimulationSnapshot,
@@ -429,6 +499,36 @@ fn poop_slots(
                     area.y.saturating_add(y),
                     2,
                     1,
+                ),
+            )
+        })
+        .collect()
+}
+
+/// Builds wide-layout poop hit regions around the four-row rendered object.
+fn wide_poop_slots(
+    area: Rect,
+    snapshot: &SimulationSnapshot,
+    x: u16,
+    top: u16,
+    limit: usize,
+    width: u16,
+    height: u16,
+    spacing: u16,
+) -> Vec<(Uuid, Rect)> {
+    snapshot
+        .pending_poops
+        .iter()
+        .take(limit)
+        .enumerate()
+        .map(|(index, poop)| {
+            (
+                poop.id(),
+                Rect::new(
+                    area.x.saturating_add(x + index as u16 * spacing),
+                    area.y.saturating_add(top),
+                    width,
+                    height,
                 ),
             )
         })
@@ -982,6 +1082,7 @@ fn render_minimal(
     napping: bool,
     options: RoomRenderOptions,
     drag: Option<(&str, Position)>,
+    geometry: &RoomGeometry,
 ) {
     let palette = options.palette();
     let needs = snapshot.needs;
@@ -1009,20 +1110,76 @@ fn render_minimal(
     );
 
     let stocked = snapshot.inventory.count(FoodKind::Kibble);
-    let poop_count = snapshot.pending_poops.len();
-    let mut affordances = format!("◉ PET  FOOD x{stocked}  BED  POOP x{poop_count}");
     let (affection, snack) = demand_counts(snapshot);
-    affordances.push_str(&format!("  AFF x{affection}"));
-    if snack > 0 {
-        affordances.push_str("  SNACK");
-    }
-    put_line(
+    put_text(
         area,
         buffer,
-        1,
-        &affordances,
+        0,
+        MINIMAL_TARGET_ROW,
+        "◉ PET",
         palette.cell_style(SemanticTone::Tone2),
     );
+    let food = geometry
+        .food_sources
+        .first()
+        .expect("Minimal always exposes the starter food target");
+    put_text(
+        area,
+        buffer,
+        food.rect.x.saturating_sub(area.x),
+        MINIMAL_TARGET_ROW,
+        &minimal_food_label(stocked),
+        palette.cell_style(SemanticTone::Tone2),
+    );
+    if let Some(bed) = geometry.bed {
+        put_text(
+            area,
+            buffer,
+            bed.x.saturating_sub(area.x),
+            MINIMAL_TARGET_ROW,
+            MINIMAL_BED_LABEL,
+            palette.cell_style(SemanticTone::Tone2),
+        );
+    }
+    if geometry.poops.is_empty() {
+        put_text(
+            area,
+            buffer,
+            MINIMAL_POOP_X,
+            MINIMAL_TARGET_ROW,
+            MINIMAL_POOP_LABEL,
+            palette.cell_style(SemanticTone::Tone1),
+        );
+    } else {
+        for (_, poop) in &geometry.poops {
+            put_text(
+                area,
+                buffer,
+                poop.x.saturating_sub(area.x),
+                MINIMAL_TARGET_ROW,
+                MINIMAL_POOP_LABEL,
+                palette.cell_style(SemanticTone::Tone2),
+            );
+        }
+    }
+    put_text(
+        area,
+        buffer,
+        MINIMAL_AFF_X,
+        MINIMAL_TARGET_ROW,
+        &format!("AFF x{affection}"),
+        palette.cell_style(SemanticTone::Tone2),
+    );
+    if snack > 0 {
+        put_text(
+            area,
+            buffer,
+            MINIMAL_AFF_X.saturating_add(8),
+            MINIMAL_TARGET_ROW,
+            "SNACK",
+            palette.cell_style(SemanticTone::Tone2),
+        );
+    }
     put_text(
         area,
         buffer,
@@ -1117,22 +1274,14 @@ fn render_food_sources_wide(
     for source in &geometry.food_sources {
         let x = source.rect.x.saturating_sub(area.x);
         let y = source.rect.y.saturating_sub(area.y);
-        put_sprite(area, buffer, &FOOD_BOWL, x, y.saturating_sub(2), palette);
+        put_sprite(area, buffer, &FOOD_BOWL, x, y, palette);
         put_text(
             area,
             buffer,
             x,
-            y.saturating_add(1),
-            &format!("FOOD {}", food_label(source.food_id)),
+            y.saturating_add(3),
+            &format!("FOOD {} x{}", food_label(source.food_id), source.count),
             palette.cell_style(SemanticTone::Tone3),
-        );
-        put_text(
-            area,
-            buffer,
-            x.saturating_add(2),
-            y.saturating_add(2),
-            &format!("x{}", source.count),
-            palette.cell_style(SemanticTone::Tone2),
         );
     }
 }
@@ -1146,13 +1295,13 @@ fn render_poops_wide(
     for (index, (_, rect)) in geometry.poops.iter().enumerate() {
         let x = rect.x.saturating_sub(area.x);
         let y = rect.y.saturating_sub(area.y);
-        put_sprite(area, buffer, &POOP_OBJECT, x, y.saturating_sub(2), palette);
+        put_sprite(area, buffer, &POOP_OBJECT, x, y, palette);
         if index == 0 {
             put_text(
                 area,
                 buffer,
                 x,
-                y.saturating_add(1),
+                y.saturating_add(3),
                 "POOP",
                 palette.cell_style(SemanticTone::Tone3),
             );
@@ -1171,19 +1320,12 @@ fn render_food_sources_compact_wide(
     };
     let x = first.rect.x.saturating_sub(area.x);
     let y = first.rect.y.saturating_sub(area.y);
-    put_sprite(
-        area,
-        buffer,
-        &FOOD_BOWL_COMPACT,
-        x,
-        y.saturating_sub(2),
-        palette,
-    );
+    put_sprite(area, buffer, &FOOD_BOWL_COMPACT, x, y, palette);
     put_text(
         area,
         buffer,
         x,
-        6,
+        y.saturating_add(3),
         &format!("FOOD x{}", first.count),
         palette.cell_style(SemanticTone::Tone3),
     );
@@ -1191,19 +1333,13 @@ fn render_food_sources_compact_wide(
     // of displacing the pet or bed from the compact priority order.
     for (index, source) in geometry.food_sources.iter().skip(1).enumerate() {
         let x = source.rect.x.saturating_sub(area.x);
-        put_sprite(
-            area,
-            buffer,
-            &FOOD_BOWL_COMPACT,
-            x,
-            y.saturating_sub(2),
-            palette,
-        );
+        let y = source.rect.y.saturating_sub(area.y);
+        put_sprite(area, buffer, &FOOD_BOWL_COMPACT, x, y, palette);
         put_text(
             area,
             buffer,
             x,
-            5,
+            y.saturating_add(2),
             &format!("{}x{}", food_label(source.food_id), source.count),
             palette.cell_style(SemanticTone::Tone2),
         );
@@ -1224,19 +1360,12 @@ fn render_poops_compact_wide(
     };
     let x = rect.x.saturating_sub(area.x);
     let y = rect.y.saturating_sub(area.y);
-    put_sprite(
-        area,
-        buffer,
-        &POOP_OBJECT_COMPACT,
-        x,
-        y.saturating_sub(2),
-        palette,
-    );
+    put_sprite(area, buffer, &POOP_OBJECT_COMPACT, x, y, palette);
     put_text(
         area,
         buffer,
         x,
-        6,
+        y.saturating_add(3),
         "POOP",
         palette.cell_style(SemanticTone::Tone3),
     );

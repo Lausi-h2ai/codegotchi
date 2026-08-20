@@ -680,3 +680,58 @@ fn wide_room_keeps_named_targets_and_minimal_keeps_a_pet_mark() {
         "Minimal must retain a visible pet mark: {minimal_text}"
     );
 }
+
+#[test]
+fn wide_care_hit_regions_cover_the_rendered_food_and_poop_objects() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot
+        .pending_poops
+        .push(Poop::new(Uuid::from_u128(10), now));
+
+    for area in [Rect::new(0, 0, 120, 14), Rect::new(0, 0, 120, 7)] {
+        let geometry = codegotchi_cli::terminal::room_geometry(area, &snapshot);
+        let food = geometry.food_sources.first().expect("starter food source");
+        assert!(
+            food.rect.width >= 10 && food.rect.height >= 4,
+            "food hit region must cover the bowl and its label: {:?}",
+            food.rect
+        );
+        let (_, poop) = geometry.poops.first().expect("seeded poop");
+        assert!(
+            poop.width >= 5 && poop.height >= 4,
+            "poop hit region must cover the rendered object: {poop:?}"
+        );
+    }
+}
+
+#[test]
+fn minimal_care_labels_start_inside_their_hit_regions() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot
+        .pending_poops
+        .push(Poop::new(Uuid::from_u128(11), now));
+    let area = Rect::new(0, 0, 120, 3);
+    let geometry = codegotchi_cli::terminal::room_geometry(area, &snapshot);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+
+    let row = |x: u16, width: usize| {
+        (0..width)
+            .map(|offset| {
+                buffer
+                    .cell((x + offset as u16, 1))
+                    .expect("Minimal label cell")
+                    .symbol()
+                    .to_owned()
+            })
+            .collect::<String>()
+    };
+    let food = geometry.food_sources.first().expect("starter food source");
+    assert_eq!(row(food.rect.x, 5), "[FOOD");
+    let bed = geometry.bed.expect("Minimal bed");
+    assert_eq!(row(bed.x, 5), "[BED]");
+    let (_, poop) = geometry.poops.first().expect("seeded poop");
+    assert_eq!(row(poop.x, 6), "[POOP]");
+}
