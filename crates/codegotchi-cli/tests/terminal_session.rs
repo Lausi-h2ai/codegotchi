@@ -212,6 +212,74 @@ fn production_session_core_uses_negotiated_modes_for_every_input_kind() {
 }
 
 #[test]
+fn production_session_core_encodes_every_negotiated_mouse_tracking_level() {
+    let cases = [
+        (
+            b"\x1b[?9h".as_slice(),
+            MouseEventKind::Down(MouseButton::Left),
+            [27, b'[', b'M', 32, 37, 38].as_slice(),
+        ),
+        (
+            b"\x1b[?1000h".as_slice(),
+            MouseEventKind::Up(MouseButton::Left),
+            [27, b'[', b'M', 35, 37, 38].as_slice(),
+        ),
+        (
+            b"\x1b[?1002h".as_slice(),
+            MouseEventKind::Drag(MouseButton::Left),
+            [27, b'[', b'M', 64, 37, 38].as_slice(),
+        ),
+        (
+            b"\x1b[?1003h".as_slice(),
+            MouseEventKind::Moved,
+            [27, b'[', b'M', 67, 37, 38].as_slice(),
+        ),
+    ];
+
+    for (mode, kind, expected) in cases {
+        let mut core = TerminalSessionCore::new(8, 40);
+        core.process_output(mode);
+        let event = Event::Mouse(MouseEvent {
+            kind,
+            column: 4,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(core.encode_event(&event), expected, "mode bytes: {mode:?}");
+    }
+}
+
+#[test]
+fn production_session_core_encodes_every_negotiated_mouse_coordinate_encoding() {
+    let cases = [
+        (
+            b"\x1b[?1000h".as_slice(),
+            [27, b'[', b'M', 32, 37, 38].as_slice(),
+        ),
+        (
+            b"\x1b[?1000h\x1b[?1005h".as_slice(),
+            [27, b'[', b'M', 32, 0xc3, 0xa9, 0xc2, 0x85].as_slice(),
+        ),
+        (
+            b"\x1b[?1000h\x1b[?1006h".as_slice(),
+            b"\x1b[<0;5;6M".as_slice(),
+        ),
+    ];
+
+    for (modes, expected) in cases {
+        let mut core = TerminalSessionCore::new(8, 40);
+        core.process_output(modes);
+        let event = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: if modes.ends_with(b"1005h") { 200 } else { 4 },
+            row: if modes.ends_with(b"1005h") { 100 } else { 5 },
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(core.encode_event(&event), expected, "mode bytes: {modes:?}");
+    }
+}
+
+#[test]
 fn production_session_core_resizes_rows_before_columns_and_bounds_screen_state() {
     let mut core = TerminalSessionCore::new(4, 10);
     core.resize(31, 120);

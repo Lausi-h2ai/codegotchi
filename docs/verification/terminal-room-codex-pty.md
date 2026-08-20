@@ -385,3 +385,63 @@ callback.
 This is Linux/WSL production-routing evidence with a fake Codex and no real
 Codex fidelity claim. macOS terminal lifecycle remains deferred, and the real
 Codex/first-room/screenshot gates remain later orchestrator work.
+
+## Task 5 mode, platform, and real-Codex gate (2026-08-20)
+
+The Task 5 candidate before the evidence commit was `a7d04c3497bb`. The
+production PTY implementation was not changed: the acceptance audit found no
+reproduced PTY failure. The added tests exercise the existing production seam
+(`TerminalSessionCore::encode_event`) and the virtual-screen mode model.
+
+| Requirement | Evidence |
+|---|---|
+| Application cursor keys, bracketed paste, focus reporting | Existing `terminal_screen` mode/encoder fixtures and `terminal_session::production_session_core_uses_negotiated_modes_for_every_input_kind`. |
+| Mouse tracking levels | `terminal_session::production_session_core_encodes_every_negotiated_mouse_tracking_level` proves Press, PressRelease, ButtonMotion, and AnyMotion through the production seam. |
+| Mouse coordinate encodings | `terminal_session::production_session_core_encodes_every_negotiated_mouse_coordinate_encoding` proves Default, UTF-8, and SGR through the production seam. |
+| Unsupported mode isolation | `terminal_screen::unsupported_mouse_modes_only_leave_safe_encoding_fallback_and_active_tracking` sends unsupported `?1015`/`?1016` while tracking and other input modes are active, then asserts safe encoding and surviving event bytes. |
+| Child/PTY lifecycle | Existing direct PTY tests cover input, resize, ANSI output, SIGINT/SIGTERM/escalation, descendant teardown, and reader unblocking on Unix; the new `rust-macos` CI job runs the same workspace tests on `macos-latest`. |
+
+Automated commands run for this candidate:
+
+```text
+cargo test -p codegotchi-cli --test terminal_screen unsupported_mouse_modes_only_leave_safe_encoding_fallback_and_active_tracking -- --nocapture  # 1 passed
+cargo test -p codegotchi-cli --test terminal_session production_session_core_encodes_every_negotiated_mouse -- --nocapture  # 2 passed
+cargo fmt --all -- --check  # pass
+```
+
+The official CLI used for the real run was installed temporarily as
+`@openai/codex@0.147.0` (`codex-cli 0.147.0`), matching the version recorded
+above. The host's preinstalled CLI is `0.148.0` and was not used for the
+fidelity claim. The run used WSL2 Linux, xterm 390, Xvfb `:99`, Noto Sans
+Mono 10, and a 120×45 outer terminal (1324×904 pixels).
+
+Reviewed real-run captures from the production launcher are tracked under
+`docs/verification/terminal-room/`:
+
+- `task5-a7d04c3497bb-full-120x45-codex-start.png` shows the official Codex
+  0.147.0 TUI startup/model panel and the Full room.
+- `task5-a7d04c3497bb-full-120x45-after-prompt.png` shows the same production
+  room after a prompt was sent; the PTY transcript records the prompt bytes.
+
+Both images were inspected directly. The room art, status bars, furniture,
+food affordances, and pet render without protocol leakage; the Codex pane is
+legible at Full size. No resize frame or video/GIF is claimed: the Xvfb
+window detached while Codex was waiting for the external `codex_apps` MCP
+startup, so Compact/Minimal/Full cycling could not be captured safely.
+
+The bounded real-Codex transcript at
+`/tmp/codegotchi-task5-nomcp-a7d04c3497bb-zAHFan/terminal.typescript` proves
+the official TUI loaded, the trust prompt was accepted, and the prompt
+`Reply with exactly READY and no tools.` reached the hosted PTY (`READY` is
+present in the transcript). Codex then remained in `Booting MCP server:
+codex_apps` and did not produce a model reply before the run had to be
+terminated as a verified run-owned process group. The final launcher attempt
+also recorded equal `stty -g` snapshots before and after exit, but this does
+not substitute for the blocked Codex interaction checklist.
+
+The remaining real-run items are therefore explicitly blocked: model reply,
+keyboard navigation, bracketed clipboard paste (no `xclip`, `xsel`, or
+`wl-copy` helper is installed), observable focus, Codex mouse scroll/click,
+slash command, tool/approval flow, responsive resize, and room pet/feed/clean/
+nap interactions while Codex remains usable. The macOS job is committed but
+awaits GitHub-hosted execution; no local macOS claim is made.

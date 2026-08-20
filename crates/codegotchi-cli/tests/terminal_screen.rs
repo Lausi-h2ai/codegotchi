@@ -300,6 +300,45 @@ fn queries_do_not_change_input_modes() {
 }
 
 #[test]
+fn unsupported_mouse_modes_only_leave_safe_encoding_fallback_and_active_tracking() {
+    let mut screen = CodexScreen::new(4, 20);
+    screen.process(b"\x1b[?1h\x1b[?2004h\x1b[?1004h\x1b[?1000h");
+
+    screen.process(b"\x1b[?1015h\x1b[?1016h");
+    assert_eq!(
+        screen.input_modes(),
+        CodexInputModes {
+            application_cursor_keys: true,
+            bracketed_paste: true,
+            focus_reporting: true,
+            mouse_tracking: MouseTrackingMode::PressRelease,
+            mouse_encoding: MouseEncoding::Default,
+        }
+    );
+    assert_eq!(
+        encode_mouse_event(
+            mouse(MouseEventKind::Down(MouseButton::Left), 4, 5),
+            screen.input_modes(),
+        ),
+        [27, b'[', b'M', 32, 37, 38]
+    );
+
+    screen.process(b"\x1b[?1006h\x1b[?1015l\x1b[?1016l");
+    assert_eq!(
+        screen.input_modes().mouse_tracking,
+        MouseTrackingMode::PressRelease
+    );
+    assert_eq!(screen.input_modes().mouse_encoding, MouseEncoding::Sgr);
+    assert_eq!(
+        encode_mouse_event(
+            mouse(MouseEventKind::Down(MouseButton::Left), 4, 5),
+            screen.input_modes(),
+        ),
+        b"\x1b[<0;5;6M"
+    );
+}
+
+#[test]
 fn query_replies_are_drained_without_stale_replies() {
     let mut screen = CodexScreen::new(4, 20);
 
