@@ -79,16 +79,16 @@ routes pointer events in the lower pane to care controls. The room adapts
 between Full, Compact, and Minimal layouts as the terminal is resized, giving
 Codex the usable pane first while retaining the pet and essential care.
 
-- Pet CodeGotchi by pressing on the pet, holding the pointer down, and moving
-  it over the pet before releasing. A sustained gesture must last at least
-  1,500 ms and cover at least 120 backend distance units; the terminal maps
-  its cell path to that same contract. The browser projection measures the
-  equivalent pointer gesture. Only the authoritative response can resolve an
-  affection demand.
-- Feed by dragging a stocked food source (`KIB`, `TRT`, `FRT`, or `ENE`) onto
-  the pet. Empty inventory is not rendered as a drag source. Kibble, treats,
-  and fruit satisfy snack demands; an energy drink restores energy but does
-  not satisfy a snack demand.
+- Pet CodeGotchi by pressing on the pet, holding the pointer down, moving the
+  pointer, and releasing. A sustained gesture must last at least 1,500 ms and
+  cover at least 120 backend distance units; the terminal maps its cell path
+  to that same contract. The browser projection measures the equivalent
+  pointer gesture. Only the authoritative response can resolve an affection
+  demand.
+- In Full and Compact, feed by dragging a stocked food source (`KIB`, `TRT`,
+  `FRT`, or `ENE`) onto the pet; empty inventory is not rendered as a drag
+  source there. Kibble, treats, and fruit satisfy snack demands; an energy
+  drink restores energy but does not satisfy a snack demand.
 - Clean poop by clicking an authoritative poop object in the terminal room.
   In the browser projection, arm the shovel and select a poop, then use the
   trash target (or drag the selected poop to it). A poop remains visible until
@@ -97,12 +97,14 @@ Codex the usable pane first while retaining the pet and essential care.
   an authoritative five-second energy-recovery action; ordinary idle dozing is
   only presentation and never recovers energy.
 
-Minimal mode keeps the condensed `CG` need row, a one-line stocked-kibble
-`FOOD` tray, `BED`, visible `POOP` slots, and `AFF`/`SNACK` demand markers. Drag
-the food tray to the pet, click the bed, and click a poop just as in the larger
-layouts. Full and Compact expose every stocked food kind; use the browser
-projection or a larger terminal when a Minimal tray does not show the item you
-need.
+Minimal mode keeps the condensed `CG` need row, a one-line kibble `FOOD x<count>`
+tray, `BED`, visible `POOP` slots, and `AFF`/`SNACK` demand markers. The tray is
+shown even when kibble is empty (`FOOD x0`); dragging that empty tray submits
+the normal authoritative feed request, which is rejected as out of stock and
+does not change state. Drag stocked food to the pet, click the bed, and click a
+poop just as in the larger layouts. Full and Compact expose every stocked food
+kind; use the browser projection or a larger terminal when a Minimal tray does
+not show the item you need.
 
 The browser remains an optional fallback and second projection of the same
 runtime. Use `--ui browser` when a terminal host is unavailable, `--ui both` to
