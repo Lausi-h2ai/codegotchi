@@ -37,8 +37,9 @@ pub fn pointer_distance(path: &[Position]) -> f32 {
 }
 
 /// Accumulates one pointer-down-to-pointer-up petting gesture in terminal
-/// cell coordinates. The backend threshold contract (duration and distance)
-/// is enforced by the caller before submitting a care request.
+/// cell coordinates. The local threshold gate controls when feedback is
+/// emitted, while the authoritative domain independently validates the
+/// cumulative evidence on every care request.
 #[derive(Clone, Debug, Default)]
 pub struct PetGesture {
     started_at: Option<std::time::Instant>,
@@ -117,12 +118,13 @@ pub enum RoomCareRequest {
         interaction_ms: u64,
         pointer_distance: f32,
     },
-    /// One increment of an active, already-qualified petting gesture. The
-    /// session emits these every tick while the user keeps petting so the
-    /// happiness bar rises continuously (until full) instead of only on
-    /// pointer release.
+    /// One increment of an active, locally qualified petting gesture. The
+    /// cumulative evidence is carried to the authoritative runtime, which
+    /// independently validates it before mutating happiness.
     PetStroke {
         action_id: Uuid,
+        duration_ms: u64,
+        distance: f64,
     },
 }
 
@@ -134,7 +136,7 @@ pub trait CareGateway {
     fn clean(&self, action_id: Uuid, poop_id: Uuid);
     fn nap(&self, action_id: Uuid);
     fn pet(&self, action_id: Uuid, interaction_ms: u64, pointer_distance: f32);
-    fn pet_stroke(&self, action_id: Uuid);
+    fn pet_stroke(&self, action_id: Uuid, duration_ms: u64, distance: f64);
 }
 
 /// Pure room-mouse state machine. It owns petting-gesture and food-drag state
@@ -251,7 +253,18 @@ impl RoomInputSession {
     /// authoritative happiness strokes each tick until the gesture ends.
     #[must_use]
     pub fn petting_qualified(&self) -> bool {
-        self.gesture.as_ref().is_some_and(PetGesture::qualified)
+        self.petting_evidence().is_some()
+    }
+
+    /// Returns cumulative evidence for an active gesture once the local
+    /// presentation gate is met. This is measurement only: the runtime/domain
+    /// validates the same evidence again before every happiness mutation.
+    #[must_use]
+    pub fn petting_evidence(&self) -> Option<(u64, f64)> {
+        let gesture = self.gesture.as_ref()?;
+        let (duration_ms, distance) = gesture.metrics();
+        (duration_ms >= PET_MIN_INTERACTION_MS && distance >= PET_MIN_POINTER_DISTANCE)
+            .then_some((duration_ms, f64::from(distance)))
     }
 }
 

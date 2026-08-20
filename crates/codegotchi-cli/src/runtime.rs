@@ -230,8 +230,19 @@ impl AuthoritativeRuntime {
 
     /// Applies one increment of an in-progress petting gesture so happiness
     /// rises continuously while the user pets, not only on pointer release.
-    pub fn pet_stroke(&self, action_id: Uuid) -> Result<MutationReceipt, RuntimeError> {
-        self.apply_care(CareCommand::PetStroke { action_id })
+    /// The cumulative evidence is revalidated by the domain before any
+    /// authoritative happiness mutation is persisted.
+    pub fn pet_stroke(
+        &self,
+        action_id: Uuid,
+        duration_ms: u64,
+        distance: f64,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        self.apply_care(CareCommand::PetStroke {
+            action_id,
+            duration_ms,
+            distance,
+        })
     }
 
     pub fn apply_care(&self, command: CareCommand) -> Result<MutationReceipt, RuntimeError> {
@@ -400,7 +411,7 @@ fn care_action_id(command: &CareCommand) -> Uuid {
         CareCommand::Feed { action_id, .. }
         | CareCommand::CleanPoop { action_id, .. }
         | CareCommand::Pet { action_id, .. }
-        | CareCommand::PetStroke { action_id }
+        | CareCommand::PetStroke { action_id, .. }
         | CareCommand::Nap { action_id } => *action_id,
     }
 }
@@ -422,13 +433,13 @@ fn seed_new_pet(pet: Pet) -> Pet {
 mod tests {
     use chrono::{Duration, Utc};
     use codegotchi_domain::{
-        AttentionIncidentKind, DefaultNeedProgressionStrategy, FakeClock, FoodInventory, Pet,
-        PetBehavior, PetNeeds, PetSimulation, PetSpecies, incident_delay_ms, incident_kind,
+        AttentionIncidentKind, CareError, DefaultNeedProgressionStrategy, FakeClock, FoodInventory,
+        Pet, PetBehavior, PetNeeds, PetSimulation, PetSpecies, incident_delay_ms, incident_kind,
     };
     use tokio::sync::broadcast::error::TryRecvError;
     use uuid::Uuid;
 
-    use super::AuthoritativeRuntime;
+    use super::{AuthoritativeRuntime, RuntimeError};
     use crate::persistence::SqliteStore;
 
     fn pet_id_with_first_affection_incident() -> Uuid {
@@ -475,6 +486,54 @@ mod tests {
             .expect("replayed pet should be accepted");
         assert!(second.duplicate);
         assert_eq!(second.snapshot, first.snapshot);
+    }
+
+    #[test]
+    fn pet_stroke_revalidates_cumulative_evidence_and_is_replay_safe() {
+        let pet_id = pet_id_with_first_affection_incident();
+        let start = Utc::now();
+        let clock = FakeClock::new(start);
+        let delay = incident_delay_ms(pet_id, 0);
+        let pet = Pet::with_inventory(
+            pet_id,
+            "Mochi",
+            PetSpecies::Cat,
+            start,
+            FoodInventory::starter(),
+        );
+        let mut simulation = PetSimulation::new(pet, clock, DefaultNeedProgressionStrategy);
+        simulation.current_state_at(start + Duration::milliseconds(delay as i64));
+        let mut initial = simulation.snapshot();
+        initial.needs = PetNeeds::new(0.0, 100.0, 50.0, 100.0);
+        initial.behavior = PetBehavior::Wandering;
+
+        let runtime = AuthoritativeRuntime::new(SqliteStore::open(":memory:").unwrap(), initial)
+            .expect("runtime should restore the fixture");
+        let invalid = runtime
+            .pet_stroke(Uuid::from_u128(9002), 1_500, 112.0)
+            .expect_err("below-threshold distance must be rejected by the runtime");
+        assert!(matches!(
+            invalid,
+            RuntimeError::Care(CareError::InsufficientDistance)
+        ));
+
+        let before = runtime.snapshot();
+        let applied = runtime
+            .pet_stroke(Uuid::from_u128(9002), 1_500, 128.0)
+            .expect("qualified cumulative evidence should apply");
+        assert!(!applied.duplicate);
+        assert!(applied.snapshot.needs.happiness() > before.needs.happiness());
+        assert_eq!(
+            applied.snapshot.pending_demands.len(),
+            before.pending_demands.len(),
+            "continuous strokes must not resolve affection"
+        );
+
+        let replay = runtime
+            .pet_stroke(Uuid::from_u128(9002), 1_500, 128.0)
+            .expect("replayed stroke should be accepted as a no-op");
+        assert!(replay.duplicate);
+        assert_eq!(replay.snapshot, applied.snapshot);
     }
 
     #[tokio::test]

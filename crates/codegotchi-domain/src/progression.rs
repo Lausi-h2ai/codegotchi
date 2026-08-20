@@ -12,7 +12,7 @@ use crate::{
         incident_id, incident_kind,
     },
     behavior::BehaviorCoordinator,
-    care::{CareCommand, CareError, CareResult},
+    care::{CareCommand, CareError, CareResult, validate_pet_evidence},
     clock::Clock,
     event::{ActivityKind, AgentEvent, AgentEventError, AgentEventKind},
     permission::{EnforcementMode, PetSettings},
@@ -492,18 +492,12 @@ where
                 interaction_ms,
                 pointer_distance,
                 ..
-            } => {
-                if *interaction_ms < 1_500 {
-                    return Err(CareError::InsufficientDuration);
-                }
-                if !pointer_distance.is_finite() {
-                    return Err(CareError::NonFinitePointerDistance);
-                }
-                if *pointer_distance < 120.0 {
-                    return Err(CareError::InsufficientDistance);
-                }
-            }
-            CareCommand::PetStroke { .. } => {}
+            } => validate_pet_evidence(*interaction_ms, f64::from(*pointer_distance))?,
+            CareCommand::PetStroke {
+                duration_ms,
+                distance,
+                ..
+            } => validate_pet_evidence(*duration_ms, *distance)?,
             CareCommand::Nap { .. } => {}
         }
 
@@ -1244,6 +1238,8 @@ mod tests {
             simulation
                 .apply_care(&CareCommand::PetStroke {
                     action_id: Uuid::from_u128(action),
+                    duration_ms: 1_500,
+                    distance: 128.0,
                 })
                 .unwrap();
         }
@@ -1269,6 +1265,8 @@ mod tests {
             simulation
                 .apply_care(&CareCommand::PetStroke {
                     action_id: Uuid::from_u128(action),
+                    duration_ms: 1_500,
+                    distance: 128.0,
                 })
                 .unwrap();
         }
@@ -1286,6 +1284,8 @@ mod tests {
         simulation.pet.needs_mut().set_happiness(40.0);
         let stroke = CareCommand::PetStroke {
             action_id: Uuid::from_u128(99),
+            duration_ms: 1_500,
+            distance: 128.0,
         };
 
         assert_eq!(simulation.apply_care(&stroke).unwrap(), CareResult::Applied);
@@ -1294,6 +1294,91 @@ mod tests {
             CareResult::Duplicate
         );
         assert_eq!(simulation.pet().needs().happiness(), 44.0);
+    }
+
+    #[test]
+    fn pet_stroke_requires_authoritative_duration_and_distance_evidence() {
+        let cases = [
+            (1_500, 112.0, CareError::InsufficientDistance),
+            (1_499, 128.0, CareError::InsufficientDuration),
+        ];
+
+        for (duration_ms, distance, expected_error) in cases {
+            let mut simulation = simulation_with_demands([(1, PetDemandKind::Affection)]);
+            simulation.pet.needs_mut().set_happiness(50.0);
+            let before = simulation.pet().needs().happiness();
+
+            assert_eq!(
+                simulation.apply_care(&CareCommand::PetStroke {
+                    action_id: Uuid::from_u128(duration_ms as u128),
+                    duration_ms,
+                    distance,
+                }),
+                Err(expected_error)
+            );
+            assert_eq!(simulation.pet().needs().happiness(), before);
+            assert_eq!(demand_ids(&simulation), vec![Uuid::from_u128(1)]);
+        }
+
+        let mut simulation = simulation_with_demands([(1, PetDemandKind::Affection)]);
+        simulation.pet.needs_mut().set_happiness(50.0);
+        assert_eq!(
+            simulation
+                .apply_care(&CareCommand::PetStroke {
+                    action_id: Uuid::from_u128(1_500),
+                    duration_ms: 1_500,
+                    distance: 128.0,
+                })
+                .unwrap(),
+            CareResult::Applied
+        );
+        assert!(simulation.pet().needs().happiness() > 50.0);
+        assert_eq!(demand_ids(&simulation), vec![Uuid::from_u128(1)]);
+    }
+
+    #[test]
+    fn pet_stroke_rejects_non_finite_or_negative_distance_without_mutation() {
+        for (action_id, distance, expected_error) in [
+            (1, f64::NAN, CareError::NonFinitePointerDistance),
+            (2, f64::INFINITY, CareError::NonFinitePointerDistance),
+            (3, f64::NEG_INFINITY, CareError::NonFinitePointerDistance),
+            (4, -1.0, CareError::InsufficientDistance),
+        ] {
+            let mut simulation = simulation_with_demands([(1, PetDemandKind::Affection)]);
+            simulation.pet.needs_mut().set_happiness(50.0);
+            let before = simulation.pet().needs().happiness();
+
+            assert_eq!(
+                simulation.apply_care(&CareCommand::PetStroke {
+                    action_id: Uuid::from_u128(action_id),
+                    duration_ms: 1_500,
+                    distance,
+                }),
+                Err(expected_error)
+            );
+            assert_eq!(simulation.pet().needs().happiness(), before);
+            assert_eq!(demand_ids(&simulation), vec![Uuid::from_u128(1)]);
+        }
+    }
+
+    #[test]
+    fn interrupted_qualified_pet_stroke_retains_earned_happiness_without_resolving_demand() {
+        // A gesture interrupted before pointer-up retains only the happiness
+        // already earned by domain-validated strokes. The final Pet command
+        // remains the sole transition that resolves affection.
+        let mut simulation = simulation_with_demands([(1, PetDemandKind::Affection)]);
+        simulation.pet.needs_mut().set_happiness(50.0);
+
+        simulation
+            .apply_care(&CareCommand::PetStroke {
+                action_id: Uuid::from_u128(1),
+                duration_ms: 1_500,
+                distance: 128.0,
+            })
+            .unwrap();
+
+        assert_eq!(simulation.pet().needs().happiness(), 54.0);
+        assert_eq!(demand_ids(&simulation), vec![Uuid::from_u128(1)]);
     }
 
     #[test]

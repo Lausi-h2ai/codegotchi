@@ -102,11 +102,15 @@ impl CareGateway for RecordingCareGateway {
         });
     }
 
-    fn pet_stroke(&self, action_id: Uuid) {
+    fn pet_stroke(&self, action_id: Uuid, duration_ms: u64, distance: f64) {
         self.requests
             .lock()
             .unwrap()
-            .push(RoomCareRequest::PetStroke { action_id });
+            .push(RoomCareRequest::PetStroke {
+                action_id,
+                duration_ms,
+                distance,
+            });
     }
 }
 
@@ -123,7 +127,11 @@ fn apply(gateway: &RecordingCareGateway, requests: Vec<RoomCareRequest>) {
                 interaction_ms,
                 pointer_distance,
             } => gateway.pet(action_id, interaction_ms, pointer_distance),
-            RoomCareRequest::PetStroke { action_id } => gateway.pet_stroke(action_id),
+            RoomCareRequest::PetStroke {
+                action_id,
+                duration_ms,
+                distance,
+            } => gateway.pet_stroke(action_id, duration_ms, distance),
         }
     }
 }
@@ -238,6 +246,11 @@ fn petting_qualified_gates_continuous_strokes() {
         input.petting_qualified(),
         "an active gesture past 1500ms and 120 distance should keep stroking"
     );
+    let (duration_ms, distance) = input
+        .petting_evidence()
+        .expect("qualified gesture should expose cumulative evidence");
+    assert!(duration_ms >= 1_500);
+    assert!(distance >= 120.0);
 
     requests = input.process(
         room,
@@ -593,6 +606,6 @@ fn action_id(request: &RoomCareRequest) -> Uuid {
         | RoomCareRequest::Clean { action_id, .. }
         | RoomCareRequest::Nap { action_id }
         | RoomCareRequest::Pet { action_id, .. }
-        | RoomCareRequest::PetStroke { action_id } => *action_id,
+        | RoomCareRequest::PetStroke { action_id, .. } => *action_id,
     }
 }

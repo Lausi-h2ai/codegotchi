@@ -64,8 +64,8 @@ impl CareGateway for AuthoritativeRuntime {
         let _ = AuthoritativeRuntime::pet(self, action_id, interaction_ms, pointer_distance);
     }
 
-    fn pet_stroke(&self, action_id: Uuid) {
-        let _ = AuthoritativeRuntime::pet_stroke(self, action_id);
+    fn pet_stroke(&self, action_id: Uuid, duration_ms: u64, distance: f64) {
+        let _ = AuthoritativeRuntime::pet_stroke(self, action_id, duration_ms, distance);
     }
 }
 
@@ -859,15 +859,16 @@ where
                     last_behavior_frame = frame;
                     redraw = true;
                 }
-                // Continuous petting: while a qualified gesture is active,
-                // each tick applies a small authoritative happiness gain so
-                // the bar rises during the gesture, not only on release. The
-                // petted reaction keeps the pet smiling while stroked.
+                // Continuous petting: while a locally qualified gesture is
+                // active, each tick submits its cumulative evidence. The
+                // authoritative runtime/domain validates that evidence again
+                // before applying the happiness gain. The petted reaction
+                // keeps the pet smiling while stroked.
                 if let Some(runtime) = runtime
-                    && room_input.petting_qualified()
+                    && let Some((duration_ms, distance)) = room_input.petting_evidence()
                 {
                     core.react_to_pet(behavior_now);
-                    let _ = runtime.pet_stroke(Uuid::new_v4());
+                    let _ = runtime.pet_stroke(Uuid::new_v4(), duration_ms, distance);
                     redraw = true;
                 }
             }
@@ -1252,7 +1253,11 @@ fn apply_room_request(runtime: &dyn CareGateway, request: RoomCareRequest) {
             interaction_ms,
             pointer_distance,
         } => runtime.pet(action_id, interaction_ms, pointer_distance),
-        RoomCareRequest::PetStroke { action_id } => runtime.pet_stroke(action_id),
+        RoomCareRequest::PetStroke {
+            action_id,
+            duration_ms,
+            distance,
+        } => runtime.pet_stroke(action_id, duration_ms, distance),
     }
 }
 
