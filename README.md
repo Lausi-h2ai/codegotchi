@@ -11,15 +11,38 @@ From a checkout with the embedded production bundle present:
 
 ```sh
 cargo install --path crates/codegotchi-cli --locked
-codegotchi run -- codex [ordinary Codex arguments...]
 ```
 
-The launcher starts the runtime before Codex, prints a URL beginning with
-`CodeGotchi UI:`, and best-effort opens it with the native browser helper. The
-server binds only to `127.0.0.1` on an ephemeral port. Set
+The default launcher mode is `auto`. These are the supported command forms;
+arguments after `codex` are passed to the official Codex executable in order:
+
+```sh
+codegotchi run -- codex ...
+codegotchi run --ui auto -- codex ...
+codegotchi run --ui terminal -- codex ...
+codegotchi run --ui browser -- codex ...
+codegotchi run --ui both -- codex ...
+```
+
+`--ui terminal` hosts the official Codex TUI in a PTY in the upper pane and
+renders the CodeGotchi room in the lower pane. `--ui browser` keeps Codex on
+inherited stdio and launches the browser projection. `--ui both` starts the
+terminal room and the browser projection against the same authoritative
+runtime, so the browser is a second projection rather than a second pet.
+
+`--ui auto` first attempts terminal integration. When interactive terminal
+initialization succeeds, it behaves like `terminal`. If initialization fails
+before the terminal PTY child is spawned, the launcher prints the browser URL,
+best-effort opens the browser, and falls back to Codex with inherited stdio.
+Failures after the terminal session has started are reported as terminal
+errors; they do not silently switch projections.
+
+Browser projections (explicit `browser`/`both`, or the `auto` fallback) print a
+URL beginning with `CodeGotchi UI:` and best-effort open it with the native
+browser helper. The server binds only to `127.0.0.1` on an ephemeral port. Set
 `CODEGOTCHI_BROWSER=none` to suppress automatic browser launch, or set it to a
 browser-helper executable path. If the helper fails, the printed URL remains
-usable.
+usable. Terminal-only mode does not require a browser helper.
 
 The token is supplied only in the URL fragment as `#token=...`. The UI removes
 the fragment from the visible address bar and keeps the token only in the
@@ -48,6 +71,61 @@ rejected without rewriting the file.
 Trailing Codex arguments are preserved in order. CodeGotchi rejects an
 explicit `-p`, attached short profile form, `--profile`, or `--profile=...`
 because it must inject its own persistent additive profile.
+
+## Terminal room and care controls
+
+The terminal room is mouse-first: Codex owns the keyboard, while CodeGotchi
+routes pointer events in the lower pane to care controls. The room adapts
+between Full, Compact, and Minimal layouts as the terminal is resized, giving
+Codex the usable pane first while retaining the pet and essential care.
+
+- Pet CodeGotchi by pressing on the pet, holding the pointer down, and moving
+  it over the pet before releasing. A sustained gesture must last at least
+  1,500 ms and cover at least 120 backend distance units; the terminal maps
+  its cell path to that same contract. The browser projection measures the
+  equivalent pointer gesture. Only the authoritative response can resolve an
+  affection demand.
+- Feed by dragging a stocked food source (`KIB`, `TRT`, `FRT`, or `ENE`) onto
+  the pet. Empty inventory is not rendered as a drag source. Kibble, treats,
+  and fruit satisfy snack demands; an energy drink restores energy but does
+  not satisfy a snack demand.
+- Clean poop by clicking an authoritative poop object in the terminal room.
+  In the browser projection, arm the shovel and select a poop, then use the
+  trash target (or drag the selected poop to it). A poop remains visible until
+  the authoritative runtime confirms removal.
+- Use the bed/hammock for an explicit nap by clicking it. A successful nap is
+  an authoritative five-second energy-recovery action; ordinary idle dozing is
+  only presentation and never recovers energy.
+
+Minimal mode keeps the condensed `CG` need row, a one-line stocked-kibble
+`FOOD` tray, `BED`, visible `POOP` slots, and `AFF`/`SNACK` demand markers. Drag
+the food tray to the pet, click the bed, and click a poop just as in the larger
+layouts. Full and Compact expose every stocked food kind; use the browser
+projection or a larger terminal when a Minimal tray does not show the item you
+need.
+
+The browser remains an optional fallback and second projection of the same
+runtime. Use `--ui browser` when a terminal host is unavailable, `--ui both` to
+keep both views open, or let `--ui auto` take its pre-spawn initialization
+fallback. The URL token stays in the fragment (`#token=...`), is removed from
+the visible address bar by the UI, and should be treated as local-session
+credentials.
+
+The intended terminal platform envelope is Linux, WSL, and macOS; current
+terminal acceptance evidence is Linux/WSL-first. Native Windows is not part of
+the current terminal target. Browser mode remains available wherever the
+launcher can print the loopback URL and a browser can reach it.
+
+Named terminal theme presets are planned, rendering-only options. The planned
+surface is:
+
+```text
+--terminal-theme auto|mono|soft-green|amber|night
+```
+
+The current launcher accepts the `--ui` modes above and uses the terminal's
+default/Auto semantic palette; it does not yet accept `--terminal-theme` or
+the named presets. Selecting a future preset will not change pet state.
 
 ## State, runtime files, and cleanup
 
@@ -115,8 +193,9 @@ The room displays affection and snack requests from the authoritative
 snapshot. Drag kibble, a treat, or fruit to the pet to satisfy one oldest snack
 request; energy drinks do not satisfy snack requests. To satisfy one oldest
 affection request, pet CodeGotchi for at least 1,500 ms while moving the
-pointer at least 120 px along its path. The browser only measures and submits
-the gesture: the backend validates it and the demand remains visible until an
+pointer at least 120 backend distance units along its path (the terminal maps
+cell travel to that metric). The browser only measures and submits the
+gesture: the backend validates it and the demand remains visible until an
 authoritative response or WebSocket snapshot removes it.
 
 The fixed demonstration controls require the exact `CODEGOTCHI_ENABLE_DEBUG=1`
