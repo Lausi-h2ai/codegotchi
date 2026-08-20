@@ -368,7 +368,14 @@ fn every_stocked_food_is_a_draggable_source_with_count() {
                 &default_frame(),
                 &mouse(
                     MouseEventKind::Down(MouseButton::Left),
-                    source.rect.x + 1,
+                    // Pick a rendered edge outside the pet when the two
+                    // visible regions overlap; the target itself remains the
+                    // production geometry rather than a legacy coordinate.
+                    if source.rect.x < geometry.pet.x {
+                        source.rect.x
+                    } else {
+                        source.rect.x + source.rect.width - 1
+                    },
                     source.rect.y,
                 ),
             ),
@@ -480,6 +487,165 @@ fn food_drag_to_pet_feeds_and_other_drops_do_not() {
     );
 }
 
+/// The cells actually occupied by rendered food/poop affordances must route to
+/// the same care requests as their geometry. This intentionally uses a large
+/// inventory count so a fixed-width rectangle cannot pass by accident.
+#[test]
+fn rendered_food_and_poop_edges_dispatch_care_requests() {
+    let mut snapshot = base_snapshot();
+    snapshot
+        .inventory
+        .add(codegotchi_domain::FoodKind::Kibble, 1_000_000);
+    let poop_id = Uuid::from_u128(0x7010);
+    snapshot.pending_poops.push(Poop::new(poop_id, Utc::now()));
+
+    for room in [Rect::new(0, 0, 120, 14), Rect::new(0, 0, 120, 7)] {
+        let geometry = room_geometry_with_frame(room, &snapshot, &default_frame());
+        let food = geometry.food_sources.first().expect("starter food source");
+        let food_label_width = if room.height >= 14 {
+            format!("FOOD KIB x{}", food.count).chars().count()
+        } else {
+            format!("FOOD x{}", food.count).chars().count()
+        };
+        let food_edge = Position::new(
+            food.rect.x + u16::try_from(food_label_width - 1).unwrap(),
+            food.rect.y + 3,
+        );
+        let pet_point = Position::new(geometry.pet.x + 1, geometry.pet.y + 1);
+        let poop = geometry.poops.first().expect("seeded poop").1;
+        let poop_edge = Position::new(poop.x + 3, poop.y + 3);
+
+        let mut input = RoomInputSession::default();
+        let gateway = RecordingCareGateway::default();
+        apply(
+            &gateway,
+            input.process(
+                room,
+                &snapshot,
+                &default_frame(),
+                &mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    food_edge.x,
+                    food_edge.y,
+                ),
+            ),
+        );
+        apply(
+            &gateway,
+            input.process(
+                room,
+                &snapshot,
+                &default_frame(),
+                &mouse(
+                    MouseEventKind::Up(MouseButton::Left),
+                    pet_point.x,
+                    pet_point.y,
+                ),
+            ),
+        );
+        apply(
+            &gateway,
+            input.process(
+                room,
+                &snapshot,
+                &default_frame(),
+                &mouse(
+                    MouseEventKind::Up(MouseButton::Left),
+                    poop_edge.x,
+                    poop_edge.y,
+                ),
+            ),
+        );
+        let recorded = gateway.requests.lock().unwrap();
+        assert!(
+            matches!(&recorded[0], RoomCareRequest::Feed { food_id, .. } if food_id == "kibble"),
+            "rendered food edge must begin a kibble drag: {recorded:?}"
+        );
+        assert_eq!(
+            recorded[1],
+            RoomCareRequest::Clean {
+                action_id: action_id(&recorded[1]),
+                poop_id,
+            },
+            "rendered poop edge must submit clean"
+        );
+    }
+
+    // Minimal's printed controls are the production geometry, so exercise the
+    // far edge of each label rather than a nearby hard-coded coordinate.
+    let room = Rect::new(0, 0, 40, 3);
+    let geometry = room_geometry_with_frame(room, &snapshot, &default_frame());
+    let food = geometry.food_sources.first().expect("Minimal food target");
+    let bed = geometry.bed.expect("Minimal bed target");
+    let poop = geometry.poops.first().expect("Minimal poop target").1;
+    let mut input = RoomInputSession::default();
+    let gateway = RecordingCareGateway::default();
+    let food_edge = Position::new(food.rect.x + food.rect.width - 1, food.rect.y);
+    let pet_point = Position::new(geometry.pet.x + 1, geometry.pet.y);
+    apply(
+        &gateway,
+        input.process(
+            room,
+            &snapshot,
+            &default_frame(),
+            &mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                food_edge.x,
+                food_edge.y,
+            ),
+        ),
+    );
+    apply(
+        &gateway,
+        input.process(
+            room,
+            &snapshot,
+            &default_frame(),
+            &mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                pet_point.x,
+                pet_point.y,
+            ),
+        ),
+    );
+    apply(
+        &gateway,
+        input.process(
+            room,
+            &snapshot,
+            &default_frame(),
+            &mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                bed.x + bed.width - 1,
+                bed.y,
+            ),
+        ),
+    );
+    apply(
+        &gateway,
+        input.process(
+            room,
+            &snapshot,
+            &default_frame(),
+            &mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                poop.x + poop.width - 1,
+                poop.y,
+            ),
+        ),
+    );
+    let recorded = gateway.requests.lock().unwrap();
+    assert!(matches!(
+        &recorded[0],
+        RoomCareRequest::Feed { food_id, .. } if food_id == "kibble"
+    ));
+    assert!(matches!(&recorded[1], RoomCareRequest::Nap { .. }));
+    assert!(matches!(
+        &recorded[2],
+        RoomCareRequest::Clean { poop_id: id, .. } if *id == poop_id
+    ));
+}
+
 /// Clicking an authoritative poop submits clean with its id; the bed submits
 /// nap; non-left buttons produce nothing.
 #[test]
@@ -546,17 +712,25 @@ fn poop_click_cleans_and_bed_click_naps() {
 fn minimal_food_tray_requires_drop_on_pet() {
     let snapshot = base_snapshot();
     let room = Rect::new(0, 0, 40, 3);
+    let geometry = room_geometry_with_frame(room, &snapshot, &default_frame());
+    let food = geometry.food_sources.first().expect("Minimal food target");
+    let food_point = Position::new(food.rect.x + 1, food.rect.y);
+    let pet_point = Position::new(geometry.pet.x + 1, geometry.pet.y);
     let mut input = RoomInputSession::default();
     let gateway = RecordingCareGateway::default();
 
-    // Drop on the pet (3x1 rect at the far left) feeds.
+    // Drag from the rendered food label to the rendered pet target.
     apply(
         &gateway,
         input.process(
             room,
             &snapshot,
             &default_frame(),
-            &mouse(MouseEventKind::Down(MouseButton::Left), 3, 1),
+            &mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                food_point.x,
+                food_point.y,
+            ),
         ),
     );
     apply(
@@ -565,7 +739,11 @@ fn minimal_food_tray_requires_drop_on_pet() {
             room,
             &snapshot,
             &default_frame(),
-            &mouse(MouseEventKind::Up(MouseButton::Left), 1, 0),
+            &mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                pet_point.x,
+                pet_point.y,
+            ),
         ),
     );
     let recorded = gateway.requests.lock().unwrap();
@@ -581,7 +759,11 @@ fn minimal_food_tray_requires_drop_on_pet() {
             room,
             &snapshot,
             &default_frame(),
-            &mouse(MouseEventKind::Down(MouseButton::Left), 3, 1),
+            &mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                food_point.x,
+                food_point.y,
+            ),
         ),
     );
     apply(

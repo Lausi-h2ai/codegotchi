@@ -247,8 +247,8 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
             area,
         );
         let bed = Rect::new(area.x.saturating_add(97), area.y.saturating_add(5), 23, 7);
-        let food_sources = wide_food_sources(area, snapshot, 32, 8, 12, 5, 13);
-        let poops = wide_poop_slots(area, snapshot, 82, 8, 3, 5, 4, 5);
+        let food_sources = wide_food_sources(area, snapshot, 32, 8);
+        let poops = wide_poop_slots(area, snapshot, 82, 8, 3, 5);
         return RoomGeometry {
             pet,
             bed: Some(bed),
@@ -300,8 +300,8 @@ fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16
             area,
         );
         let bed = Rect::new(area.x.saturating_add(91), area.y.saturating_add(2), 23, 4);
-        let food_sources = wide_food_sources(area, snapshot, 34, 3, 10, 4, 11);
-        let poops = wide_poop_slots(area, snapshot, 78, 3, 2, 5, 4, 6);
+        let food_sources = wide_food_sources(area, snapshot, 34, 3);
+        let poops = wide_poop_slots(area, snapshot, 78, 3, 2, 6);
         return RoomGeometry {
             pet,
             bed: Some(bed),
@@ -451,32 +451,61 @@ fn wide_food_sources(
     snapshot: &SimulationSnapshot,
     x: u16,
     top: u16,
-    width: u16,
-    height: u16,
-    spacing: u16,
 ) -> Vec<FoodSource> {
-    [
+    let mut next_x = x;
+    let mut sources = Vec::new();
+    for food in [
         FoodKind::Kibble,
         FoodKind::Treat,
         FoodKind::Fruit,
         FoodKind::EnergyDrink,
+    ] {
+        let count = snapshot.inventory.count(food);
+        if count > 0 {
+            sources.push(FoodSource {
+                rect: Rect::new(
+                    area.x.saturating_add(next_x),
+                    area.y.saturating_add(top),
+                    food_target_width(food, count),
+                    food_target_height(),
+                ),
+                food_id: food.id(),
+                count,
+            });
+        }
+        if let Some(source) = sources.last() {
+            next_x = next_x.saturating_add(source.rect.width).saturating_add(2);
+        }
+    }
+    sources
+}
+
+fn sprite_width(sprite: &[&str]) -> u16 {
+    sprite
+        .iter()
+        .map(|row| label_width(row))
+        .max()
+        .unwrap_or_default()
+}
+
+fn food_target_width(food: FoodKind, count: u32) -> u16 {
+    let wide_label = format!("FOOD {} x{}", food_label(food.id()), count);
+    let compact_first_label = format!("FOOD x{count}");
+    let compact_label = format!("{}x{count}", food_label(food.id()));
+    [
+        sprite_width(&FOOD_BOWL),
+        label_width(&wide_label),
+        label_width(&compact_first_label),
+        label_width(&compact_label),
     ]
     .into_iter()
-    .enumerate()
-    .filter_map(|(index, food)| {
-        let count = snapshot.inventory.count(food);
-        (count > 0).then(|| FoodSource {
-            rect: Rect::new(
-                area.x.saturating_add(x + index as u16 * spacing),
-                area.y.saturating_add(top),
-                width,
-                height,
-            ),
-            food_id: food.id(),
-            count,
-        })
-    })
-    .collect()
+    .max()
+    .unwrap_or_default()
+}
+
+const fn food_target_height() -> u16 {
+    // Both wide renderers draw their label on the sprite's last row.
+    FOOD_BOWL.len() as u16
 }
 
 fn poop_slots(
@@ -512,8 +541,6 @@ fn wide_poop_slots(
     x: u16,
     top: u16,
     limit: usize,
-    width: u16,
-    height: u16,
     spacing: u16,
 ) -> Vec<(Uuid, Rect)> {
     snapshot
@@ -527,12 +554,24 @@ fn wide_poop_slots(
                 Rect::new(
                     area.x.saturating_add(x + index as u16 * spacing),
                     area.y.saturating_add(top),
-                    width,
-                    height,
+                    wide_poop_target_width(),
+                    wide_poop_target_height(),
                 ),
             )
         })
         .collect()
+}
+
+fn wide_poop_target_width() -> u16 {
+    // The Full renderer draws the four-row object and the POOP label from the
+    // same anchor; use the larger of those actual rendered widths.
+    sprite_width(&POOP_OBJECT)
+        .max(sprite_width(&POOP_OBJECT_COMPACT))
+        .max(label_width("POOP"))
+}
+
+fn wide_poop_target_height() -> u16 {
+    POOP_OBJECT.len().max(POOP_OBJECT_COMPACT.len()).max(1) as u16
 }
 
 /// Applies a presentation wander offset to a hit rectangle, clamping it inside

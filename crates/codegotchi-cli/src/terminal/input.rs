@@ -164,16 +164,20 @@ impl RoomInputSession {
         let point = Position::new(event.column, event.row);
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                if let Some(food_id) = geometry.food_hit(point) {
-                    self.dragging_food = Some(food_id);
-                    self.drag_position = Some(point);
-                    self.gesture = None;
-                    return Vec::new();
-                }
+                // The pet remains the primary care target when a wandering
+                // presentation frame overlaps a food affordance. Otherwise a
+                // visible pet can accidentally start a feed drag and never
+                // produce the intended pet gesture.
                 if geometry.pet.contains(point) {
                     self.gesture = Some(PetGesture::begin(point));
                     self.dragging_food = None;
                     self.drag_position = None;
+                    return Vec::new();
+                }
+                if let Some(food_id) = geometry.food_hit(point) {
+                    self.dragging_food = Some(food_id);
+                    self.drag_position = Some(point);
+                    self.gesture = None;
                 }
                 Vec::new()
             }

@@ -5,7 +5,7 @@ use codegotchi_cli::terminal::{
     render_room_with_options,
 };
 use codegotchi_domain::{
-    ActivityKind, AgentActivityState, DefaultNeedProgressionStrategy, FoodInventory, Pet,
+    ActivityKind, AgentActivityState, DefaultNeedProgressionStrategy, FoodInventory, FoodKind, Pet,
     PetBehavior, PetDemand, PetDemandKind, PetSimulation, PetSpecies, Poop, SimulationSnapshot,
     SystemClock,
 };
@@ -682,26 +682,104 @@ fn wide_room_keeps_named_targets_and_minimal_keeps_a_pet_mark() {
 }
 
 #[test]
-fn wide_care_hit_regions_cover_the_rendered_food_and_poop_objects() {
+fn rendered_care_extents_are_inside_their_hit_regions() {
     let now = Utc::now();
-    let mut snapshot = base_snapshot(now);
-    snapshot
-        .pending_poops
-        .push(Poop::new(Uuid::from_u128(10), now));
+    // The rendered count is part of the clickable food affordance. A test
+    // that only checks a minimum rectangle size would miss a count growing
+    // beyond that rectangle. Run each food kind in isolation so the assertions
+    // cover every renderer label without another target overwriting it.
+    for food_kind in [
+        FoodKind::Kibble,
+        FoodKind::Treat,
+        FoodKind::Fruit,
+        FoodKind::EnergyDrink,
+    ] {
+        let mut snapshot = base_snapshot(now);
+        snapshot.inventory = FoodInventory::default();
+        snapshot.inventory.add(food_kind, 1_000_000);
+        for area in [Rect::new(0, 0, 120, 14), Rect::new(0, 0, 120, 7)] {
+            let geometry = codegotchi_cli::terminal::room_geometry(area, &snapshot);
+            let food = geometry.food_sources.first().expect("starter food source");
+            let mut buffer = Buffer::filled(area, Cell::new(" "));
+            render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+            let food_name = match food.food_id {
+                "kibble" => "KIB",
+                "treat" => "TRT",
+                "fruit" => "FRT",
+                "energy_drink" => "ENE",
+                other => panic!("unexpected food id {other}"),
+            };
+            let label = if area.height >= 14 {
+                format!("FOOD {food_name} x{}", food.count)
+            } else {
+                format!("FOOD x{}", food.count)
+            };
+            let food_rows = if area.height >= 14 {
+                ["  ○  ", " ◒◒ ", "└──┘ ", label.as_str()]
+            } else {
+                [" ○ ", "◒◒ ", "└─┘ ", label.as_str()]
+            };
+            for (row, symbols) in food_rows.iter().enumerate() {
+                for (offset, symbol) in symbols.chars().enumerate() {
+                    if symbol == ' ' {
+                        continue;
+                    }
+                    let point = Position::new(
+                        food.rect.x.saturating_add(u16::try_from(offset).unwrap()),
+                        food.rect.y.saturating_add(u16::try_from(row).unwrap()),
+                    );
+                    assert_eq!(
+                        buffer.cell(point).expect("rendered food cell").symbol(),
+                        symbol.to_string(),
+                        "food projection must be rendered at its geometry anchor"
+                    );
+                    assert!(
+                        food.rect.contains(point),
+                        "food hit region must contain every rendered cell: rect={:?} point={point:?}",
+                        food.rect
+                    );
+                }
+            }
+        }
+    }
 
+    let mut snapshot = base_snapshot(now);
+    snapshot.inventory = FoodInventory::default();
+    let poop_id = Uuid::from_u128(10);
+    snapshot.pending_poops.push(Poop::new(poop_id, now));
     for area in [Rect::new(0, 0, 120, 14), Rect::new(0, 0, 120, 7)] {
         let geometry = codegotchi_cli::terminal::room_geometry(area, &snapshot);
-        let food = geometry.food_sources.first().expect("starter food source");
-        assert!(
-            food.rect.width >= 10 && food.rect.height >= 4,
-            "food hit region must cover the bowl and its label: {:?}",
-            food.rect
-        );
+        let mut buffer = Buffer::filled(area, Cell::new(" "));
+        render_room(area, &mut buffer, &snapshot, &default_frame(), None);
         let (_, poop) = geometry.poops.first().expect("seeded poop");
-        assert!(
-            poop.width >= 5 && poop.height >= 4,
-            "poop hit region must cover the rendered object: {poop:?}"
-        );
+        // The label is deliberately drawn over the final sprite row, so this
+        // fixture describes the final rendered cells rather than the source
+        // sprite in isolation.
+        let poop_rows = if area.height >= 14 {
+            ["  ~ ", "  ~ ", " (●) ", "POOP"]
+        } else {
+            [" ~ ", "(●)", "╰─ ", "POOP"]
+        };
+        for (row, symbols) in poop_rows.iter().enumerate() {
+            for (offset, symbol) in symbols.chars().enumerate() {
+                if symbol == ' ' {
+                    continue;
+                }
+                let point = Position::new(
+                    poop.x.saturating_add(u16::try_from(offset).unwrap()),
+                    poop.y.saturating_add(u16::try_from(row).unwrap()),
+                );
+                assert_eq!(
+                    buffer.cell(point).expect("rendered poop cell").symbol(),
+                    symbol.to_string(),
+                    "poop sprite must be rendered at its geometry anchor"
+                );
+                assert!(
+                    poop.contains(point),
+                    "poop hit region must contain every rendered sprite cell: rect={poop:?} point={point:?}"
+                );
+            }
+        }
     }
 }
 
