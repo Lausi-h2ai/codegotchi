@@ -646,6 +646,52 @@ fn rendered_food_and_poop_edges_dispatch_care_requests() {
     ));
 }
 
+/// The normal Full fixture carries three poops. Their wide hit regions must
+/// stay outside the bed so a click on the bed remains a nap, not a clean.
+#[test]
+fn full_three_poop_slots_stay_outside_bed_and_bed_click_naps() {
+    let mut snapshot = base_snapshot();
+    let poop_ids = [
+        Uuid::from_u128(0x7011),
+        Uuid::from_u128(0x7012),
+        Uuid::from_u128(0x7013),
+    ];
+    for poop_id in poop_ids {
+        snapshot.pending_poops.push(Poop::new(poop_id, Utc::now()));
+    }
+    let room = Rect::new(0, 0, 120, 14);
+    let geometry = room_geometry_with_frame(room, &snapshot, &default_frame());
+    let bed = geometry.bed.expect("Full room has a bed target");
+    assert_eq!(geometry.poops.len(), poop_ids.len());
+    for (_, poop) in &geometry.poops {
+        let disjoint = poop.x.saturating_add(poop.width) <= bed.x
+            || bed.x.saturating_add(bed.width) <= poop.x
+            || poop.y.saturating_add(poop.height) <= bed.y
+            || bed.y.saturating_add(bed.height) <= poop.y;
+        assert!(
+            disjoint,
+            "Full poop target must not overlap bed: poop={poop:?} bed={bed:?}"
+        );
+    }
+
+    let bed_point = Position::new(bed.x.saturating_add(1), bed.y.saturating_add(3));
+    let mut input = RoomInputSession::default();
+    let requests = input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            bed_point.x,
+            bed_point.y,
+        ),
+    );
+    assert!(
+        matches!(requests.as_slice(), [RoomCareRequest::Nap { .. }]),
+        "a Full bed click must submit Nap, not Clean: {requests:?}"
+    );
+}
+
 /// Clicking an authoritative poop submits clean with its id; the bed submits
 /// nap; non-left buttons produce nothing.
 #[test]

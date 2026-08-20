@@ -249,7 +249,9 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
         let bed = Rect::new(area.x.saturating_add(97), area.y.saturating_add(5), 23, 7);
         let food_sources = wide_food_sources(area, snapshot, 32, 8, false);
         let poop_x = poop_anchor_after_food(area, &food_sources, 82);
-        let poops = wide_poop_slots(area, snapshot, poop_x, 8, 3, 5);
+        // Keep the three five-cell poop slots in the upper-right gutter; the
+        // floor row has no room between the widened food labels and the bed.
+        let poops = wide_poop_slots(area, snapshot, poop_x, 1, 3, 5);
         return RoomGeometry {
             pet,
             bed: Some(bed),
