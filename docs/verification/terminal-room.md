@@ -2,23 +2,24 @@
 
 Status: **PASS — ready for merge**
 
-Task 7 visual acceptance is tied to renderer commit
-`c3f45f79d914ca57097f74d23c905046d1c4d79c` and the six PNGs in
+Task 7 Fix Round 1 is tied to renderer commit
+`992e5b6833c41757169c9ee69615d170e933b561`; the evidence commit is recorded
+in the final report. The six inspected PNGs and exact capture mappings are in
 [terminal-room evidence](terminal-room/README.md).
 
 | Requirement | Result |
 |---|---|
-| Full 120x45 light/default | PASS — room, pet, furniture, food, poop, care, and status visible. |
-| Full 120x45 dark | PASS — night contrast and silhouettes remain readable. |
-| Compact 120x30 | PASS — decoration degrades before pet/care; bed, food, poop survive. |
-| Minimal 120x21 | PASS — PET/FOOD/BED/POOP and care/status text survive. |
-| Bed sleep | PASS — click activates covered bed pet and `z z z`. |
-| Floor doze | PASS — curled open-floor pet and empty bed distinguish generic sleep. |
-| Hit regions/clipping | PASS — geometry aligns with visible targets; no clipping/stale cells observed. |
-| Automated tests | PASS — 69 library tests and 15 terminal-room integration tests. |
+| Deterministic Full care state | PASS — explicit bottom-aligned fixture seeds three poops plus Affection/Snack demands; light/dark/bed/doze frames visibly show them. |
+| Full 120x45 light/default | PASS — complete room composition and seeded care state. |
+| Full 120x45 dark | PASS — seeded care state remains readable in night contrast. |
+| Compact 120x30 | PASS — widened bowl/poop targets and labels survive with pet/bed. |
+| Minimal 120x21 | PASS — visible FOOD/BED/POOP controls start exactly at their hit rectangles. |
+| Wide hit regions | PASS — focused tests cover object-width/height regions in Full and Compact. |
+| Bed sleep vs floor doze | PASS — covered bed pet versus horizontal open-floor curl, same Full framing. |
+| Automated tests | PASS — 70 library tests and 17 terminal-room integration tests. |
 
-The remaining differences are non-blocking ANSI abstraction, the bounded Codex
-pane above integrated room captures, and fixture-only forcing of generic doze.
+Remaining differences are non-blocking ANSI abstraction and the pre-existing
+duplicate `BED BED` wide-bed label. No scoped Important blocker remains.
 
 ## Task 5 platform/Codex verification (historical record retained)
 
