@@ -1,63 +1,94 @@
-# Terminal Room Verification Evidence
+# Terminal Room Visual Acceptance Evidence
 
-Status: **PENDING_VISION_REVIEW** — captures below were produced by a
-non-vision-capable orchestrator. They are preserved for inspection by a
-vision-capable model (GPT-5.6 Sol or equivalent). No visual acceptance is
-claimed. Functional/byte-level acceptance evidence is separate (see
-`../terminal-room-codex-pty.md` and the SDD progress ledger).
+Status: **ACCEPTED** (Task 7 visual review, 2026-08-20)
 
-## Screenshots (all marked PENDING_VISION_REVIEW)
+Final renderer commit: `c3f45f79d914ca57097f74d23c905046d1c4d79c`.
+Every frame below was opened as a raster image and compared with the canonical
+references under `docs/mockups/terminal-room/`.
 
-| File | Terminal cells | Pixels | Theme | State represented |
-|---|---|---|---|---|
-| full-120x45-light.png | 120x45 | 1204x859 | xterm default (light) | Full room: Codex TUI upper, room lower (status bars, pet, bed, food, poops) |
-| full-120x45-dark.png | 120x45 | 1204x859 | xterm `-bg black -fg white` | Full room in dark terminal-default theme |
-| compact-120x30-light.png | 120x30 | 1204x574 | xterm default (light) | Compact room: condensed status line, pet, bed, food, poops |
-| minimal-120x21-light.png | 120x21 | 1204x403 | xterm default (light) | Minimal room: `CG ok H.. E.. P.. C..` + FOOD/BED/POOP affordances |
-| full-120x45-newart.png | 120x45 | 1324x904 | xterm default (light) | Full room with the restored round-blob pet art, furniture, four drag food sources, pending care chips |
-| compact-120x30-newart.png | 120x30 | 1324x604 | xterm default (light) | Compact room with the new blob art and A/S demand counts |
-| minimal-120x21-newart.png | 120x21 | 1324x424 | xterm default (light) | Minimal room with the new-art session |
+| File | Cells | Pixels | State/theme | Result |
+|---|---:|---:|---|---|
+| [full-120x45-light.png](full-120x45-light.png) | 120x45 | 1324x904 | Full, xterm default/light, SoftGreen | Window/desk/shelf/wardrobe/bed/plants/open floor, large pet, food and poop read clearly. |
+| [full-120x45-dark.png](full-120x45-dark.png) | 120x45 | 1324x904 | Full, night palette | Contrast, silhouettes, and affordances survive the dark palette. |
+| [compact-120x30-light.png](compact-120x30-light.png) | 120x30 | 1324x604 | Compact, SoftGreen, one poop | Decoration reduces before pet/care; bed, food, and poop remain readable. |
+| [minimal-120x21-light.png](minimal-120x21-light.png) | 120x21 | 1324x424 | Minimal, SoftGreen, one poop | PET/FOOD/BED/POOP and status/care text remain visible. |
+| [full-120x45-bed-sleep.png](full-120x45-bed-sleep.png) | 120x45 | 1324x904 | Full, authoritative bed sleep | Covered pet is on the bed with `z z z`; click target is unambiguous. |
+| [full-120x45-floor-doze.png](full-120x45-floor-doze.png) | 120x45 | 1324x904 | Full, generic floor doze | Curled pet is on open floor with `z`; bed remains empty. |
 
-## Capture method
+## Visual review
 
-```bash
-export DISPLAY=:0   # WSLg X server
-xterm -title CGShotFullLight -geometry 120x45+0+0 -fa "Noto Sans Mono" -fs 10 \
-  -e sh -c 'TERM=xterm-256color cd /home/laurent/codegotchi && target/debug/codegotchi run --ui terminal -- codex'
-# wait for Codex TUI + room settle (~45s), then:
-import -window <window-id> docs/verification/terminal-room/full-120x45-light.png
+- Full reads as a cozy room around a large rounded pet. The cabinet silhouette
+  is the wardrobe; its printed label is omitted to avoid narrow-room overlap.
+- Idle, floor-doze, and bed-sleep sprites retain distinct face/blanket detail.
+- Food bowls, bed, and poop have visible affordances aligned with their hit
+  regions. A real xterm mouse click produced the bed-sleep frame.
+- Full -> Compact -> Minimal removes decoration/art first while retaining the
+  pet and care targets; Minimal is intentionally text-forward.
+- Light/default and night contrast are legible. Raster inspection found no
+  clipping, stale cells, or unintended half-block seams.
+
+Non-blocking differences: ANSI art is more abstract than raster mockups;
+integrated screenshots include the bounded Codex pane above the room; and the
+floor-doze state uses the deterministic fixture because the public integrated
+CLI has no force-doze command. The fixture calls the same production renderer.
+No P0/P1 visual blocker remains.
+
+## Capture environment and commands
+
+- Ubuntu workspace; `xterm 390`; `Noto Sans Mono` 10 pt; `Xvfb :99 -screen 0
+  1400x1000x24`; `DISPLAY=:99`.
+- Integrated Full/Compact/Minimal/bed captures used the bounded production
+  command below (fresh state directories and geometry/theme varied per frame):
+
+  ```bash
+  DISPLAY=:99 xterm -title CGTask7IntegratedFullColor -geometry 120x45+0+0 \
+    -fa "Noto Sans Mono" -fs 10 -e sh -c 'cd /home/laurent/codegotchi-task7 && exec env \
+    NO_COLOR= TERM=xterm-256color XDG_STATE_HOME=/tmp/codegotchi-task7-statec \
+    XDG_RUNTIME_DIR=/tmp/codegotchi-task7-runtimec CODEX_HOME=/tmp/codegotchi-task7-codexc \
+    CODEGOTCHI_REAL_CODEX=/tmp/cg-task7-fake-codex.sh FAKE_COMPOSED_HOLD_SECONDS=120 \
+    CODEGOTCHI_BROWSER=none target/debug/codegotchi run --ui terminal \
+    --terminal-theme soft-green -- codex'
+  ```
+
+  Dark Full used `-bg black -fg white` and `--terminal-theme night`; Compact
+  and Minimal used 120x30 and 120x21 with fresh state directories. Bed sleep
+  used the Full command followed by:
+
+  ```bash
+  DISPLAY=:99 xdotool mousemove --sync 1155 790 click 1
+  ```
+
+- Poops in integrated frames were generated with:
+
+  ```bash
+  CG_META=$(find /tmp/codegotchi-task7-runtime*/codegotchi -maxdepth 1 -type f \
+    -name 'session-*.json' -print -quit)
+  CODEGOTCHI_SESSION_FILE="$CG_META" CODEGOTCHI_ENABLE_DEBUG=1 \
+    target/debug/codegotchi debug generate-poop
+  ```
+
+- Floor doze used the deterministic production-renderer fixture:
+
+  ```bash
+  DISPLAY=:99 xterm -title CGTask7FixtureFloorDoze -geometry 120x45+0+0 \
+    -fa "Noto Sans Mono" -fs 10 -bg black -fg white -e sh -c \
+    'cd /home/laurent/codegotchi-task7 && exec env NO_COLOR= TERM=xterm-256color \
+    CG_FIXTURE_LAYOUT=full CG_FIXTURE_THEME=night CG_FIXTURE_TIME_OF_DAY=day \
+    CG_FIXTURE_SLEEP=doze CG_FIXTURE_PAUSE_MS=30000 CODEGOTCHI_BROWSER=none \
+    target/debug/examples/terminal_room_fixture'
+  ```
+
+Screenshots were taken with `import -window <window-id> <file>` after settle.
+No video tool was available; the bed/doze PNGs are the ordered state sequence.
+
+## Automated verification
+
+```text
+cargo fmt --all -- --check                         PASS
+cargo test -p codegotchi-cli --lib                 PASS (69 passed)
+cargo test -p codegotchi-cli --test terminal_room  PASS (15 passed)
+git diff --check                                   PASS
 ```
 
-Same procedure with `-geometry 120x30` and `-geometry 120x21` for Compact and
-Minimal; `-bg black -fg white` for the dark theme capture.
-
-## Metadata
-
-- Capture commit (new-art set): `8769565`; earlier set: `515c2b6` (real-Codex
-  interactive verification recorded in the SDD progress ledger).
-- Codex: `codex-cli 0.147.0` (npm-managed; deepseek provider; YOLO mode).
-- Terminal: xterm 390 on Xvfb `:99` (TCP-only, because `/tmp/.X11-unix` is
-  read-only and the WSLg `:0` relay wedged during this pass), font
-  Noto Sans Mono 10.
-- Runtime state shown: fresh pet (Hunger 100%, Energy 0%, Happy 0%,
-  Cleanliness 0% at capture time), Kibble x50, three authoritative poops in
-  Full/Compact, `Calm` activity at capture time.
-- Interactive session evidence (typing, prompt submission, real model reply,
-  live Thinking/WaitingOrBlocked activity reflection, clean exit, terminal
-  restore, no protocol leakage) is in `/tmp/codegotchi-controlled2.typescript`
-  (earlier tree) and `/tmp/codegotchi-controlled3.typescript` (current tree:
-  room + new pet art, typed prompt echoed, real model reply observed), and
-  summarized in `.superpowers/sdd/2026-08-13-terminal-room-agent-hardening/progress.md`.
-
-## Known visual-verification gaps (for the vision-capable pass)
-
-- The new-art set restores the round blocky mascot style (logical-pixel
-  packed); the vision pass should judge whether the proportions still match
-  the reference mockups.
-- Hit regions are aligned with rendered objects by construction; the vision
-  pass should confirm the visual affordances still read as clickable.
-- Light/dark contrast, half-block seams, and Full -> Compact -> Minimal
-  degradation need image inspection.
-- The `:99` captures used the xterm default (light) theme only; the old
-  `full-120x45-dark.png` still covers the dark theme but predates the art
-  restoration.
+Reviewer/process: fresh implementer performed one substantive screenshot ->
+inspection -> correction -> recapture loop, then inspected every final PNG.

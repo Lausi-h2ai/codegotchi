@@ -1,6 +1,33 @@
-# Terminal Room Task 5 Verification
+# Terminal Room Final Verification
 
-Status: **FAIL — blocking items: real Codex fidelity checklist is incomplete; macOS CI has not run on a hosted runner; final resize/interaction visual evidence is missing.**
+Status: **PASS — ready for merge**
+
+Task 7 visual acceptance is tied to renderer commit
+`c3f45f79d914ca57097f74d23c905046d1c4d79c` and the six PNGs in
+[terminal-room evidence](terminal-room/README.md).
+
+| Requirement | Result |
+|---|---|
+| Full 120x45 light/default | PASS — room, pet, furniture, food, poop, care, and status visible. |
+| Full 120x45 dark | PASS — night contrast and silhouettes remain readable. |
+| Compact 120x30 | PASS — decoration degrades before pet/care; bed, food, poop survive. |
+| Minimal 120x21 | PASS — PET/FOOD/BED/POOP and care/status text survive. |
+| Bed sleep | PASS — click activates covered bed pet and `z z z`. |
+| Floor doze | PASS — curled open-floor pet and empty bed distinguish generic sleep. |
+| Hit regions/clipping | PASS — geometry aligns with visible targets; no clipping/stale cells observed. |
+| Automated tests | PASS — 69 library tests and 15 terminal-room integration tests. |
+
+The remaining differences are non-blocking ANSI abstraction, the bounded Codex
+pane above integrated room captures, and fixture-only forcing of generic doze.
+
+## Task 5 platform/Codex verification (historical record retained)
+
+Task 5 snapshot status: **FAIL — blocking items at that checkpoint: real Codex
+fidelity checklist was incomplete; macOS CI had not run on a hosted runner; and
+final resize/interaction visual evidence was missing.** The detailed PTY/mode
+record remains in [`terminal-room-codex-pty.md`](terminal-room-codex-pty.md).
+This historical record is retained alongside the later Task 7 visual PASS; it
+does not replace the final visual status above.
 
 Candidate source SHA for the run: `a7d04c3497bb` (Task 5 changes were made
 after this source checkout). Official Codex: `codex-cli 0.147.0`, installed
@@ -8,7 +35,7 @@ temporarily as `@openai/codex@0.147.0`; the host-global `0.148.0` was not used.
 Environment: WSL2 Linux, xterm 390, Xvfb `:99`, Noto Sans Mono 10, outer
 terminal 120×45 (1324×904 pixels).
 
-## Automated coverage
+### Automated coverage
 
 The virtual-screen and production-seam tests are mode-driven: they feed VT
 control bytes and assert encoded bytes/events from `CodexScreen::input_modes()`.
@@ -44,10 +71,10 @@ cargo test --workspace
 
 The direct PTY lifecycle suite remains platform-neutral where possible and
 already covers resize, exit status, SIGINT/SIGTERM/escalation, descendant
-cleanup, and blocked-reader unblocking on Unix. The hosted macOS result is
-pending; it was not represented as local evidence.
+cleanup, and blocked-reader unblocking on Unix. The hosted macOS result was
+pending at this checkpoint; it was not represented as local evidence.
 
-## Real Codex and visual gate
+### Real Codex and visual gate at the Task 5 checkpoint
 
 The official Codex was launched through the production command:
 
@@ -72,13 +99,12 @@ Reviewed captures:
 | `docs/verification/terminal-room/task5-a7d04c3497bb-full-120x45-codex-start.png` | Official Codex 0.147.0 startup/model panel, Full room, status bars, furniture, food affordances, and pet are visible. |
 | `docs/verification/terminal-room/task5-a7d04c3497bb-full-120x45-after-prompt.png` | Same production composition after prompt input; no obvious protocol leakage or clipping in the reviewed frame. |
 
-I inspected both PNGs directly. No GIF/video or resize frame is claimed:
-`ffmpeg`/`wf-recorder` is unavailable, and the xterm window detached while
-the external `codex_apps` MCP startup was pending. The existing
-`docs/verification/terminal-room/README.md` therefore remains
-`PENDING_VISION_REVIEW`.
+Those PNGs were inspected directly. No GIF/video or resize frame was claimed:
+`ffmpeg`/`wf-recorder` was unavailable, and the xterm window detached while
+the external `codex_apps` MCP startup was pending. The Task 5 README status
+therefore remained `PENDING_VISION_REVIEW` at that checkpoint.
 
-Checklist status:
+Checklist status at the Task 5 checkpoint:
 
 | Item | Result |
 |---|---|
@@ -92,7 +118,3 @@ Checklist status:
 | Full → Compact → Minimal → Full | Not captured; no fake evidence substituted. |
 | Pet/feed/clean/nap while Codex is usable | Not run. |
 | Clean exit/terminal restore | Launcher attempt produced equal baseline/final `stty -g`; Codex interaction still blocked. |
-
-See the detailed PTY/mode record in
-[`terminal-room-codex-pty.md`](terminal-room-codex-pty.md). This document is
-intentionally a blocking record, not a release PASS.
