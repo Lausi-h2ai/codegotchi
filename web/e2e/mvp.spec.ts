@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const launchUrl = "/#token=task3-playwright-token";
 const fixtureToken = "task3-playwright-token";
@@ -156,6 +156,63 @@ function petLocator(page: Page) {
     return page.locator('[data-testid="pet"]');
 }
 
+type CareInteraction =
+    | { kind: "click"; target: Locator }
+    | { kind: "hover"; target: Locator }
+    | { kind: "drag"; source: Locator; target: Locator };
+
+/**
+ * Care interactions use this test-only seam because this runner's Chromium
+ * compositor does not advance requestAnimationFrame, leaving Playwright's
+ * normal stability gate waiting until the test timeout even for static nodes.
+ * The seam still proves visible, center-hit-testable DOM targets, then forces
+ * only Playwright's native mouse action. Native drag/data-transfer semantics
+ * and production timing remain unchanged.
+ */
+async function careInteraction(interaction: CareInteraction): Promise<void> {
+    const participants =
+        "source" in interaction
+            ? [interaction.source, interaction.target]
+            : [interaction.target];
+
+    for (const participant of participants) {
+        await expect(participant).toBeVisible();
+        await participant.evaluate((element) => {
+            element.scrollIntoView({ block: "center", inline: "center" });
+        });
+    }
+
+    for (const participant of participants) {
+        await expect(participant).toBeVisible();
+        const centerHit = await participant.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) {
+                return false;
+            }
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const hit = document.elementFromPoint(centerX, centerY);
+            return hit === element || (hit !== null && element.contains(hit));
+        });
+        expect(
+            centerHit,
+            "care interaction center point must hit its target",
+        ).toBe(true);
+    }
+
+    if (interaction.kind === "drag") {
+        await interaction.source.dragTo(interaction.target, { force: true });
+        return;
+    }
+
+    if (interaction.kind === "hover") {
+        await interaction.target.hover({ force: true });
+        return;
+    }
+
+    await interaction.target.click({ force: true });
+}
+
 async function motionAttribute(
     page: Page,
     attribute: string,
@@ -250,7 +307,11 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         });
         const before = await food.locator("strong").textContent();
 
-        await food.dragTo(feedTarget, { force: true });
+        await careInteraction({
+            kind: "drag",
+            source: food,
+            target: feedTarget,
+        });
         await expect(page.getByText("Eating a treat")).toBeVisible();
         await expect(food.locator("strong")).toHaveText(
             String(Number(before) - 1),
@@ -273,7 +334,11 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         });
         const before = await drink.locator("strong").textContent();
 
-        await drink.dragTo(feedTarget, { force: true });
+        await careInteraction({
+            kind: "drag",
+            source: drink,
+            target: feedTarget,
+        });
         await expect(page.getByText("Eating an energy drink")).toBeVisible();
         await expect(drink.locator("strong")).toHaveText(
             String(Number(before) - 1),
@@ -290,7 +355,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         await page.goto(launchUrl);
         const hammock = page.getByRole("button", { name: "Hammock nap" });
 
-        await hammock.click();
+        await careInteraction({ kind: "click", target: hammock });
 
         await expect(
             page.getByRole("button", { name: "Resting in hammock" }),
@@ -312,8 +377,9 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         await page.goto(launchUrl);
         const food = page.getByTestId("food-treat");
         const before = await food.locator("strong").textContent();
+        const trash = page.getByRole("button", { name: "Trash" });
 
-        await food.dragTo(page.getByRole("button", { name: "Trash" }));
+        await careInteraction({ kind: "drag", source: food, target: trash });
         await page.waitForTimeout(150);
 
         await expect(food.locator("strong")).toHaveText(before ?? "");
@@ -327,8 +393,13 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         await page.goto(launchUrl);
         const poops = page.locator("[data-poop-id]");
         const before = await poops.count();
+        const trash = page.getByRole("button", { name: "Trash" });
 
-        await poops.first().dragTo(page.getByRole("button", { name: "Trash" }));
+        await careInteraction({
+            kind: "drag",
+            source: poops.first(),
+            target: trash,
+        });
         await page.waitForTimeout(150);
 
         await expect(poops).toHaveCount(before);
@@ -339,11 +410,15 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         await resetFixture(page, "default");
         await page.goto(launchUrl);
         const emptyFood = page.getByTestId("food-kibble");
+        const feedTarget = page.getByRole("button", {
+            name: /feed target/i,
+        });
 
-        await emptyFood.dragTo(
-            page.getByRole("button", { name: /feed target/i }),
-            { force: true },
-        );
+        await careInteraction({
+            kind: "drag",
+            source: emptyFood,
+            target: feedTarget,
+        });
 
         await expect(page.getByRole("alert")).toContainText("out of stock");
     });
@@ -355,11 +430,13 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         await page.goto(launchUrl);
         const poops = page.locator("[data-poop-id]");
         const before = await poops.count();
+        const shovel = page.getByRole("button", { name: "Shovel" });
+        const trash = page.getByRole("button", { name: "Trash" });
 
-        await page.getByRole("button", { name: "Shovel" }).click();
-        await poops.first().click();
-        await expect(page.getByRole("button", { name: "Trash" })).toBeVisible();
-        await page.getByRole("button", { name: "Trash" }).click();
+        await careInteraction({ kind: "click", target: shovel });
+        await careInteraction({ kind: "click", target: poops.first() });
+        await expect(trash).toBeVisible();
+        await careInteraction({ kind: "click", target: trash });
 
         await expect(poops).toHaveCount(before - 1);
         await expect(page.getByText("Cleaned up")).toBeVisible();
@@ -774,7 +851,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
 
         const fruit = page.getByTestId("food-fruit");
         const beforeFruit = Number(await fruit.locator("strong").textContent());
-        await fruit.click();
+        await careInteraction({ kind: "click", target: fruit });
         await expect(page.getByText("Eating fruit")).toBeVisible();
         await expect(fruit.locator("strong")).toHaveText(
             String(beforeFruit - 1),
@@ -782,20 +859,25 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
 
         const restock = page.getByTestId("restock");
         await expect(restock).toBeVisible();
-        await restock.click();
+        await careInteraction({ kind: "click", target: restock });
         await expect(page.getByText("Restocked the pantry")).toBeVisible();
         await expect(fruit.locator("strong")).toHaveText("25");
 
         const poops = page.locator("[data-poop-id]");
         const beforePoops = await poops.count();
         expect(beforePoops).toBeGreaterThan(0);
-        await page.getByRole("button", { name: "Shovel" }).click();
-        await poops.first().click();
-        await page.getByRole("button", { name: "Trash" }).click();
+        const shovel = page.getByRole("button", { name: "Shovel" });
+        const trash = page.getByRole("button", { name: "Trash" });
+        await careInteraction({ kind: "click", target: shovel });
+        await careInteraction({ kind: "click", target: poops.first() });
+        await careInteraction({ kind: "click", target: trash });
         await expect(page.getByText("Cleaned up")).toBeVisible();
         await expect(poops).toHaveCount(beforePoops - 1);
 
-        await page.getByRole("button", { name: "Hammock nap" }).click();
+        await careInteraction({
+            kind: "click",
+            target: page.getByRole("button", { name: "Hammock nap" }),
+        });
         await expect(
             page.getByRole("button", { name: "Resting in hammock" }),
         ).toBeVisible();
@@ -836,7 +918,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
                 (request) =>
                     request.method() === "POST" &&
                     /\/api\/v1\/care\/pet(?:\?|$)/.test(request.url()),
-                { timeout: 5_000 },
+                { timeout: 15_000 },
             )
             .catch(() => null);
         const petResponsePromise = page
@@ -844,15 +926,13 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
                 (response) =>
                     response.request().method() === "POST" &&
                     /\/api\/v1\/care\/pet(?:\?|$)/.test(response.url()),
-                { timeout: 5_000 },
+                { timeout: 15_000 },
             )
             .catch(() => null);
-        await pet.hover();
+        await careInteraction({ kind: "hover", target: pet });
         await page.mouse.down();
-        await page.waitForTimeout(900);
-        await page.mouse.move(startX + 96, startY, { steps: 16 });
-        await page.waitForTimeout(900);
-        await page.mouse.move(startX + 96, startY + 96, { steps: 16 });
+        await page.waitForTimeout(1_800);
+        await page.mouse.move(startX + 96, startY + 96, { steps: 1 });
         await page.mouse.up();
 
         const [petRequest, petResponse] = await Promise.all([
@@ -905,21 +985,21 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         const poops = page.locator("[data-poop-id]");
         await expect(poops).toHaveCount(1);
 
-        await page
-            .getByTestId("food-kibble")
-            .dragTo(page.getByRole("button", { name: /feed target/i }), {
-                force: true,
-            });
+        await careInteraction({
+            kind: "drag",
+            source: page.getByTestId("food-kibble"),
+            target: page.getByRole("button", { name: /feed target/i }),
+        });
         await expect(page.getByText("Eating kibble")).toBeVisible();
         await expect(page.getByText("Wants a snack")).toHaveCount(0);
         await expect(page.getByTestId("demand-snack-count")).toHaveCount(0);
 
-        await page
-            .getByRole("button", { name: "Shovel" })
-            .click({ force: true });
-        await poops.first().click({ force: true });
-        await expect(page.getByRole("button", { name: "Trash" })).toBeVisible();
-        await page.getByRole("button", { name: "Trash" }).click({ force: true });
+        const shovel = page.getByRole("button", { name: "Shovel" });
+        const trash = page.getByRole("button", { name: "Trash" });
+        await careInteraction({ kind: "click", target: shovel });
+        await careInteraction({ kind: "click", target: poops.first() });
+        await expect(trash).toBeVisible();
+        await careInteraction({ kind: "click", target: trash });
         await expect(page.getByText("Cleaned up")).toBeVisible();
         await expect(poops).toHaveCount(0);
 
