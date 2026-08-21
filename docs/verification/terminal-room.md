@@ -86,9 +86,11 @@ role, and the exact per-run environment marker, walks every live descendant,
 and sends `SIGTERM` before bounded escalation; a second marker scan catches
 descendants reparented after root death. Diagnostics omit command lines, and
 blocked cleanup removes argument, metadata, state, debug, wrapper, and xterm
-log files while retaining only redacted evidence. A private `Xvfb` path uses
-an authenticated local Unix socket and is available only when a supported
-lightweight window manager is installed.
+log files and removes or redacts run-owned Xauthority credentials before
+retaining only redacted evidence. If cleanup is blocked, the report and log
+print the retained run-root path; inherited user Xauthority is never removed.
+A private `Xvfb` path uses an authenticated local Unix socket and is available
+only when a supported lightweight window manager is installed.
 
 The harness does not capture or parse a Codex screen transcript. Feed, clean,
 and nap can be checked from redacted authoritative state snapshots. Pet is

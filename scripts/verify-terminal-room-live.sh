@@ -5,6 +5,7 @@ IFS=$'\n\t'
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPOSITORY_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+source "$SCRIPT_DIR/live-acceptance-cleanup.sh"
 
 usage() {
     cat <<'EOF'
@@ -85,6 +86,8 @@ declare -A STATE_SUMMARIES=()
 
 DISPLAY_USED=""
 DISPLAY_AUTHORITY=""
+DISPLAY_AUTHORITY_OWNED=0
+DISPLAY_AUTHORITY_CLEANUP_STATUS="not-needed"
 DISPLAY_STARTED=0
 XVFB_PID=""
 WM_PID=""
@@ -481,7 +484,8 @@ write_report() {
         if ((CLEANUP_BLOCKED == 0)); then
             printf '%s\n' '- Temporary XDG state/runtime/data/config/cache/home paths are removed by the harness cleanup.'
         else
-            printf '%s\n' '- BLOCKED: the run root is retained because cleanup could not prove full process-tree termination.'
+            retained_run_root_report_line "$RUN_ROOT"
+            printf '%s\n' "- Private display credential cleanup: `$DISPLAY_AUTHORITY_CLEANUP_STATUS`."
         fi
         printf '%s\n' '- Run-owned process cleanup scans the exact per-run environment marker after root cleanup, including descendants reparented after root death.'
         printf '%s\n' '- Process diagnostics intentionally omit command lines so operator arguments and credentials cannot enter the report.'
@@ -522,6 +526,19 @@ cleanup() {
         FINAL_STATUS='BLOCKED'
         exit_status=1
     fi
+    if ((CLEANUP_BLOCKED == 1)); then
+        if scrub_private_display_credentials "$DISPLAY_AUTHORITY" "$DISPLAY_AUTHORITY_OWNED"; then
+            if ((DISPLAY_AUTHORITY_OWNED == 1)); then
+                DISPLAY_AUTHORITY_CLEANUP_STATUS='removed or redacted'
+            else
+                DISPLAY_AUTHORITY_CLEANUP_STATUS='not-owned; inherited Xauthority was left untouched'
+            fi
+            DISPLAY_AUTHORITY_OWNED=0
+        else
+            DISPLAY_AUTHORITY_CLEANUP_STATUS='not verified; retained root requires immediate restricted cleanup'
+            record 'private display credentials' 'not removed or redacted before blocked diagnostics retention'
+        fi
+    fi
     write_report "$exit_status"
     if ((CLEANUP_BLOCKED == 0)); then
         rm -rf -- "$RUN_ROOT"
@@ -529,7 +546,7 @@ cleanup() {
         rm -f -- "$CODEGOTCHI_ARGUMENTS_FILE" "$METADATA_PATH" "$CODEGOTCHI_WRAPPER" \
             "$RUN_ROOT"/curl-*.conf "$RUN_ROOT"/state-*.json "$RUN_ROOT"/debug-*.out \
             "$RUN_ROOT"/debug-*.err "$RUN_ROOT"/xterm.log
-        log "BLOCKED: retained run root for safe cleanup follow-up"
+        log "BLOCKED: retained run root at $RUN_ROOT for safe cleanup follow-up (private display credentials $DISPLAY_AUTHORITY_CLEANUP_STATUS)"
     fi
     exit "$exit_status"
 }
@@ -587,6 +604,7 @@ start_private_display() {
             continue
         fi
         DISPLAY_AUTHORITY="$RUN_ROOT/Xauthority-$display_number"
+        DISPLAY_AUTHORITY_OWNED=1
         local cookie
         cookie=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
         printf 'add %s MIT-MAGIC-COOKIE-1 %s\n' "$candidate" "$cookie" \
@@ -633,6 +651,7 @@ select_display() {
     if [[ -n ${DISPLAY-} ]] && is_display_usable "$DISPLAY"; then
         DISPLAY_USED=$DISPLAY
         DISPLAY_AUTHORITY=${XAUTHORITY-}
+        DISPLAY_AUTHORITY_OWNED=0
         DISPLAY_STARTED=0
         log 'reusing the existing usable DISPLAY'
         return 0

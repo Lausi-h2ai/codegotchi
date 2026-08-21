@@ -84,3 +84,23 @@ CODEGOTCHI_LIVE_NO_BUILD=1 DISPLAY= \
 Neither the sentinel nor its option name appeared in process output or the
 retained report. The report is
 `/tmp/codegotchi-live-round2-redaction/20260821T211818Z-1698668-verification.txt`.
+
+## Round-three cleanup evidence
+
+The focused cleanup regression passed:
+
+```text
+bash -n scripts/live-acceptance-cleanup.sh
+bash -n scripts/verify-terminal-room-live.sh
+bash -n scripts/test-live-acceptance-cleanup.sh
+scripts/test-live-acceptance-cleanup.sh
+live acceptance cleanup regression: PASS
+```
+
+The regression removes a run-owned private Xauthority file, preserves an
+inherited Xauthority file, verifies the retained-root report line contains
+the synthetic root path without cookie text, and checks that credential
+scrubbing is called before report generation. The round-three blocked
+preflight again exited `1` with final status `BLOCKED`; its report was
+`/tmp/codegotchi-live-round3-preflight/20260821T213211Z-1702328-verification.txt`.
+No Xauthority path or cookie appeared in its output or report.
