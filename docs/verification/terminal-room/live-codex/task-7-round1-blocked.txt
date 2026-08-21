@@ -104,3 +104,25 @@ scrubbing is called before report generation. The round-three blocked
 preflight again exited `1` with final status `BLOCKED`; its report was
 `/tmp/codegotchi-live-round3-preflight/20260821T213211Z-1702328-verification.txt`.
 No Xauthority path or cookie appeared in its output or report.
+
+## Round-four rendering evidence
+
+The blocked-report credential status is rendered through a literal `printf`
+argument rather than shell backtick interpolation. The cleanup regression
+passes a hostile-looking status containing `$()` and backticks, confirms the
+text is emitted literally, and confirms no command-substitution marker file
+is created. The round-four checks passed:
+
+```text
+bash -n scripts/live-acceptance-cleanup.sh
+bash -n scripts/verify-terminal-room-live.sh
+bash -n scripts/test-live-acceptance-cleanup.sh
+scripts/test-live-acceptance-cleanup.sh
+live acceptance cleanup regression: PASS
+cargo fmt --all -- --check
+git diff --check
+```
+
+The round-four blocked preflight exited `1` with final status `BLOCKED`; its
+report was
+`/tmp/codegotchi-live-round4-preflight/20260821T213752Z-1704883-verification.txt`.

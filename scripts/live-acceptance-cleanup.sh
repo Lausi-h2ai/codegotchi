@@ -17,3 +17,9 @@ retained_run_root_report_line() {
 
     printf '%s\n' "- BLOCKED: retained run root: \`$run_root\` (cleanup could not prove full process-tree termination)."
 }
+
+private_display_credential_report_line() {
+    local status=$1
+
+    printf '%s\n' '- Private display credential cleanup: `'"$status"'`.'
+}

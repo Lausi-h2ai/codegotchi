@@ -28,9 +28,15 @@ retained_line=$(retained_run_root_report_line "$TEST_ROOT/retained-run")
 [[ $retained_line == *"$TEST_ROOT/retained-run"* ]]
 [[ $retained_line != *cookie* ]]
 
+hostile_status='$(touch "$TEST_ROOT/command-substitution-fired") `echo hostile`'
+status_line=$(private_display_credential_report_line "$hostile_status")
+[[ $status_line == *'$(touch'* && $status_line == *'`echo hostile`'* ]]
+[[ ! -e "$TEST_ROOT/command-substitution-fired" ]]
+
 grep -Fq 'source "$SCRIPT_DIR/live-acceptance-cleanup.sh"' "$HARNESS"
 grep -Fq 'DISPLAY_AUTHORITY_OWNED=1' "$HARNESS"
 grep -Fq 'retained_run_root_report_line "$RUN_ROOT"' "$HARNESS"
+grep -Fq 'private_display_credential_report_line "$DISPLAY_AUTHORITY_CLEANUP_STATUS"' "$HARNESS"
 scrub_line=$(grep -n 'scrub_private_display_credentials "$DISPLAY_AUTHORITY"' "$HARNESS" | cut -d: -f1 | head -n 1)
 report_call_line=$(grep -n '^    write_report ' "$HARNESS" | cut -d: -f1 | head -n 1)
 [[ $scrub_line =~ ^[0-9]+$ && $report_call_line =~ ^[0-9]+$ ]]

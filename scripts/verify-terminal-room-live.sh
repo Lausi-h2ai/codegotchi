@@ -485,7 +485,7 @@ write_report() {
             printf '%s\n' '- Temporary XDG state/runtime/data/config/cache/home paths are removed by the harness cleanup.'
         else
             retained_run_root_report_line "$RUN_ROOT"
-            printf '%s\n' "- Private display credential cleanup: `$DISPLAY_AUTHORITY_CLEANUP_STATUS`."
+            private_display_credential_report_line "$DISPLAY_AUTHORITY_CLEANUP_STATUS"
         fi
         printf '%s\n' '- Run-owned process cleanup scans the exact per-run environment marker after root cleanup, including descendants reparented after root death.'
         printf '%s\n' '- Process diagnostics intentionally omit command lines so operator arguments and credentials cannot enter the report.'
