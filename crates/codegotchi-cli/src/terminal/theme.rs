@@ -24,7 +24,7 @@ pub enum SemanticTone {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TerminalThemePreset {
     /// Follow the terminal's own foreground/background while retaining a
-    /// neutral gray ladder for the intermediate semantic tones.
+    /// coordinate-aware ordered-dither ladder for intermediates.
     #[default]
     Auto,
     /// A four-step neutral monochrome palette with a black room background.
@@ -44,10 +44,10 @@ impl TerminalThemePreset {
     #[must_use]
     pub fn resolve(self) -> ResolvedPalette {
         match self {
-            Self::Auto => ResolvedPalette::new([
+            Self::Auto => ResolvedPalette::auto([
                 Style::default().bg(Color::Reset),
-                Style::default().fg(Color::DarkGray),
-                Style::default().fg(Color::Gray),
+                Style::default().fg(Color::Reset).bg(Color::Reset),
+                Style::default().fg(Color::Reset).bg(Color::Reset),
                 Style::default().fg(Color::Reset),
             ]),
             Self::Mono => ResolvedPalette::new([
@@ -131,17 +131,61 @@ impl FromStr for TerminalThemePreset {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResolvedPalette {
     tones: [Style; 4],
+    adaptive: bool,
 }
 
 impl ResolvedPalette {
     const fn new(tones: [Style; 4]) -> Self {
-        Self { tones }
+        Self {
+            tones,
+            adaptive: false,
+        }
+    }
+
+    const fn auto(tones: [Style; 4]) -> Self {
+        Self {
+            tones,
+            adaptive: true,
+        }
     }
 
     /// Returns the concrete Ratatui style for one semantic tone.
     #[must_use]
     pub fn style(self, tone: SemanticTone) -> Style {
         self.tones[tone_index(tone)]
+    }
+
+    /// Samples one logical art pixel without producing a concrete color.
+    ///
+    /// Fixed presets preserve their authored tone. Auto maps the endpoints to
+    /// terminal defaults and thresholds intermediate tones with a deterministic
+    /// 4x4 Bayer pattern so Tone1 has lower default-foreground coverage than
+    /// Tone2.
+    #[must_use]
+    pub fn sample_logical_tone(
+        self,
+        tone: SemanticTone,
+        logical_x: u16,
+        logical_y: u16,
+    ) -> SemanticTone {
+        if !self.adaptive {
+            return tone;
+        }
+        match tone {
+            SemanticTone::Tone0 | SemanticTone::Tone3 => tone,
+            SemanticTone::Tone1 | SemanticTone::Tone2 => {
+                let threshold = BAYER_MATRIX[(logical_y % 4) as usize][(logical_x % 4) as usize];
+                let foreground_density = match tone {
+                    SemanticTone::Tone1 => 5,
+                    _ => 10,
+                };
+                if threshold < foreground_density {
+                    SemanticTone::Tone3
+                } else {
+                    SemanticTone::Tone0
+                }
+            }
+        }
     }
 
     /// Returns a cell-ready style that keeps the preset's room background
@@ -182,3 +226,6 @@ const fn tone_index(tone: SemanticTone) -> usize {
 pub fn auto_style(tone: SemanticTone) -> Style {
     TerminalThemePreset::Auto.resolve().style(tone)
 }
+
+/// Classic normalized 4x4 ordered-dither thresholds (0..16).
+const BAYER_MATRIX: [[u16; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];

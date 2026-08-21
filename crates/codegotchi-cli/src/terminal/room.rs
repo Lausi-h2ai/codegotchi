@@ -1545,13 +1545,17 @@ fn put_sprite(
     for (row, line) in sprite.iter().enumerate() {
         let row = u16::try_from(row).unwrap_or(u16::MAX);
         for (offset, ch) in line.chars().enumerate() {
-            let style = match ch {
-                '█' | '▀' | '▄' => palette.cell_style(SemanticTone::Tone1),
-                '┌' | '┐' | '└' | '┘' | '─' | '│' => {
-                    palette.cell_style(SemanticTone::Tone2)
-                }
-                _ => palette.cell_style(SemanticTone::Tone3),
+            let tone = match ch {
+                '█' | '▀' | '▄' => SemanticTone::Tone1,
+                '┌' | '┐' | '└' | '┘' | '─' | '│' => SemanticTone::Tone2,
+                _ => SemanticTone::Tone3,
             };
+            let logical_x = area
+                .x
+                .saturating_add(x)
+                .saturating_add(u16::try_from(offset).unwrap_or(u16::MAX));
+            let logical_y = area.y.saturating_add(y).saturating_add(row);
+            let style = palette.cell_style(palette.sample_logical_tone(tone, logical_x, logical_y));
             put(
                 area,
                 buffer,

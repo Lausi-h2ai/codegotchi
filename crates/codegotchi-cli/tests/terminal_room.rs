@@ -520,10 +520,10 @@ fn drag_ghost_renders_at_the_pointer_cell() {
     );
 }
 
-/// Auto theme uses terminal defaults plus neutral gray steps so the same art
-/// stays readable on dark and light terminals.
+/// Auto separates logical tone selection from concrete host colors: its
+/// endpoints are the terminal defaults and intermediates are sampled later.
 #[test]
-fn auto_theme_maps_semantic_tones_to_defaults_and_gray_steps() {
+fn auto_theme_maps_endpoints_to_terminal_defaults_without_named_grays() {
     let tone0 = auto_style(SemanticTone::Tone0);
     assert_eq!(tone0.bg, Some(Color::Reset), "Tone0 resets the background");
     assert_eq!(
@@ -531,11 +531,13 @@ fn auto_theme_maps_semantic_tones_to_defaults_and_gray_steps() {
         "Tone0 leaves the terminal default foreground"
     );
 
-    let tone1 = auto_style(SemanticTone::Tone1);
-    assert_eq!(tone1.fg, Some(Color::DarkGray));
-
-    let tone2 = auto_style(SemanticTone::Tone2);
-    assert_eq!(tone2.fg, Some(Color::Gray));
+    let palette = TerminalThemePreset::Auto.resolve();
+    for tone in [SemanticTone::Tone1, SemanticTone::Tone2] {
+        let style = palette.style(tone);
+        assert_ne!(style.fg, Some(Color::DarkGray));
+        assert_ne!(style.fg, Some(Color::Gray));
+        assert_eq!(style.fg, Some(Color::Reset));
+    }
 
     let tone3 = auto_style(SemanticTone::Tone3);
     assert_eq!(
@@ -543,6 +545,126 @@ fn auto_theme_maps_semantic_tones_to_defaults_and_gray_steps() {
         Some(Color::Reset),
         "Tone3 resets to the foreground"
     );
+}
+
+#[test]
+fn auto_samples_intermediates_with_a_four_by_four_bayer_pattern() {
+    let palette = TerminalThemePreset::Auto.resolve();
+    let mut tone1_foreground = 0;
+    let mut tone2_foreground = 0;
+
+    for y in 0..4u16 {
+        for x in 0..4u16 {
+            if palette.sample_logical_tone(SemanticTone::Tone1, x, y) == SemanticTone::Tone3 {
+                tone1_foreground += 1;
+            }
+            if palette.sample_logical_tone(SemanticTone::Tone2, x, y) == SemanticTone::Tone3 {
+                tone2_foreground += 1;
+            }
+        }
+    }
+
+    assert_eq!(tone1_foreground, 5);
+    assert_eq!(tone2_foreground, 10);
+    assert!(
+        tone1_foreground < tone2_foreground,
+        "Tone1 must have lower foreground coverage than Tone2"
+    );
+}
+
+#[test]
+fn fixed_presets_sample_authored_tones_without_coordinates() {
+    let expectations = [
+        (
+            TerminalThemePreset::Mono,
+            [
+                Color::Rgb(8, 8, 8),
+                Color::Rgb(72, 72, 72),
+                Color::Rgb(156, 156, 156),
+                Color::Rgb(236, 236, 236),
+            ],
+        ),
+        (
+            TerminalThemePreset::SoftGreen,
+            [
+                Color::Rgb(7, 15, 12),
+                Color::Rgb(24, 74, 45),
+                Color::Rgb(96, 166, 112),
+                Color::Rgb(166, 220, 177),
+            ],
+        ),
+        (
+            TerminalThemePreset::Amber,
+            [
+                Color::Rgb(18, 12, 4),
+                Color::Rgb(112, 64, 16),
+                Color::Rgb(196, 126, 38),
+                Color::Rgb(255, 212, 112),
+            ],
+        ),
+        (
+            TerminalThemePreset::Night,
+            [
+                Color::Rgb(6, 10, 24),
+                Color::Rgb(32, 64, 128),
+                Color::Rgb(92, 132, 204),
+                Color::Rgb(202, 220, 255),
+            ],
+        ),
+    ];
+
+    for (preset, colors) in expectations {
+        let palette = preset.resolve();
+        for (index, &color) in colors.iter().enumerate() {
+            let tone = match index {
+                0 => SemanticTone::Tone0,
+                1 => SemanticTone::Tone1,
+                2 => SemanticTone::Tone2,
+                _ => SemanticTone::Tone3,
+            };
+            assert_eq!(
+                palette.sample_logical_tone(tone, 3, 2),
+                tone,
+                "{preset} must preserve {tone:?}"
+            );
+            let style = palette.style(tone);
+            if index == 0 {
+                assert_eq!(style.bg, Some(color), "{preset} {tone:?}");
+            } else {
+                assert_eq!(style.fg, Some(color), "{preset} {tone:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn auto_rendering_uses_only_terminal_defaults_and_is_deterministic() {
+    let snapshot = base_snapshot(Utc::now());
+    let area = Rect::new(3, 2, 120, 14);
+    let options = RoomRenderOptions::for_theme(TerminalThemePreset::Auto, RoomAmbience::Day);
+    let mut first = Buffer::filled(area, Cell::new(" "));
+    let mut second = Buffer::filled(area, Cell::new(" "));
+    render_room_with_options(area, &mut first, &snapshot, &default_frame(), options, None);
+    render_room_with_options(
+        area,
+        &mut second,
+        &snapshot,
+        &default_frame(),
+        options,
+        None,
+    );
+
+    assert_eq!(
+        first, second,
+        "identical renders must produce identical cells"
+    );
+    for cell in first.content.iter() {
+        let style = cell.style();
+        assert_ne!(style.fg, Some(Color::DarkGray));
+        assert_ne!(style.fg, Some(Color::Gray));
+        assert_eq!(style.fg, Some(Color::Reset));
+        assert_eq!(style.bg, Some(Color::Reset));
+    }
 }
 
 #[test]

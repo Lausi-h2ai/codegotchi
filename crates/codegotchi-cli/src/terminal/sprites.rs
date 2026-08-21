@@ -55,15 +55,22 @@ pub fn draw_sprite_with_palette<R: AsRef<str>>(
     while logical_row < height {
         let line = sprite[logical_row].as_ref();
         for (col, character) in line.chars().enumerate() {
-            let top = tone_for(character);
+            let logical_x = area
+                .x
+                .saturating_add(u16::try_from(col).unwrap_or(u16::MAX));
+            let logical_y = area
+                .y
+                .saturating_add(u16::try_from(logical_row).unwrap_or(u16::MAX));
+            let top = palette.sample_logical_tone(tone_for(character), logical_x, logical_y);
             let bottom = if logical_row + 1 < height {
-                tone_for(
+                let bottom_tone = tone_for(
                     sprite[logical_row + 1]
                         .as_ref()
                         .chars()
                         .nth(col)
                         .unwrap_or(' '),
-                )
+                );
+                palette.sample_logical_tone(bottom_tone, logical_x, logical_y.saturating_add(1))
             } else {
                 SemanticTone::Tone0
             };
@@ -465,8 +472,8 @@ mod tests {
             packed,
             [
                 "  ▄██▄██  ",
-                " █  ▀▀  ▀▄",
-                " █  ▄▄   █",
+                " █  ▀   ▀▄",
+                " █   ▄   █",
                 " █▄▄▄▄▄▄█ ",
                 "  ▀▀  ▀▀  ",
             ]
@@ -475,14 +482,19 @@ mod tests {
 
     #[test]
     fn half_block_packing_uses_two_logical_pixels_per_row() {
-        // A 2x2 sprite (dark top, background bottom) must render one terminal
-        // row with the upper-half glyph.
+        // A 2x2 sprite (foreground top, background bottom) must render one
+        // terminal row with the upper-half glyph.
         let sprite: [&str; 2] = ["##", ".."];
         let area = Rect::new(0, 0, 4, 4);
         let mut buffer = Buffer::filled(area, ratatui::buffer::Cell::new(" "));
         draw_sprite(area, &mut buffer, &sprite, 0, 0);
-        assert_eq!(buffer.cell((0, 0)).expect("cell").symbol(), "▀");
-        assert_eq!(buffer.cell((1, 0)).expect("cell").symbol(), "▀");
+        let symbols: Vec<_> = (0..2)
+            .map(|x| buffer.cell((x, 0)).expect("cell").symbol().to_owned())
+            .collect();
+        assert!(
+            symbols.iter().all(|symbol| symbol == "▀" || symbol == "█"),
+            "ordered dithering may only replace a foreground pixel with the background, got {symbols:?}"
+        );
     }
 
     #[test]
