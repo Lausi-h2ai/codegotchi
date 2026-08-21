@@ -304,21 +304,37 @@ fn full_room_renders_decorative_furniture() {
     let mut buffer = Buffer::filled(full, Cell::new(" "));
     render_room(full, &mut buffer, &snapshot, &default_frame(), None);
     let text = buffer_text(&buffer, full.width, full.height);
-    let regions = [
-        (Rect::new(2, 1, 20, 6), "window"),
-        (Rect::new(34, 1, 22, 5), "shelf"),
-        (Rect::new(58, 1, 20, 8), "wardrobe"),
-        (Rect::new(1, 6, 28, 6), "desk"),
-        (Rect::new(1, 9, 16, 4), "plants"),
-        (Rect::new(98, 5, 21, 8), "bed"),
-    ];
-    for (region, name) in regions {
-        let occupied = (region.x..region.right())
-            .flat_map(|x| (region.y..region.bottom()).map(move |y| (x, y)))
-            .filter(|&(x, y)| buffer.cell((x, y)).is_some_and(|cell| cell.symbol() != " "))
-            .count();
-        assert!(occupied > 4, "Full room missing layered {name} region");
-    }
+    assert_eq!(
+        buffer.cell((0, 6)).expect("wall-floor divider").symbol(),
+        "┈"
+    );
+    assert_eq!(buffer.cell((0, 11)).expect("floor baseline").symbol(), "─");
+    assert_eq!(buffer.cell((27, 1)).expect("window frame").symbol(), "╭");
+    assert!(text.contains("☀"), "day window needs a sun marker: {text}");
+    assert_eq!(buffer.cell((48, 2)).expect("shelf book").symbol(), "▌");
+    assert!(
+        text.contains("▣"),
+        "shelf or desk needs readable objects: {text}"
+    );
+    assert_eq!(buffer.cell((68, 3)).expect("wardrobe handle").symbol(), "·");
+    assert!(
+        text.contains("╲╱"),
+        "wardrobe needs hanging-clothing detail: {text}"
+    );
+    assert!(text.contains("╱╲"), "desk needs a lamp silhouette: {text}");
+    assert!(
+        text.contains("▣▣▣"),
+        "desk needs a laptop silhouette: {text}"
+    );
+    assert_eq!(buffer.cell((40, 9)).expect("plant leaf").symbol(), "█");
+    assert_eq!(buffer.cell((40, 11)).expect("plant pot").symbol(), "╭");
+    assert_eq!(buffer.cell((36, 7)).expect("rug frame").symbol(), "╭");
+    assert_eq!(buffer.cell((96, 5)).expect("bed headboard").symbol(), "┌");
+    assert!(text.contains("pillow"), "bed needs a pillow marker: {text}");
+    assert!(
+        text.contains("BED"),
+        "bed needs one interaction marker: {text}"
+    );
     assert!(!text.contains("WINDOW"));
     assert!(!text.contains("SHELF"));
     assert!(!text.contains("DESK"));
@@ -336,6 +352,8 @@ fn full_mascot_and_care_targets_have_release_geometry() {
     assert!(bed.right() < area.right(), "bed needs a right-edge margin");
     for source in &geometry.food_sources {
         assert!(!rects_overlap(geometry.pet, source.rect));
+        assert_eq!(source.rect.y, area.y.saturating_add(8));
+        assert!(source.rect.bottom() <= area.y.saturating_add(12));
     }
 
     let mut buffer = Buffer::filled(area, Cell::new(" "));
@@ -356,6 +374,82 @@ fn full_mascot_and_care_targets_have_release_geometry() {
             })
         }),
         "stocked food must render as physical objects"
+    );
+}
+
+#[test]
+fn full_bed_sprite_fits_its_23_column_hitbox() {
+    let snapshot = base_snapshot(Utc::now());
+    let area = Rect::new(0, 0, 120, 14);
+    let geometry = codegotchi_cli::terminal::room_geometry(area, &snapshot);
+    let bed = geometry.bed.expect("Full always has a bed");
+    assert_eq!(bed.width, 23);
+    assert_eq!(bed.height, 7);
+
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let expected_rows = [
+        "┌─┐                 ┌─┐",
+        "│ │  ┌───────────┐  │ │",
+        "│ └──┤  pillow   ├──┘ │",
+        "│    └───────────┘    │",
+        "│  *  *  *  *  *  *   │",
+        "└─────────────────────┘",
+        "  └────── BED ──────┘  ",
+    ];
+    for (row, expected) in expected_rows.iter().enumerate() {
+        let rendered: String = (bed.x..bed.right())
+            .map(|x| {
+                buffer
+                    .cell((x, bed.y + row as u16))
+                    .expect("bed cell")
+                    .symbol()
+                    .chars()
+                    .next()
+                    .unwrap_or(' ')
+            })
+            .collect();
+        assert_eq!(rendered, *expected, "bed row {row} changed");
+    }
+}
+
+#[test]
+fn full_eighty_column_geometry_keeps_care_objects_between_furniture() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot
+        .pending_poops
+        .push(Poop::new(Uuid::from_u128(8), now));
+    let area = Rect::new(0, 0, 80, 14);
+    let geometry = codegotchi_cli::terminal::room_geometry(area, &snapshot);
+    let bed = geometry.bed.expect("Full always has a bed");
+    assert_eq!(bed.x, 56);
+    assert!(geometry.pet.right() <= bed.x);
+    assert_eq!(geometry.poops.len(), 1);
+    for source in &geometry.food_sources {
+        assert!(!rects_overlap(geometry.pet, source.rect));
+        assert!(
+            geometry
+                .poops
+                .iter()
+                .all(|(_, poop)| !rects_overlap(*poop, source.rect))
+        );
+    }
+    for (_, poop) in &geometry.poops {
+        assert!(!rects_overlap(geometry.pet, *poop));
+        assert!(!rects_overlap(bed, *poop));
+    }
+
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let text = buffer_text(&buffer, area.width, area.height);
+    assert!(
+        text.contains("▣"),
+        "compact furniture must retain shelf detail"
+    );
+    assert!(
+        text.contains("╱╲"),
+        "compact furniture must retain a lamp cue"
     );
 }
 
@@ -905,12 +999,30 @@ fn wide_room_keeps_named_targets_and_minimal_keeps_a_pet_mark() {
     let mut full_buffer = Buffer::filled(full, Cell::new(" "));
     render_room(full, &mut full_buffer, &snapshot, &default_frame(), None);
     let full_text = buffer_text(&full_buffer, full.width, full.height);
-    for marker in ["FOOD", "BED", "POOP"] {
-        assert!(
-            full_text.contains(marker),
-            "wide Full affordance missing {marker}: {full_text}"
-        );
-    }
+    let full_geometry = codegotchi_cli::terminal::room_geometry(full, &snapshot);
+    let food = full_geometry
+        .food_sources
+        .first()
+        .expect("starter food source");
+    let poop = full_geometry.poops.first().expect("seeded poop").1;
+    assert_eq!(
+        full_buffer
+            .cell((food.rect.x + 2, food.rect.y))
+            .expect("food bowl")
+            .symbol(),
+        "╭"
+    );
+    assert_eq!(
+        full_buffer
+            .cell((poop.x + 1, poop.y + 1))
+            .expect("poop body")
+            .symbol(),
+        "╱"
+    );
+    assert!(
+        full_text.contains("pillow") && full_text.contains("BED"),
+        "wide Full bed must retain physical detail and its care cue: {full_text}"
+    );
     assert!(!full_text.contains("PET"));
 
     let compact = Rect::new(0, 0, 120, 7);
@@ -975,14 +1087,14 @@ fn rendered_care_extents_are_inside_their_hit_regions() {
                 other => panic!("unexpected food id {other}"),
             };
             let label = if area.height >= 14 {
-                format!("FOOD {food_name} x{}", food.count)
+                format!("{food_name} x{}", food.count)
             } else {
                 format!("FOOD x{}", food.count)
             };
             let food_rows = if area.height >= 14 {
-                ["  ○  ", " ◒◒ ", "└──┘ ", label.as_str()]
+                ["  ╭──╮ ", " ╱◒◒╲  ", "│◒◒◒│  ", label.as_str()]
             } else {
-                [" ○ ", "◒◒ ", "└─┘ ", label.as_str()]
+                [" ○  ", "◒◒  ", "└─┘ ", label.as_str()]
             };
             for (row, symbols) in food_rows.iter().enumerate() {
                 for (offset, symbol) in symbols.chars().enumerate() {
@@ -1021,7 +1133,7 @@ fn rendered_care_extents_are_inside_their_hit_regions() {
         // fixture describes the final rendered cells rather than the source
         // sprite in isolation.
         let poop_rows = if area.height >= 14 {
-            ["  ~ ", "  ~ ", " (●) ", "POOP"]
+            ["  ╱╲   ", " ╱██╲  ", " ╲██╱  ", "POOP"]
         } else {
             [" ~ ", "(●)", "╰─ ", "POOP"]
         };
@@ -1063,7 +1175,7 @@ fn rendered_food_labels_do_not_overlap_poops_in_wide_layouts() {
         for (index, source) in geometry.food_sources.iter().enumerate() {
             let label = if area.height >= 14 {
                 format!(
-                    "FOOD {} x{}",
+                    "{} x{}",
                     match source.food_id {
                         "kibble" => "KIB",
                         "treat" => "TRT",

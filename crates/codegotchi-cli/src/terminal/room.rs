@@ -242,7 +242,7 @@ fn room_mode(height: u16) -> RoomMode {
 fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) -> RoomGeometry {
     if area.width >= 80 {
         let bed_x = area.width.saturating_sub(24);
-        let pet_x = bed_x.saturating_sub(26);
+        let pet_x = bed_x.saturating_sub(18);
         let pet = offset_rect(
             Rect::new(
                 area.x.saturating_add(pet_x),
@@ -260,9 +260,20 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
             7,
         );
         let food_x = 2.min(area.width.saturating_sub(52));
-        let food_sources = wide_food_sources(area, snapshot, food_x, 9, false);
-        let poop_x = bed_x.saturating_sub(7).max(pet_x.saturating_add(19));
-        let poops = wide_poop_slots(area, snapshot, poop_x, 1, 3, 5);
+        let compact_food = area.width < 100;
+        let ultra_compact_food = area.width < 90;
+        let food_sources =
+            wide_food_sources(area, snapshot, food_x, 8, compact_food, ultra_compact_food);
+        let food_right = food_sources
+            .last()
+            .map_or(food_x, |source| source.rect.right().saturating_sub(area.x));
+        let poop_x = if area.width >= 100 {
+            pet_x.saturating_sub(24).max(food_right.saturating_add(2))
+        } else {
+            food_right.saturating_add(2)
+        };
+        let poop_limit = if area.width >= 100 { 3 } else { 1 };
+        let poops = wide_poop_slots(area, snapshot, poop_x, 8, poop_limit, 7);
         return RoomGeometry {
             pet,
             bed: Some(bed),
@@ -271,24 +282,22 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
             minimal: false,
         };
     }
-    let pet_x = area.width.saturating_sub(34).max(2);
+    let bed_x = if area.width <= 64 {
+        area.width.saturating_sub(20).max(4)
+    } else {
+        area.width.saturating_sub(28).max(4)
+    };
+    let pet_x = bed_x.saturating_sub(18);
     let pet = offset_rect(
         Rect::new(
             area.x.saturating_add(pet_x),
-            area.y.saturating_add(3),
+            area.y.saturating_add(4),
             (area.width.saturating_sub(pet_x)).min(18),
             7,
         ),
         offset,
         area,
     );
-    // Keep the compact fixture's legacy 40-column bed anchor while leaving
-    // enough right margin in the production-width room for the whole sprite.
-    let bed_x = if area.width <= 64 {
-        area.width.saturating_sub(20).max(4)
-    } else {
-        area.width.saturating_sub(28).max(4)
-    };
     let bed = Rect::new(
         area.x.saturating_add(bed_x),
         area.y.saturating_add(8),
@@ -314,9 +323,9 @@ fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16
             area,
         );
         let bed = Rect::new(area.x.saturating_add(91), area.y.saturating_add(2), 23, 4);
-        let food_sources = wide_food_sources(area, snapshot, 34, 3, true);
+        let food_sources = wide_food_sources(area, snapshot, 34, 3, true, false);
         let poop_x = poop_anchor_after_food(area, &food_sources, 78);
-        let poops = wide_poop_slots(area, snapshot, poop_x, 3, 2, 6);
+        let poops = wide_poop_slots(area, snapshot, poop_x, 3, 2, 7);
         return RoomGeometry {
             pet,
             bed: Some(bed),
@@ -485,6 +494,7 @@ fn wide_food_sources(
     x: u16,
     top: u16,
     compact: bool,
+    ultra_compact: bool,
 ) -> Vec<FoodSource> {
     let mut next_x = x;
     let mut sources = Vec::new();
@@ -501,8 +511,8 @@ fn wide_food_sources(
                 rect: Rect::new(
                     area.x.saturating_add(next_x),
                     area.y.saturating_add(top),
-                    food_target_width(food, count, compact, first),
-                    food_target_height(),
+                    food_target_width(food, count, compact, first, ultra_compact),
+                    food_target_height(compact),
                 ),
                 food_id: food.id(),
                 count,
@@ -522,20 +532,18 @@ fn sprite_width(sprite: &[&str]) -> u16 {
         .unwrap_or_default()
 }
 
-fn food_target_width(food: FoodKind, count: u32, compact: bool, first: bool) -> u16 {
-    let label = if compact {
-        if first {
-            format!("FOOD x{count}")
-        } else {
-            format!("{}x{count}", food_label(food.id()))
-        }
-    } else {
-        format!("FOOD {} x{}", food_label(food.id()), count)
-    };
+fn food_target_width(
+    food: FoodKind,
+    count: u32,
+    compact: bool,
+    first: bool,
+    ultra_compact: bool,
+) -> u16 {
+    let label = food_source_label(food, count, compact, first, ultra_compact);
     let sprite = if compact {
-        &FOOD_BOWL_COMPACT
+        &FOOD_BOWL_COMPACT_WIDE
     } else {
-        &FOOD_BOWL
+        &FOOD_BOWL_WIDE
     };
     [sprite_width(sprite), label_width(&label)]
         .into_iter()
@@ -543,9 +551,32 @@ fn food_target_width(food: FoodKind, count: u32, compact: bool, first: bool) -> 
         .unwrap_or_default()
 }
 
-const fn food_target_height() -> u16 {
-    // Both wide renderers draw their label on the sprite's last row.
-    FOOD_BOWL.len() as u16
+fn food_source_label(
+    food: FoodKind,
+    count: u32,
+    compact: bool,
+    first: bool,
+    ultra_compact: bool,
+) -> String {
+    if ultra_compact {
+        format!("x{count}")
+    } else if compact {
+        if first {
+            format!("FOOD x{count}")
+        } else {
+            format!("{}x{count}", food_label(food.id()))
+        }
+    } else {
+        format!("{} x{count}", food_label(food.id()))
+    }
+}
+
+const fn food_target_height(compact: bool) -> u16 {
+    if compact {
+        FOOD_BOWL_COMPACT_WIDE.len() as u16
+    } else {
+        FOOD_BOWL_WIDE.len() as u16
+    }
 }
 
 fn poop_anchor_after_food(area: Rect, food_sources: &[FoodSource], fallback: u16) -> u16 {
@@ -611,15 +642,13 @@ fn wide_poop_slots(
 }
 
 fn wide_poop_target_width() -> u16 {
-    // The Full renderer draws the four-row object and the POOP label from the
-    // same anchor; use the larger of those actual rendered widths.
-    sprite_width(&POOP_OBJECT)
+    sprite_width(&POOP_OBJECT_WIDE)
         .max(sprite_width(&POOP_OBJECT_COMPACT))
         .max(label_width("POOP"))
 }
 
 fn wide_poop_target_height() -> u16 {
-    POOP_OBJECT.len().max(POOP_OBJECT_COMPACT.len()).max(1) as u16
+    POOP_OBJECT_WIDE.len().max(POOP_OBJECT_COMPACT.len()).max(1) as u16
 }
 
 /// Applies a presentation wander offset to a hit rectangle, clamping it inside
@@ -1332,7 +1361,7 @@ fn render_pending_demands_wide(
     put_text(
         area,
         buffer,
-        64,
+        area.width.saturating_sub(42),
         area.height.saturating_sub(2),
         &line,
         palette.cell_style(SemanticTone::Tone2),
@@ -1345,16 +1374,25 @@ fn render_food_sources_wide(
     geometry: &RoomGeometry,
     palette: ResolvedPalette,
 ) {
-    for source in &geometry.food_sources {
+    let compact = area.width < 100;
+    let ultra_compact = area.width < 90;
+    for (index, source) in geometry.food_sources.iter().enumerate() {
         let x = source.rect.x.saturating_sub(area.x);
         let y = source.rect.y.saturating_sub(area.y);
-        put_sprite(area, buffer, &FOOD_BOWL, x, y, palette);
+        let bowl = if compact {
+            &FOOD_BOWL_COMPACT_WIDE
+        } else {
+            &FOOD_BOWL_WIDE
+        };
+        put_sprite(area, buffer, bowl, x, y, palette);
+        let food = FoodKind::from_id(source.food_id).expect("rendered food id is known");
+        let label = food_source_label(food, source.count, compact, index == 0, ultra_compact);
         put_text(
             area,
             buffer,
             x,
-            y.saturating_add(3),
-            &format!("FOOD {} x{}", food_label(source.food_id), source.count),
+            y.saturating_add(bowl.len().saturating_sub(1) as u16),
+            &label,
             palette.cell_style(SemanticTone::Tone3),
         );
     }
@@ -1369,13 +1407,13 @@ fn render_poops_wide(
     for (index, (_, rect)) in geometry.poops.iter().enumerate() {
         let x = rect.x.saturating_sub(area.x);
         let y = rect.y.saturating_sub(area.y);
-        put_sprite(area, buffer, &POOP_OBJECT, x, y, palette);
+        put_sprite(area, buffer, &POOP_OBJECT_WIDE, x, y, palette);
         if index == 0 {
             put_text(
                 area,
                 buffer,
                 x,
-                y.saturating_add(3),
+                y.saturating_add(POOP_OBJECT_WIDE.len().saturating_sub(1) as u16),
                 "POOP",
                 palette.cell_style(SemanticTone::Tone3),
             );
@@ -1577,33 +1615,79 @@ fn render_furniture_full_wide(
     palette: ResolvedPalette,
     ambience: RoomAmbience,
 ) {
+    render_room_backdrop(area, buffer, palette);
     let window = match ambience {
         RoomAmbience::Day => &WINDOW_FULL_DAY,
         RoomAmbience::Night => &WINDOW_FULL_NIGHT,
     };
-    // Window and curtains anchor the left wall above the desk.
-    put_sprite(area, buffer, window, 10, 1, palette);
+    let bed_x = area.width.saturating_sub(24);
+    if area.width >= 100 {
+        put_sprite(area, buffer, &DESK_FULL, 1, 1, palette);
+        put_sprite(area, buffer, window, 27, 1, palette);
+        put_sprite(area, buffer, &SHELF_FULL, 47, 1, palette);
+        put_sprite(area, buffer, &WARDROBE_FULL, 66, 1, palette);
+        put_sprite(area, buffer, &RUG_FULL, 36, 7, palette);
+        put_sprite(area, buffer, &PLANTS_FULL, 38, 8, palette);
+    } else {
+        put_sprite(area, buffer, &DESK_COMPACT_FULL, 1, 1, palette);
+        put_sprite(area, buffer, window, 18, 1, palette);
+        put_sprite(area, buffer, &SHELF_COMPACT_FULL, 38, 1, palette);
+        put_sprite(area, buffer, &WARDROBE_COMPACT_FULL, 48, 1, palette);
+        if area.width >= 90 {
+            put_sprite(area, buffer, &PLANTS_COMPACT_FULL, 48, 8, palette);
+        }
+    }
+    for x in (0..area.width).step_by(3) {
+        put(
+            area,
+            buffer,
+            x,
+            area.height.saturating_sub(4),
+            "·",
+            palette.cell_style(SemanticTone::Tone1),
+        );
+    }
+    if bed_x > 1 {
+        put_text(
+            area,
+            buffer,
+            bed_x.saturating_sub(2),
+            4,
+            "╎",
+            palette.cell_style(SemanticTone::Tone1),
+        );
+    }
+}
 
-    // Shelf, wardrobe, and desk form a readable furniture rhythm around the
-    // pet without relying on text labels to identify them.
-    put_sprite(area, buffer, &SHELF_FULL, 34, 1, palette);
-    put_sprite(area, buffer, &WARDROBE_FULL, 58, 1, palette);
-    put_sprite(area, buffer, &DESK_FULL, 1, 6, palette);
-    // A low floor line gives the roaming area a stable depth cue without
-    // introducing a clipping-prone full-width border.
-    for x in (0..area.width).step_by(4) {
+fn render_room_backdrop(area: Rect, buffer: &mut Buffer, palette: ResolvedPalette) {
+    for y in 1..area.height.saturating_sub(3) {
+        let tone = if y % 2 == 0 {
+            SemanticTone::Tone1
+        } else {
+            SemanticTone::Tone0
+        };
+        for x in (1..area.width.saturating_sub(1)).step_by(6) {
+            put(area, buffer, x, y, "·", palette.cell_style(tone));
+        }
+    }
+    for x in 0..area.width {
+        put(
+            area,
+            buffer,
+            x,
+            6,
+            "┈",
+            palette.cell_style(SemanticTone::Tone1),
+        );
         put(
             area,
             buffer,
             x,
             11,
-            "·",
+            "─",
             palette.cell_style(SemanticTone::Tone1),
         );
     }
-    put_sprite(area, buffer, &PLANTS_FULL, 3, 9, palette);
-    put_sprite(area, buffer, &PLANT_ACCENT, 22, 8, palette);
-    put_sprite(area, buffer, &RUG_FULL, 17, 7, palette);
 }
 
 /// Decorative bedroom furniture for the Full layout. Deterministic simple
@@ -1645,43 +1729,58 @@ fn need_percent(value: f32) -> u8 {
     value.clamp(0.0, 100.0).round() as u8
 }
 
-const WINDOW_FULL_DAY: [&str; 4] = [
-    "┌────────────┐",
-    "│   ☀   ·    │",
-    "│▄▄▄▄▄▄▄▄▄▄▄▄│",
-    "└────────────┘",
+const WINDOW_FULL_DAY: [&str; 5] = [
+    "╭────────────────╮",
+    "│   ║  ☀  ·  ║   │",
+    "│   ▄▄▄▄▄▄▄▄▄▄   │",
+    "│   ▀▀▀▀▀▀▀▀▀▀   │",
+    "╰────────────────╯",
 ];
 
-const WINDOW_FULL_NIGHT: [&str; 4] = [
-    "┌────────────┐",
-    "│  ·  ☾  ·   │",
-    "│  ·    ·   ·│",
-    "└────────────┘",
+const WINDOW_FULL_NIGHT: [&str; 5] = [
+    "╭────────────────╮",
+    "│   ║  ·  ☾  ║   │",
+    "│   ▄▄▄▄▄▄▄▄▄▄   │",
+    "│   ▀▀▀▀▀▀▀▀▀▀   │",
+    "╰────────────────╯",
 ];
 
-const SHELF_FULL: [&str; 3] = ["┌─┬─────┬────┐", "│▄│▄▄▄▄▄│▄▄▄▄│", "└─┴─────┴────┘"];
+const SHELF_FULL: [&str; 4] = [
+    "╭─┬─────┬─────┬──╮",
+    "│▌▐▌  ▣│▌▐▌  ▣│  │",
+    "│▌▐▌  ─┴─────┴── │",
+    "╰─┴──────────────╯",
+];
 
-const WARDROBE_FULL: [&str; 6] = [
-    "┌──────────┐",
+const WARDROBE_FULL: [&str; 7] = [
+    "╭──────────╮",
     "│┌──┐  ┌──┐│",
+    "││· │  │ ·││",
     "││  │  │  ││",
     "│└──┘  └──┘│",
-    "│┌──┐  ┌──┐│",
-    "└──────────┘",
+    "│╲╱╲╱╲╱╲╱╲ │",
+    "╰──────────╯",
 ];
 
-const DESK_FULL: [&str; 4] = [
-    "┌────────────────┐",
-    "│    ▄▄▄▄▄▄▄▄    │",
-    "│    ██████████  │",
-    "└────────────────┘",
+const DESK_FULL: [&str; 5] = [
+    "╭──────────────────────╮",
+    "│   ╭────────╮   ╱╲    │",
+    "│   │▣▣▣▣▣▣▣│  ╱  ╲    │",
+    "│   ╰────────╯   ║     │",
+    "╰──────────────────────╯",
 ];
 
-const PLANTS_FULL: [&str; 3] = ["  ▀  ", " ▀▀▀ ", "┌───┐"];
+const PLANTS_FULL: [&str; 5] = [
+    "  ╱╲   ╱╲   ",
+    " ╱██╲ ╱██╲  ",
+    "   ██   ██  ",
+    "  ╭──╮ ╭──╮ ",
+    "  ╰──╯ ╰──╯ ",
+];
 
 const WINDOW_COMPACT: [&str; 3] = ["┌──────────┐", "│▀▀▀▀▀▀▀▀▀▀│", "└──────────┘"];
 
-const PLANTS_COMPACT: [&str; 3] = PLANTS_FULL;
+const PLANTS_COMPACT: [&str; 3] = ["  ▀  ", " ▀▀▀ ", "┌───┐"];
 
 const BED_FULL: [&str; 4] = [
     "┌──────────────────┐",
@@ -1700,8 +1799,8 @@ const BED_WIDE: [&str; 7] = [
     "│ └──┤  pillow   ├──┘ │",
     "│    └───────────┘    │",
     "│  *  *  *  *  *  *   │",
-    "└──────────────────────┘",
-    "   └────── BED ─────┘   ",
+    "└─────────────────────┘",
+    "  └────── BED ──────┘  ",
 ];
 
 const BED_COMPACT_WIDE: [&str; 4] = [
@@ -1711,12 +1810,25 @@ const BED_COMPACT_WIDE: [&str; 4] = [
     "└─────── BED ──────┘",
 ];
 
-const FOOD_BOWL: [&str; 4] = ["  ○  ", " ◒◒ ", "└──┘ ", "     "];
-const FOOD_BOWL_COMPACT: [&str; 4] = [" ○ ", "◒◒ ", "└─┘ ", "    "];
-const POOP_OBJECT: [&str; 4] = ["  ~ ", "  ~ ", " (●) ", "  ╰─ "];
+const FOOD_BOWL_COMPACT: [&str; 4] = [" ○  ", "◒◒  ", "└─┘ ", "    "];
+const FOOD_BOWL_WIDE: [&str; 4] = ["  ╭──╮ ", " ╱◒◒╲  ", "│◒◒◒│  ", "╰────╯ "];
+const FOOD_BOWL_COMPACT_WIDE: [&str; 4] = [" ╭─╮ ", "╱◒╲  ", "│◒│  ", "╰─╯  "];
+const POOP_OBJECT_WIDE: [&str; 4] = ["  ╱╲   ", " ╱██╲  ", " ╲██╱  ", "  ╰╯   "];
 const POOP_OBJECT_COMPACT: [&str; 4] = [" ~ ", "(●)", "╰─ ", "   "];
-const PLANT_ACCENT: [&str; 4] = ["  ▄  ", " ▄█▄ ", "  █  ", " ▄▄▄ "];
-const RUG_FULL: [&str; 3] = ["╭────────╮", "│· · · · │", "╰────────╯"];
+const SHELF_COMPACT_FULL: [&str; 3] = ["╭───────╮", "│▌▐▌ ▣  │", "╰───────╯"];
+const WARDROBE_COMPACT_FULL: [&str; 3] = ["╭──────╮", "││· · ││", "╰──────╯"];
+const DESK_COMPACT_FULL: [&str; 4] = [
+    "╭──────────────╮",
+    "│ ╭──╮  ╱╲     │",
+    "│ ╰──╯  ║      │",
+    "╰──────────────╯",
+];
+const PLANTS_COMPACT_FULL: [&str; 4] = ["  ╱╲  ╱╲ ", " ╱██╲╱██╲", " ╭─╮ ╭─╮ ", " ╰─╯ ╰─╯ "];
+const RUG_FULL: [&str; 3] = [
+    "╭────────────────╮",
+    "│· · · · · · · · │",
+    "╰────────────────╯",
+];
 
 #[cfg(test)]
 mod tests {
@@ -1733,25 +1845,37 @@ mod tests {
     /// sleep face) corrupts the rendered glyph alignment.
     #[test]
     fn every_sprite_has_consistent_row_widths() {
-        let sprites: &[&[&str]] = &[
-            &BED_FULL,
-            &BED_COMPACT,
-            &WINDOW_FULL_DAY,
-            &WINDOW_FULL_NIGHT,
-            &SHELF_FULL,
-            &WARDROBE_FULL,
-            &DESK_FULL,
-            &PLANTS_FULL,
-            &WINDOW_COMPACT,
-            &PLANTS_COMPACT,
+        let sprites: &[(&str, &[&str])] = &[
+            ("BED_FULL", &BED_FULL),
+            ("BED_COMPACT", &BED_COMPACT),
+            ("BED_WIDE", &BED_WIDE),
+            ("BED_COMPACT_WIDE", &BED_COMPACT_WIDE),
+            ("WINDOW_FULL_DAY", &WINDOW_FULL_DAY),
+            ("WINDOW_FULL_NIGHT", &WINDOW_FULL_NIGHT),
+            ("SHELF_FULL", &SHELF_FULL),
+            ("SHELF_COMPACT_FULL", &SHELF_COMPACT_FULL),
+            ("WARDROBE_FULL", &WARDROBE_FULL),
+            ("WARDROBE_COMPACT_FULL", &WARDROBE_COMPACT_FULL),
+            ("DESK_FULL", &DESK_FULL),
+            ("DESK_COMPACT_FULL", &DESK_COMPACT_FULL),
+            ("PLANTS_FULL", &PLANTS_FULL),
+            ("PLANTS_COMPACT_FULL", &PLANTS_COMPACT_FULL),
+            ("WINDOW_COMPACT", &WINDOW_COMPACT),
+            ("PLANTS_COMPACT", &PLANTS_COMPACT),
+            ("FOOD_BOWL_COMPACT", &FOOD_BOWL_COMPACT),
+            ("FOOD_BOWL_WIDE", &FOOD_BOWL_WIDE),
+            ("FOOD_BOWL_COMPACT_WIDE", &FOOD_BOWL_COMPACT_WIDE),
+            ("POOP_OBJECT_WIDE", &POOP_OBJECT_WIDE),
+            ("POOP_OBJECT_COMPACT", &POOP_OBJECT_COMPACT),
+            ("RUG_FULL", &RUG_FULL),
         ];
-        for sprite in sprites {
+        for (name, sprite) in sprites {
             let width = sprite[0].chars().count();
             for (index, row) in sprite.iter().enumerate() {
                 assert_eq!(
                     row.chars().count(),
                     width,
-                    "sprite row {index} has a different width than row 0"
+                    "{name} row {index} has a different width than row 0"
                 );
             }
         }
@@ -1766,7 +1890,7 @@ mod tests {
         let pet = Pet::with_inventory(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, now, inventory);
         let snapshot =
             PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot();
-        let sources = wide_food_sources(Rect::new(0, 0, 120, 14), &snapshot, 32, 8, false);
+        let sources = wide_food_sources(Rect::new(0, 0, 120, 14), &snapshot, 32, 8, false, false);
 
         assert_eq!(sources.len(), 2);
         assert_eq!(

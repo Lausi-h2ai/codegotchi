@@ -933,7 +933,7 @@ fn rendered_food_and_poop_edges_dispatch_care_requests() {
         let geometry = room_geometry_with_frame(room, &snapshot, &default_frame());
         let food = geometry.food_sources.first().expect("starter food source");
         let food_label_width = if room.height >= 14 {
-            format!("FOOD KIB x{}", food.count).chars().count()
+            format!("KIB x{}", food.count).chars().count()
         } else {
             format!("FOOD x{}", food.count).chars().count()
         };

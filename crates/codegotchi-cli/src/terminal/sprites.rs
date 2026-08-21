@@ -308,9 +308,9 @@ const PET_YAWN: [&str; 14] = [
     " ##  oo  oo  ##   ",
     " ##  ..  ..  ##   ",
     "##......##......##",
-    "##....####......##",
+    "##....####..oo..##",
     "##...######.....##",
-    " ##..########..## ",
+    " ##..###oo###..## ",
     "  ##.########.##  ",
     "  ##############  ",
     "    ####  ####    ",
@@ -436,7 +436,9 @@ const PET_YAWN_C: [&str; 6] = [
     "       ", " ##### ", "# ## ##", "# ## ##", " ##  ##", "   ##  ",
 ];
 
-const PET_CURIOUS_C: [&str; 6] = PET_IDLE_C;
+const PET_CURIOUS_C: [&str; 6] = [
+    "  # #  ", " ##### ", "# oo ##", "#  . .#", " ##### ", "  # #  ",
+];
 
 const PET_HAPPY_C: [&str; 6] = [
     "       ", "#######", "# ## ##", "# ## ##", " ##### ", "       ",
@@ -537,11 +539,27 @@ mod tests {
 
     #[test]
     fn full_poses_change_their_load_bearing_face_or_body_details() {
-        assert_ne!(pet_sprite(PetPose::Idle), pet_sprite(PetPose::Blink));
-        assert_ne!(pet_sprite(PetPose::WalkA), pet_sprite(PetPose::WalkB));
-        assert_ne!(pet_sprite(PetPose::Happy), pet_sprite(PetPose::Upset));
-        assert_ne!(pet_sprite(PetPose::Eating), pet_sprite(PetPose::Petted));
-        assert_ne!(pet_sprite(PetPose::Doze), pet_sprite(PetPose::Sleep));
+        for (index, first) in ALL_POSES.iter().enumerate() {
+            for second in ALL_POSES.iter().skip(index + 1) {
+                assert_ne!(
+                    pet_sprite(*first),
+                    pet_sprite(*second),
+                    "{first:?} and {second:?} must not share one Full pose"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn compact_yawn_and_curious_poses_are_not_idle_copies() {
+        assert_ne!(
+            pet_sprite_compact(PetPose::Yawn),
+            pet_sprite_compact(PetPose::Idle)
+        );
+        assert_ne!(
+            pet_sprite_compact(PetPose::Curious),
+            pet_sprite_compact(PetPose::Idle)
+        );
     }
 
     #[test]
@@ -556,19 +574,18 @@ mod tests {
                     .collect()
             })
             .collect();
-        let occupied = packed
-            .iter()
-            .flat_map(|row| row.chars())
-            .filter(|ch| !matches!(ch, ' '))
-            .count();
-        assert!(
-            occupied >= 50,
-            "round Full mascot is too hollow: {packed:?}"
-        );
-        assert!(
-            packed
-                .iter()
-                .any(|row| row.contains("▀") || row.contains("▄"))
+        assert_eq!(
+            packed,
+            vec![
+                "     ▄██▄  ▄██▄   ".to_owned(),
+                "  ▄████████████▄  ".to_owned(),
+                " ██  █▀  █▀  ██   ".to_owned(),
+                "██▀ ▀ █▄██▀ ▀ ▀ ██".to_owned(),
+                "▀██ ▀██████▄█▄▀▄█▀".to_owned(),
+                "  ███████████▄██  ".to_owned(),
+                "    ▀▀▀▀  ▀▀▀▀    ".to_owned(),
+            ],
+            "Full idle packed output changed without updating the visual contract"
         );
     }
 
