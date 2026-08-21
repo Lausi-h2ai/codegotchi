@@ -1234,6 +1234,12 @@ fn spawn_browser_command(program: &Path, arguments: &[OsString]) -> Result<Child
 }
 
 fn launch_native_browser(url: &str) -> Result<Child, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let (program, arguments) = native_browser_command(url);
+        return spawn_browser_command(&program, &arguments);
+    }
+
     #[cfg(target_os = "linux")]
     {
         for (program, arguments) in [
@@ -1257,6 +1263,17 @@ fn launch_native_browser(url: &str) -> Result<Child, String> {
         }
     }
     Err(String::from("no supported browser launcher was available"))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn launch_native_browser(url: &str) -> Result<Child, String> {
+    let _ = url;
+    Err(String::from("no supported browser launcher was available"))
+}
+
+#[cfg(target_os = "macos")]
+fn native_browser_command(url: &str) -> (PathBuf, Vec<OsString>) {
+    (PathBuf::from("/usr/bin/open"), vec![OsString::from(url)])
 }
 
 async fn reap_browser(mut child: Child, url: String) {
@@ -1887,5 +1904,15 @@ mod tests {
             )),
             143
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_selects_open_with_the_exact_url_argument() {
+        let url = "http://127.0.0.1:4173/#token=test";
+        let (program, arguments) = super::native_browser_command(url);
+
+        assert_eq!(program, PathBuf::from("/usr/bin/open"));
+        assert_eq!(arguments, vec![OsString::from(url)]);
     }
 }

@@ -394,7 +394,7 @@ struct OuterPtySizeGuard {
 impl OuterPtySizeGuard {
     fn capture() -> Self {
         let output = std::process::Command::new("stty")
-            .args(["-F", "/dev/tty", "size"])
+            .args(stty_tty_arguments(&["size".to_owned()]))
             .output()
             .expect("read outer PTY size");
         assert!(output.status.success(), "stty size should succeed");
@@ -419,14 +419,12 @@ impl OuterPtySizeGuard {
 
     fn restore(&mut self) {
         let status = std::process::Command::new("stty")
-            .args([
-                "-F",
-                "/dev/tty",
-                "rows",
-                &self.rows.to_string(),
-                "cols",
-                &self.columns.to_string(),
-            ])
+            .args(stty_tty_arguments(&[
+                "rows".to_owned(),
+                self.rows.to_string(),
+                "cols".to_owned(),
+                self.columns.to_string(),
+            ]))
             .status()
             .expect("restore outer PTY size");
         assert!(status.success(), "stty should restore outer PTY size");
@@ -438,20 +436,29 @@ impl Drop for OuterPtySizeGuard {
     fn drop(&mut self) {
         if !self.restored {
             let _ = std::process::Command::new("stty")
-                .args([
-                    "-F",
-                    "/dev/tty",
-                    "rows",
-                    &self.rows.to_string(),
-                    "cols",
-                    &self.columns.to_string(),
-                ])
+                .args(stty_tty_arguments(&[
+                    "rows".to_owned(),
+                    self.rows.to_string(),
+                    "cols".to_owned(),
+                    self.columns.to_string(),
+                ]))
                 .status();
         }
     }
 }
 
 struct OuterPtyResizeTask(Option<tokio::task::JoinHandle<bool>>);
+
+fn stty_tty_arguments(arguments: &[String]) -> Vec<String> {
+    let device_flag = if cfg!(target_os = "macos") {
+        "-f"
+    } else {
+        "-F"
+    };
+    let mut all = vec![device_flag.to_owned(), "/dev/tty".to_owned()];
+    all.extend(arguments.iter().cloned());
+    all
+}
 
 impl OuterPtyResizeTask {
     fn new(handle: tokio::task::JoinHandle<bool>) -> Self {
@@ -650,7 +657,12 @@ async fn composed_session_adapter_delivers_exact_invocation_modes_input_and_stat
     let resize_task = OuterPtyResizeTask::new(tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(450)).await;
         let result = std::process::Command::new("stty")
-            .args(["-F", "/dev/tty", "rows", "31", "cols", "120"])
+            .args(stty_tty_arguments(&[
+                "rows".to_owned(),
+                "31".to_owned(),
+                "cols".to_owned(),
+                "120".to_owned(),
+            ]))
             .status();
         sender
             .send(TerminalSessionSignal::WindowChange)

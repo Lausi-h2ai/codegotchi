@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
     target_os = "android",
     target_os = "freebsd",
     target_os = "haiku",
+    target_os = "macos",
     all(target_os = "linux", not(target_env = "uclibc")),
 ))]
 use nix::sys::wait::{Id, WaitPidFlag, WaitStatus, waitid};
@@ -215,6 +216,7 @@ impl ProcessGroupState {
             target_os = "android",
             target_os = "freebsd",
             target_os = "haiku",
+            target_os = "macos",
             all(target_os = "linux", not(target_env = "uclibc")),
         )))]
         {
@@ -445,6 +447,7 @@ impl PtyCodexChild {
         target_os = "android",
         target_os = "freebsd",
         target_os = "haiku",
+        target_os = "macos",
         all(target_os = "linux", not(target_env = "uclibc")),
     ))]
     fn observe_exit_before_reap(&mut self, blocking: bool) -> Result<bool, PtyCodexError> {
@@ -477,14 +480,10 @@ impl PtyCodexChild {
         target_os = "android",
         target_os = "freebsd",
         target_os = "haiku",
+        target_os = "macos",
         all(target_os = "linux", not(target_env = "uclibc")),
     )))]
     fn observe_exit_before_reap(&mut self, _blocking: bool) -> Result<bool, PtyCodexError> {
-        // Keep this fallback deliberately disarmed. In particular, nix 0.31
-        // exposes the WNOWAIT flag on Apple targets but not its safe waitid
-        // wrapper there, so a post-reap PGID signal would be stale. Apple
-        // natural-leader descendant cleanup remains deferred until a pinned
-        // safe pre-reap observation API is selected.
         Ok(true)
     }
 
@@ -713,6 +712,7 @@ mod tests {
             target_os = "android",
             target_os = "freebsd",
             target_os = "haiku",
+            target_os = "macos",
             all(target_os = "linux", not(target_env = "uclibc")),
         ))]
         assert_eq!(state.identity(), Some(42));
@@ -720,6 +720,7 @@ mod tests {
             target_os = "android",
             target_os = "freebsd",
             target_os = "haiku",
+            target_os = "macos",
             all(target_os = "linux", not(target_env = "uclibc")),
         )))]
         assert_eq!(state.identity(), None);
@@ -727,6 +728,7 @@ mod tests {
             target_os = "android",
             target_os = "freebsd",
             target_os = "haiku",
+            target_os = "macos",
             all(target_os = "linux", not(target_env = "uclibc")),
         ))]
         assert_eq!(state.take_for_descendant_cleanup(), Some(42));
@@ -734,6 +736,7 @@ mod tests {
             target_os = "android",
             target_os = "freebsd",
             target_os = "haiku",
+            target_os = "macos",
             all(target_os = "linux", not(target_env = "uclibc")),
         )))]
         assert_eq!(state.take_for_descendant_cleanup(), None);

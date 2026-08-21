@@ -52,6 +52,12 @@ jobs:
             - name: Run Rust workspace tests
               run: cargo test --workspace
 
+            - name: Run the macOS outer PTY smoke
+              run: |
+                script -q /dev/null cargo test -p codegotchi-cli --test terminal_session \
+                  composed_session_adapter_delivers_exact_invocation_modes_input_and_status \
+                  -- --ignored --nocapture
+
     web:
         name: Web checks
         runs-on: ubuntu-latest
