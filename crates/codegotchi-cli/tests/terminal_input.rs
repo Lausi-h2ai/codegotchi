@@ -886,7 +886,10 @@ fn second_left_press_over_empty_space_cancels_without_restart() {
 fn overlapping_pet_and_food_hit_regions_prioritize_the_pet() {
     let snapshot = base_snapshot();
     let room = Rect::new(0, 0, 120, 14);
-    let frame = default_frame();
+    let frame = PresentationFrame {
+        offset: (-60, 5),
+        ..default_frame()
+    };
     let geometry = room_geometry_with_frame(room, &snapshot, &frame);
     let source = geometry
         .food_sources

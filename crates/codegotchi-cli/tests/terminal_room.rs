@@ -304,18 +304,66 @@ fn full_room_renders_decorative_furniture() {
     let mut buffer = Buffer::filled(full, Cell::new(" "));
     render_room(full, &mut buffer, &snapshot, &default_frame(), None);
     let text = buffer_text(&buffer, full.width, full.height);
-    for (glyph, name) in [
-        ("┌────────────┐", "window"),
-        ("┌─┬─────┬────┐", "shelf"),
-        ("┌──────────┐", "wardrobe"),
-        ("┌────────────────┐", "desk"),
-        ("┌───┐", "plants"),
-    ] {
-        assert!(
-            text.contains(glyph),
-            "Full room missing {name} furniture ({glyph})"
-        );
+    let regions = [
+        (Rect::new(2, 1, 20, 6), "window"),
+        (Rect::new(34, 1, 22, 5), "shelf"),
+        (Rect::new(58, 1, 20, 8), "wardrobe"),
+        (Rect::new(1, 6, 28, 6), "desk"),
+        (Rect::new(1, 9, 16, 4), "plants"),
+        (Rect::new(98, 5, 21, 8), "bed"),
+    ];
+    for (region, name) in regions {
+        let occupied = (region.x..region.right())
+            .flat_map(|x| (region.y..region.bottom()).map(move |y| (x, y)))
+            .filter(|&(x, y)| buffer.cell((x, y)).is_some_and(|cell| cell.symbol() != " "))
+            .count();
+        assert!(occupied > 4, "Full room missing layered {name} region");
     }
+    assert!(!text.contains("WINDOW"));
+    assert!(!text.contains("SHELF"));
+    assert!(!text.contains("DESK"));
+    assert!(!text.contains("PET"));
+}
+
+#[test]
+fn full_mascot_and_care_targets_have_release_geometry() {
+    let snapshot = base_snapshot(Utc::now());
+    let area = Rect::new(0, 0, 120, 14);
+    let geometry = codegotchi_cli::terminal::room_geometry(area, &snapshot);
+    assert!((6..=7).contains(&geometry.pet.height));
+    assert!(geometry.pet.width >= 16);
+    let bed = geometry.bed.expect("Full always has a bed");
+    assert!(bed.right() < area.right(), "bed needs a right-edge margin");
+    for source in &geometry.food_sources {
+        assert!(!rects_overlap(geometry.pet, source.rect));
+    }
+
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let pet_pixels = (geometry.pet.x..geometry.pet.right())
+        .flat_map(|x| (geometry.pet.y..geometry.pet.bottom()).map(move |y| (x, y)))
+        .filter(|&(x, y)| buffer.cell((x, y)).is_some_and(|cell| cell.symbol() != " "))
+        .count();
+    assert!(
+        pet_pixels >= 30,
+        "Full mascot is still a hollow placeholder"
+    );
+    assert!(
+        geometry.food_sources.iter().all(|source| {
+            (source.rect.x..source.rect.right()).any(|x| {
+                (source.rect.y..source.rect.bottom())
+                    .any(|y| buffer.cell((x, y)).is_some_and(|cell| cell.symbol() != " "))
+            })
+        }),
+        "stocked food must render as physical objects"
+    );
+}
+
+fn rects_overlap(first: Rect, second: Rect) -> bool {
+    first.x < second.right()
+        && second.x < first.right()
+        && first.y < second.bottom()
+        && second.y < first.bottom()
 }
 
 /// Compact keeps at least a window and a plant; decoration disappears before
@@ -857,12 +905,13 @@ fn wide_room_keeps_named_targets_and_minimal_keeps_a_pet_mark() {
     let mut full_buffer = Buffer::filled(full, Cell::new(" "));
     render_room(full, &mut full_buffer, &snapshot, &default_frame(), None);
     let full_text = buffer_text(&full_buffer, full.width, full.height);
-    for marker in ["PET", "FOOD", "BED", "POOP"] {
+    for marker in ["FOOD", "BED", "POOP"] {
         assert!(
             full_text.contains(marker),
             "wide Full affordance missing {marker}: {full_text}"
         );
     }
+    assert!(!full_text.contains("PET"));
 
     let compact = Rect::new(0, 0, 120, 7);
     let mut compact_buffer = Buffer::filled(compact, Cell::new(" "));

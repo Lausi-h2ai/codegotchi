@@ -241,16 +241,27 @@ fn room_mode(height: u16) -> RoomMode {
 
 fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) -> RoomGeometry {
     if area.width >= 80 {
+        let bed_x = area.width.saturating_sub(24);
+        let pet_x = bed_x.saturating_sub(26);
         let pet = offset_rect(
-            Rect::new(area.x.saturating_add(50), area.y.saturating_add(4), 12, 6),
+            Rect::new(
+                area.x.saturating_add(pet_x),
+                area.y.saturating_add(4),
+                18,
+                7,
+            ),
             offset,
             area,
         );
-        let bed = Rect::new(area.x.saturating_add(97), area.y.saturating_add(5), 23, 7);
-        let food_sources = wide_food_sources(area, snapshot, 32, 8, false);
-        let poop_x = poop_anchor_after_food(area, &food_sources, 82);
-        // Keep the three five-cell poop slots in the upper-right gutter; the
-        // floor row has no room between the widened food labels and the bed.
+        let bed = Rect::new(
+            area.x.saturating_add(bed_x),
+            area.y.saturating_add(5),
+            23,
+            7,
+        );
+        let food_x = 2.min(area.width.saturating_sub(52));
+        let food_sources = wide_food_sources(area, snapshot, food_x, 9, false);
+        let poop_x = bed_x.saturating_sub(7).max(pet_x.saturating_add(19));
         let poops = wide_poop_slots(area, snapshot, poop_x, 1, 3, 5);
         return RoomGeometry {
             pet,
@@ -260,13 +271,13 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
             minimal: false,
         };
     }
-    let pet_x = area.width.saturating_sub(52).max(2);
+    let pet_x = area.width.saturating_sub(34).max(2);
     let pet = offset_rect(
         Rect::new(
             area.x.saturating_add(pet_x),
-            area.y.saturating_add(4),
-            (area.width.saturating_sub(pet_x)).min(14),
-            6,
+            area.y.saturating_add(3),
+            (area.width.saturating_sub(pet_x)).min(18),
+            7,
         ),
         offset,
         area,
@@ -274,15 +285,15 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
     // Keep the compact fixture's legacy 40-column bed anchor while leaving
     // enough right margin in the production-width room for the whole sprite.
     let bed_x = if area.width <= 64 {
-        area.width.saturating_sub(16).max(4)
+        area.width.saturating_sub(20).max(4)
     } else {
         area.width.saturating_sub(28).max(4)
     };
     let bed = Rect::new(
         area.x.saturating_add(bed_x),
         area.y.saturating_add(8),
-        (area.width.saturating_sub(bed_x)).min(12),
-        4,
+        (area.width.saturating_sub(bed_x)).min(20),
+        5,
     );
     let food_sources = food_sources(area, snapshot, 2, 11, 15, 16);
     let poops = poop_slots(area, snapshot, 16, 12, 3);
@@ -959,14 +970,14 @@ fn render_full_wide(
                 area,
                 buffer,
                 pet_sprite(PetPose::Sleep),
-                bed_x.saturating_add(6),
-                bed_y.saturating_add(1),
+                bed_x.saturating_add(2),
+                bed_y,
                 palette,
             );
             put_text(
                 area,
                 buffer,
-                bed_x.saturating_add(9),
+                bed_x.saturating_add(7),
                 bed_y.saturating_sub(1),
                 "z z z",
                 palette.cell_style(SemanticTone::Tone2),
@@ -989,7 +1000,7 @@ fn render_full_wide(
             put_text(
                 area,
                 buffer,
-                pet_x.saturating_add(9),
+                pet_x.saturating_add(13),
                 pet_y.saturating_sub(1),
                 "z",
                 palette.cell_style(SemanticTone::Tone2),
@@ -997,14 +1008,6 @@ fn render_full_wide(
         } else {
             draw_sprite_with_palette(area, buffer, pet_sprite(frame.pose), pet_x, pet_y, palette);
         }
-        put_text(
-            area,
-            buffer,
-            pet_x.saturating_add(3),
-            pet_y.saturating_add(5),
-            "PET",
-            palette.cell_style(SemanticTone::Tone2),
-        );
     }
 
     render_food_sources_wide(area, buffer, geometry, palette);
@@ -1324,12 +1327,12 @@ fn render_pending_demands_wide(
         line.push_str(&format!("  Snack x{snack}"));
     }
     if affection == 0 && snack == 0 {
-        line.push_str("  PET when the heart appears");
+        line.push_str("  heart cue ready");
     }
     put_text(
         area,
         buffer,
-        42,
+        64,
         area.height.saturating_sub(2),
         &line,
         palette.cell_style(SemanticTone::Tone2),
@@ -1578,42 +1581,14 @@ fn render_furniture_full_wide(
         RoomAmbience::Day => &WINDOW_FULL_DAY,
         RoomAmbience::Night => &WINDOW_FULL_NIGHT,
     };
-    // Window + curtains on the left wall.
-    put_sprite(area, buffer, window, 22, 1, palette);
-    put_text(
-        area,
-        buffer,
-        20,
-        5,
-        "WINDOW",
-        palette.cell_style(SemanticTone::Tone2),
-    );
+    // Window and curtains anchor the left wall above the desk.
+    put_sprite(area, buffer, window, 10, 1, palette);
 
-    // Shelf with books and a plant above the desk.
-    put_sprite(area, buffer, &SHELF_FULL, 40, 1, palette);
-    put_text(
-        area,
-        buffer,
-        41,
-        5,
-        "SHELF",
-        palette.cell_style(SemanticTone::Tone2),
-    );
-
-    // Wardrobe forms the room's tall center-right anchor.
-    put_sprite(area, buffer, &WARDROBE_FULL, 62, 2, palette);
-
-    // The desk remains left of the pet, with the original recognizable laptop
-    // silhouette retained for the textual renderer contract.
-    put_sprite(area, buffer, &DESK_FULL, 2, 6, palette);
-    put_text(
-        area,
-        buffer,
-        4,
-        10,
-        "DESK",
-        palette.cell_style(SemanticTone::Tone2),
-    );
+    // Shelf, wardrobe, and desk form a readable furniture rhythm around the
+    // pet without relying on text labels to identify them.
+    put_sprite(area, buffer, &SHELF_FULL, 34, 1, palette);
+    put_sprite(area, buffer, &WARDROBE_FULL, 58, 1, palette);
+    put_sprite(area, buffer, &DESK_FULL, 1, 6, palette);
     // A low floor line gives the roaming area a stable depth cue without
     // introducing a clipping-prone full-width border.
     for x in (0..area.width).step_by(4) {
@@ -1626,12 +1601,13 @@ fn render_furniture_full_wide(
             palette.cell_style(SemanticTone::Tone1),
         );
     }
-    put_sprite(area, buffer, &PLANTS_FULL, 2, 9, palette);
-    put_sprite(area, buffer, &PLANT_ACCENT, 14, 8, palette);
+    put_sprite(area, buffer, &PLANTS_FULL, 3, 9, palette);
+    put_sprite(area, buffer, &PLANT_ACCENT, 22, 8, palette);
+    put_sprite(area, buffer, &RUG_FULL, 17, 7, palette);
 }
 
 /// Decorative bedroom furniture for the Full layout. Deterministic simple
-/// silhouettes; VISUAL_FIDELITY_UNVERIFIED. Placement deliberately avoids the
+/// silhouettes. Placement deliberately avoids the
 /// status bars, pet home, bed, food tray, and poop slots.
 fn render_furniture_full(
     area: Rect,
@@ -1708,10 +1684,10 @@ const WINDOW_COMPACT: [&str; 3] = ["┌──────────┐", "│�
 const PLANTS_COMPACT: [&str; 3] = PLANTS_FULL;
 
 const BED_FULL: [&str; 4] = [
-    "┌──────────┐",
-    "│▄▄▄▄▄▄▄▄▄▄│",
-    "│▀▀▀▀▀▀▀▀▀▀│",
-    "└──────────┘",
+    "┌──────────────────┐",
+    "│▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄│",
+    "│▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│",
+    "└──────────────────┘",
 ];
 
 const BED_COMPACT: [&str; 2] = ["┌────────┐", "└────────┘"];
@@ -1740,6 +1716,7 @@ const FOOD_BOWL_COMPACT: [&str; 4] = [" ○ ", "◒◒ ", "└─┘ ", "    "];
 const POOP_OBJECT: [&str; 4] = ["  ~ ", "  ~ ", " (●) ", "  ╰─ "];
 const POOP_OBJECT_COMPACT: [&str; 4] = [" ~ ", "(●)", "╰─ ", "   "];
 const PLANT_ACCENT: [&str; 4] = ["  ▄  ", " ▄█▄ ", "  █  ", " ▄▄▄ "];
+const RUG_FULL: [&str; 3] = ["╭────────╮", "│· · · · │", "╰────────╯"];
 
 #[cfg(test)]
 mod tests {

@@ -136,11 +136,9 @@ fn packed_cell_with_palette(
     }
 }
 
-/// The Full pet sprite for a pose: 10 logical columns x 10 logical rows,
-/// packed into 5 terminal rows. The art is the round, blocky CodeGotchi
-/// silhouette (big head, two square eyes, small mouth, alternating feet);
-/// `VISUAL_FIDELITY_UNVERIFIED`: it is authored as logical-pixel grids and
-/// packed with half-blocks, and still needs the later vision pass.
+/// The Full pet sprite for a pose: 18 logical columns x 14 logical rows,
+/// packed into 7 terminal rows. Every pose shares this canvas so the pet
+/// remains a large, stable focal target while its expression changes.
 #[must_use]
 pub fn pet_sprite(pose: PetPose) -> &'static [&'static str] {
     match pose {
@@ -181,167 +179,227 @@ pub fn pet_sprite_compact(pose: PetPose) -> &'static [&'static str] {
     }
 }
 
-// Full sprites: 10 logical rows (5 terminal rows) x 10 logical columns.
-// Each terminal row packs two logical pixels: '#' foreground on both halves
-// renders as '█', top-only as '▀', bottom-only as '▄', and ' ' (Tone0)
-// renders as the room background.
+// Full sprites: 14 logical rows (7 terminal rows) x 18 logical columns.
 
-const PET_IDLE: [&str; 10] = [
-    "   ## ##  ",
-    "  ######  ",
-    " #  oo  # ",
-    " #  ..   #",
-    " #       #",
-    " #  oo   #",
-    " #      # ",
-    " ######## ",
-    "  ##  ##  ",
-    "          ",
+const PET_IDLE: [&str; 14] = [
+    "      ##    ##    ",
+    "     ####  ####   ",
+    "   ############   ",
+    "  ##############  ",
+    " ##  oo  oo  ##   ",
+    " ##  ..  ..  ##   ",
+    "##......##......##",
+    "##....####......##",
+    "##...######.....##",
+    " ##..########..## ",
+    "  ##.########.##  ",
+    "  ##############  ",
+    "    ####  ####    ",
+    "                  ",
 ];
 
-const PET_BLINK: [&str; 10] = [
-    "          ",
-    "  ######  ",
-    " #  ## ## ",
-    " #       #",
-    " #       #",
-    " #  ##   #",
-    " #      # ",
-    " ######## ",
-    "  ######  ",
-    "          ",
+const PET_BLINK: [&str; 14] = [
+    "      ##    ##    ",
+    "     ####  ####   ",
+    "   ############   ",
+    "  ##############  ",
+    " ##  ..  ..  ##   ",
+    " ##  ..  ..  ##   ",
+    "##......##......##",
+    "##....####......##",
+    "##...######.....##",
+    " ##..########..## ",
+    "  ##.########.##  ",
+    "  ##############  ",
+    "    ####  ####    ",
+    "                  ",
 ];
 
-const PET_WALK_A: [&str; 10] = [
-    "          ",
-    "  ######  ",
-    " #  ## ## ",
-    " #  ## ## ",
-    " #       #",
-    " #  ##   #",
-    " #      # ",
-    " ######## ",
-    " #  ##  # ",
-    "          ",
+const PET_WALK_A: [&str; 14] = [
+    "      ##    ##    ",
+    "     ####  ####   ",
+    "   ############   ",
+    "  ##############  ",
+    " ##  oo  oo  ##   ",
+    " ##  ..  ..  ##   ",
+    "##......##......##",
+    "##....####......##",
+    "##...######.....##",
+    " ##..########..## ",
+    "  ##.########.##  ",
+    "  ##############  ",
+    "   ####    ####   ",
+    "      ##  ##      ",
 ];
 
-const PET_WALK_B: [&str; 10] = [
-    "          ",
-    "  ######  ",
-    " #  ## ## ",
-    " #  ## ## ",
-    " #       #",
-    " #  ##   #",
-    " #      # ",
-    " ######## ",
-    "#  ##  #  ",
-    "          ",
+const PET_WALK_B: [&str; 14] = [
+    "      ##    ##    ",
+    "     ####  ####   ",
+    "   ############   ",
+    "  ##############  ",
+    " ##  oo  oo  ##   ",
+    " ##  ..  ..  ##   ",
+    "##......##......##",
+    "##....####......##",
+    "##...######.....##",
+    " ##..########..## ",
+    "  ##.########.##  ",
+    "  ##############  ",
+    "   ####    ####   ",
+    "    ##  ##        ",
 ];
 
-const PET_SIT: [&str; 10] = [
-    "          ",
-    "  ######  ",
-    " #  ## ## ",
-    " #  ## ## ",
-    " #       #",
-    " #  ##   #",
-    " #      # ",
-    " ######## ",
-    "  ####    ",
-    "  ####    ",
+const PET_SIT: [&str; 14] = [
+    "      ##    ##    ",
+    "     ####  ####   ",
+    "   ############   ",
+    "  ##############  ",
+    " ##  oo  oo  ##   ",
+    " ##  ..  ..  ##   ",
+    "##......##......##",
+    "##....####......##",
+    "##...######.....##",
+    " ##..########..## ",
+    "  ##.########.##  ",
+    "  ##############  ",
+    "   ############   ",
+    "   ############   ",
 ];
 
-const PET_DOZE: [&str; 10] = [
-    "          ",
-    "          ",
-    "  ..      ",
-    " ####     ",
-    "## o ###  ",
-    "########  ",
-    " ######## ",
-    "  ######  ",
-    "    ##    ",
-    "          ",
+const PET_DOZE: [&str; 14] = [
+    "                  ",
+    "                  ",
+    "       ##         ",
+    "     ######       ",
+    "   ##  oo  ###    ",
+    "  ##   ..   ####  ",
+    " ##    ##     ### ",
+    "##################",
+    " #################",
+    "  ############### ",
+    "   #############  ",
+    "     #########    ",
+    "       ######     ",
+    "                  ",
 ];
 
-const PET_SLEEP: [&str; 10] = [
-    "          ",
-    "  ##  ##  ",
-    " ######## ",
-    " ## .. ## ",
-    " ######## ",
-    "  ########",
-    " ######## ",
-    "  ######  ",
-    "          ",
-    "          ",
+const PET_SLEEP: [&str; 14] = [
+    "                  ",
+    "      ##    ##    ",
+    "    ##########    ",
+    "   ############   ",
+    "  ##  ..  ..  ##  ",
+    "  ##   ####   ##  ",
+    "##################",
+    "##  oooooooo  ##  ",
+    "##  ##########  ##",
+    "##  ##############",
+    " ################ ",
+    "  ##############  ",
+    "                  ",
+    "                  ",
 ];
 
-const PET_YAWN: [&str; 10] = [
-    "          ",
-    "  ######  ",
-    " #  ## ## ",
-    " #  ## ## ",
-    " ###  ### ",
-    " #  ##  # ",
-    " #      # ",
-    " ######## ",
-    "  ######  ",
-    "          ",
+const PET_YAWN: [&str; 14] = [
+    "      ##    ##    ",
+    "     ####  ####   ",
+    "   ############   ",
+    "  ##############  ",
+    " ##  oo  oo  ##   ",
+    " ##  ..  ..  ##   ",
+    "##......##......##",
+    "##....####......##",
+    "##...######.....##",
+    " ##..########..## ",
+    "  ##.########.##  ",
+    "  ##############  ",
+    "    ####  ####    ",
+    "                  ",
 ];
 
-const PET_CURIOUS: [&str; 10] = PET_IDLE;
-
-const PET_HAPPY: [&str; 10] = [
-    "          ",
-    " ######## ",
-    " #  ## ## ",
-    " #  ## ## ",
-    " #       #",
-    " #  ##   #",
-    " #      # ",
-    " ######## ",
-    "  ######  ",
-    "          ",
+const PET_CURIOUS: [&str; 14] = [
+    "      ##    ##    ",
+    "     ####  ####   ",
+    "   ############   ",
+    "  ##############  ",
+    " ##  oo   oo ##   ",
+    " ##  ..   .. ##   ",
+    "##......##......##",
+    "##....####......##",
+    "##...######.....##",
+    " ##..########..## ",
+    "  ##.########.##  ",
+    "  ##############  ",
+    "    ####  ####    ",
+    "                  ",
 ];
 
-const PET_UPSET: [&str; 10] = [
-    "          ",
-    "  ######  ",
-    " #  ## ## ",
-    " #  ## ## ",
-    " #      # ",
-    " #  ##  # ",
-    " #      # ",
-    " ######## ",
-    "  ######  ",
-    "          ",
+const PET_HAPPY: [&str; 14] = [
+    "      ##    ##    ",
+    "     ####  ####   ",
+    "   ############   ",
+    "  ##############  ",
+    " ##  oo  oo  ##   ",
+    " ##  ..  ..  ##   ",
+    "##......##......##",
+    "##....######....##",
+    "##...########...##",
+    " ##..########..## ",
+    "  ##.########.##  ",
+    "  ##############  ",
+    "    ####  ####    ",
+    "        ..        ",
 ];
 
-const PET_EATING: [&str; 10] = [
-    "          ",
-    "  ######  ",
-    " #  ## ## ",
-    " #  ## ## ",
-    " #      # ",
-    " # #### # ",
-    " #      # ",
-    " ######## ",
-    "  ######  ",
-    "          ",
+const PET_UPSET: [&str; 14] = [
+    "      ##    ##    ",
+    "     ####  ####   ",
+    "   ############   ",
+    "  ##############  ",
+    " ##  oo  oo  ##   ",
+    " ##  ..  ..  ##   ",
+    "##......##......##",
+    "##....####......##",
+    "##...######.....##",
+    " ##..########..## ",
+    "  ##.########.##  ",
+    "  ##############  ",
+    "    ####  ####    ",
+    "      ..  ..      ",
 ];
 
-const PET_PETTED: [&str; 10] = [
-    "          ",
-    " ######## ",
-    " #  ## ## ",
-    " #       #",
-    " #       #",
-    " #  ##   #",
-    " #      # ",
-    " ######## ",
-    "  ######  ",
-    "          ",
+const PET_EATING: [&str; 14] = [
+    "      ##    ##    ",
+    "     ####  ####   ",
+    "   ############   ",
+    "  ##############  ",
+    " ##  oo  oo  ##   ",
+    " ##  ..  ..  ##   ",
+    "##......##......##",
+    "##....####......##",
+    "##...######.....##",
+    " ##..########..## ",
+    "  ##.####..##..## ",
+    "  ##  ####  ##  ##",
+    "    ##  ##      ##",
+    "      ####        ",
+];
+
+const PET_PETTED: [&str; 14] = [
+    "        ..        ",
+    "      ##    ##    ",
+    "     ####  ####   ",
+    "   ############   ",
+    "  ##  oo  oo  ##  ",
+    "  ##  ..  ..  ##  ",
+    "##......##......##",
+    "##....######....##",
+    "##...########...##",
+    " ##..########..## ",
+    "  ##.########.##  ",
+    "  ##############  ",
+    "    ####  ####    ",
+    "                  ",
 ];
 
 // Compact sprites: 6 logical rows (3 terminal rows) x 7 logical columns.
@@ -456,29 +514,61 @@ mod tests {
         }
     }
 
-    /// The packed Full idle sprite must reproduce the classic round blob
-    /// glyphs so the 'cuter' art style survives the logical-pixel pipeline.
+    /// Full art uses a shared, tall canvas so every pose keeps the same
+    /// hitbox and focal scale while its face/body details change in place.
     #[test]
-    fn full_idle_packs_to_the_classic_blob_glyphs() {
-        let area = Rect::new(0, 0, 10, 5);
+    fn every_full_pose_uses_the_shared_tall_canvas() {
+        let width = pet_sprite(PetPose::Idle)[0].chars().count();
+        assert!(width >= 16, "Full mascot needs a round focal width");
+        for pose in ALL_POSES {
+            let sprite = pet_sprite(pose);
+            assert_eq!(
+                sprite.len(),
+                14,
+                "{pose:?} should occupy seven terminal rows"
+            );
+            assert_eq!(
+                sprite[0].chars().count(),
+                width,
+                "{pose:?} should share the Full canvas width"
+            );
+        }
+    }
+
+    #[test]
+    fn full_poses_change_their_load_bearing_face_or_body_details() {
+        assert_ne!(pet_sprite(PetPose::Idle), pet_sprite(PetPose::Blink));
+        assert_ne!(pet_sprite(PetPose::WalkA), pet_sprite(PetPose::WalkB));
+        assert_ne!(pet_sprite(PetPose::Happy), pet_sprite(PetPose::Upset));
+        assert_ne!(pet_sprite(PetPose::Eating), pet_sprite(PetPose::Petted));
+        assert_ne!(pet_sprite(PetPose::Doze), pet_sprite(PetPose::Sleep));
+    }
+
+    #[test]
+    fn full_idle_packs_with_a_round_body_and_face_details() {
+        let area = Rect::new(0, 0, 18, 7);
         let mut buffer = Buffer::filled(area, ratatui::buffer::Cell::new(" "));
         draw_sprite(area, &mut buffer, pet_sprite(PetPose::Idle), 0, 0);
-        let packed: Vec<String> = (0..5)
+        let packed: Vec<String> = (0..7)
             .map(|row| {
-                (0..10)
+                (0..18)
                     .map(|col| buffer.cell((col, row)).expect("cell").symbol().to_owned())
                     .collect()
             })
             .collect();
-        assert_eq!(
-            packed,
-            [
-                "  ▄██▄██  ",
-                " █  ▀   ▀▄",
-                " █   ▄   █",
-                " █▄▄▄▄▄▄█ ",
-                "  ▀▀  ▀▀  ",
-            ]
+        let occupied = packed
+            .iter()
+            .flat_map(|row| row.chars())
+            .filter(|ch| !matches!(ch, ' '))
+            .count();
+        assert!(
+            occupied >= 50,
+            "round Full mascot is too hollow: {packed:?}"
+        );
+        assert!(
+            packed
+                .iter()
+                .any(|row| row.contains("▀") || row.contains("▄"))
         );
     }
 
@@ -591,16 +681,20 @@ mod tests {
         assert_eq!(
             pet_sprite(PetPose::Doze),
             &[
-                "          ",
-                "          ",
-                "  ..      ",
-                " ####     ",
-                "## o ###  ",
-                "########  ",
-                " ######## ",
-                "  ######  ",
-                "    ##    ",
-                "          ",
+                "                  ",
+                "                  ",
+                "       ##         ",
+                "     ######       ",
+                "   ##  oo  ###    ",
+                "  ##   ..   ####  ",
+                " ##    ##     ### ",
+                "##################",
+                " #################",
+                "  ############### ",
+                "   #############  ",
+                "     #########    ",
+                "       ######     ",
+                "                  ",
             ],
             "floor doze should be a horizontal curled pose"
         );
