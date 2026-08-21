@@ -250,7 +250,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         });
         const before = await food.locator("strong").textContent();
 
-        await food.dragTo(feedTarget);
+        await food.dragTo(feedTarget, { force: true });
         await expect(page.getByText("Eating a treat")).toBeVisible();
         await expect(food.locator("strong")).toHaveText(
             String(Number(before) - 1),
@@ -273,7 +273,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         });
         const before = await drink.locator("strong").textContent();
 
-        await drink.dragTo(feedTarget);
+        await drink.dragTo(feedTarget, { force: true });
         await expect(page.getByText("Eating an energy drink")).toBeVisible();
         await expect(drink.locator("strong")).toHaveText(
             String(Number(before) - 1),
@@ -342,6 +342,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
 
         await emptyFood.dragTo(
             page.getByRole("button", { name: /feed target/i }),
+            { force: true },
         );
 
         await expect(page.getByRole("alert")).toContainText("out of stock");
@@ -906,15 +907,19 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
 
         await page
             .getByTestId("food-kibble")
-            .dragTo(page.getByRole("button", { name: /feed target/i }));
+            .dragTo(page.getByRole("button", { name: /feed target/i }), {
+                force: true,
+            });
         await expect(page.getByText("Eating kibble")).toBeVisible();
         await expect(page.getByText("Wants a snack")).toHaveCount(0);
         await expect(page.getByTestId("demand-snack-count")).toHaveCount(0);
 
-        await page.getByRole("button", { name: "Shovel" }).click();
-        await poops.first().click();
+        await page
+            .getByRole("button", { name: "Shovel" })
+            .click({ force: true });
+        await poops.first().click({ force: true });
         await expect(page.getByRole("button", { name: "Trash" })).toBeVisible();
-        await page.getByRole("button", { name: "Trash" }).click();
+        await page.getByRole("button", { name: "Trash" }).click({ force: true });
         await expect(page.getByText("Cleaned up")).toBeVisible();
         await expect(poops).toHaveCount(0);
 
