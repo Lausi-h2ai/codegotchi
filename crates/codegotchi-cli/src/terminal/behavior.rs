@@ -458,9 +458,21 @@ fn random_point(rng: &mut SplitMix64, home: Position, area: Rect) -> Position {
 /// `room_geometry`. The three layouts use the same anchors as room.rs.
 fn home_for(area: Rect) -> Position {
     if area.height >= 14 {
-        Position::new(area.width.saturating_sub(34).max(2), 4)
+        let bed_x = if area.width >= 80 {
+            area.width.saturating_sub(24)
+        } else if area.width <= 64 {
+            area.width.saturating_sub(20).max(4)
+        } else {
+            area.width.saturating_sub(28).max(4)
+        };
+        Position::new(bed_x.saturating_sub(18), 4)
     } else if area.height >= 7 {
-        Position::new(area.width.saturating_sub(26).max(2), 1)
+        let pet_x = if area.width >= 80 {
+            2
+        } else {
+            area.width.saturating_sub(52).max(2)
+        };
+        Position::new(pet_x, 2)
     } else {
         Position::new(0, 0)
     }
@@ -492,5 +504,20 @@ impl SplitMix64 {
             return low;
         }
         low + (self.next_u64() % (high - low))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn home_positions_match_room_geometry_anchors() {
+        assert_eq!(home_for(Rect::new(0, 0, 120, 14)), Position::new(78, 4));
+        assert_eq!(home_for(Rect::new(0, 0, 80, 14)), Position::new(38, 4));
+        assert_eq!(home_for(Rect::new(0, 0, 70, 14)), Position::new(24, 4));
+        assert_eq!(home_for(Rect::new(0, 0, 120, 7)), Position::new(2, 2));
+        assert_eq!(home_for(Rect::new(0, 0, 70, 7)), Position::new(18, 2));
+        assert_eq!(home_for(Rect::new(0, 0, 120, 3)), Position::new(0, 0));
     }
 }

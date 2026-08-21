@@ -2,7 +2,7 @@ use chrono::{Duration, Utc};
 use codegotchi_cli::terminal::{
     PresentationActivity, PresentationFrame, RoomAmbience, RoomRenderOptions, SemanticTone,
     TerminalThemePreset, auto_style, has_authoritative_nap, presentation_activity, render_room,
-    render_room_with_options,
+    render_room_with_options, room_geometry,
 };
 use codegotchi_domain::{
     ActivityKind, AgentActivityState, DefaultNeedProgressionStrategy, FoodInventory, FoodKind, Pet,
@@ -475,6 +475,182 @@ fn compact_room_keeps_window_decoration() {
     );
 }
 
+#[test]
+fn compact_is_a_seven_row_vignette_with_segmented_needs_and_care_objects() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot
+        .pending_poops
+        .push(Poop::new(Uuid::from_u128(13), now));
+    snapshot.pending_demands.push(PetDemand::new(
+        Uuid::from_u128(14),
+        PetDemandKind::Affection,
+        now,
+    ));
+    snapshot.pending_demands.push(PetDemand::new(
+        Uuid::from_u128(15),
+        PetDemandKind::Snack,
+        now,
+    ));
+
+    let area = Rect::new(0, 0, 120, 7);
+    let geometry = room_geometry(area, &snapshot);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let text = buffer_text(&buffer, area.width, area.height);
+
+    for marker in [
+        "H 0 E 100 P 100 C 100",
+        "Calm  A1 S1",
+        "FOOD",
+        "BED",
+        "POOP",
+    ] {
+        assert!(text.contains(marker), "Compact missing {marker}: {text}");
+    }
+    assert!(text.contains("A1") && text.contains("S1"));
+    assert!(
+        !text.contains("PET"),
+        "Compact should use the mascot/effect as its pet cue, not a debug label: {text}"
+    );
+    assert!(
+        geometry.pet.height >= 4,
+        "Compact pet hitbox must cover the focal sprite: {:?}",
+        geometry.pet
+    );
+    assert!(
+        (geometry.pet.y..geometry.pet.bottom()).any(|y| {
+            (geometry.pet.x..geometry.pet.right())
+                .any(|x| buffer.cell((x, y)).is_some_and(|cell| cell.symbol() != " "))
+        }),
+        "Compact pet sprite must occupy its hitbox"
+    );
+    assert!(
+        !text.contains("╭──────────────────────╮"),
+        "Compact must remove Full desk decoration"
+    );
+}
+
+#[test]
+fn minimal_packs_the_pet_across_three_rows_and_keeps_every_core_target() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot
+        .pending_poops
+        .push(Poop::new(Uuid::from_u128(16), now));
+    let area = Rect::new(0, 0, 120, 3);
+    let geometry = room_geometry(area, &snapshot);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let text = buffer_text(&buffer, area.width, area.height);
+
+    assert_eq!(geometry.pet.width, 9);
+    assert_eq!(geometry.pet.height, 3);
+    assert_eq!(geometry.pet.x, area.x);
+    assert_eq!(geometry.pet.y, area.y);
+    for y in geometry.pet.y..geometry.pet.bottom() {
+        assert!(
+            (geometry.pet.x..geometry.pet.right())
+                .any(|x| { buffer.cell((x, y)).is_some_and(|cell| cell.symbol() != " ") }),
+            "Minimal sprite row {y} is empty"
+        );
+    }
+    assert!(
+        !text.contains("◉ PET") && !text.contains("(=^.^=) PET"),
+        "Minimal should render a mascot instead of a text-only PET control: {text}"
+    );
+    for marker in ["H", "E", "P", "C", "[FOOD", "[BED]", "[POOP]", "AFF"] {
+        assert!(text.contains(marker), "Minimal missing {marker}: {text}");
+    }
+    for source in &geometry.food_sources {
+        assert!(source.rect.right() <= area.right());
+    }
+    if let Some(bed) = geometry.bed {
+        assert!(bed.right() <= area.right());
+    }
+    for (_, poop) in &geometry.poops {
+        assert!(poop.right() <= area.right());
+    }
+}
+
+#[test]
+fn compact_to_minimal_removes_scenery_but_preserves_care_hit_regions() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot
+        .pending_poops
+        .push(Poop::new(Uuid::from_u128(17), now));
+
+    let compact = Rect::new(0, 0, 120, 7);
+    let mut compact_buffer = Buffer::filled(compact, Cell::new(" "));
+    render_room(
+        compact,
+        &mut compact_buffer,
+        &snapshot,
+        &default_frame(),
+        None,
+    );
+    let compact_text = buffer_text(&compact_buffer, compact.width, compact.height);
+    assert!(compact_text.contains("┌──────────┐"));
+
+    let minimal = Rect::new(0, 0, 120, 3);
+    let minimal_geometry = room_geometry(minimal, &snapshot);
+    let mut minimal_buffer = Buffer::filled(minimal, Cell::new(" "));
+    render_room(
+        minimal,
+        &mut minimal_buffer,
+        &snapshot,
+        &default_frame(),
+        None,
+    );
+    let minimal_text = buffer_text(&minimal_buffer, minimal.width, minimal.height);
+    assert!(!minimal_text.contains("┌──────────┐"));
+    assert!(!minimal_text.contains("╭──────────────╮"));
+    assert!(minimal_geometry.bed.is_some());
+    assert!(!minimal_geometry.food_sources.is_empty());
+    assert!(!minimal_geometry.poops.is_empty());
+    assert!(minimal_text.contains("[FOOD") && minimal_text.contains("[BED]"));
+}
+
+#[test]
+fn minimal_target_labels_are_drawn_inside_their_hit_regions() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot
+        .pending_poops
+        .push(Poop::new(Uuid::from_u128(18), now));
+    let area = Rect::new(0, 0, 120, 3);
+    let geometry = room_geometry(area, &snapshot);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+
+    let visible = |rect: Rect| {
+        (rect.y..rect.bottom()).any(|y| {
+            (rect.x..rect.right())
+                .any(|x| buffer.cell((x, y)).is_some_and(|cell| cell.symbol() != " "))
+        })
+    };
+    assert!(
+        visible(geometry.pet),
+        "Minimal mascot is outside its hitbox"
+    );
+    assert!(
+        geometry
+            .food_sources
+            .iter()
+            .all(|source| visible(source.rect)),
+        "Minimal food affordance is outside its hitbox"
+    );
+    assert!(
+        geometry.bed.is_some_and(visible),
+        "Minimal bed affordance is outside its hitbox"
+    );
+    assert!(
+        geometry.poops.iter().all(|(_, rect)| visible(*rect)),
+        "Minimal poop affordance is outside its hitbox"
+    );
+}
+
 /// Minimal exposes exactly one deterministic stocked food source, regardless
 /// of which subset of the pantry is available, and never advertises an
 /// actionable zero-stock source.
@@ -550,7 +726,7 @@ fn minimal_with_no_food_has_disabled_food_copy_and_no_hit_source() {
         "disabled food copy missing: {text}"
     );
     assert!(
-        !text.contains("x0"),
+        !text.contains("[FOOD x0]"),
         "zero-stock food must not look actionable: {text}"
     );
 }
@@ -977,12 +1153,16 @@ fn minimal_keeps_a_pet_and_recognizable_care_affordance_icons() {
     let mut buffer = Buffer::filled(area, Cell::new(" "));
     render_room(area, &mut buffer, &snapshot, &default_frame(), None);
     let text = buffer_text(&buffer, area.width, area.height);
-    for marker in ["◉ PET", "FOOD", "BED", "POOP", "AFF"] {
+    for marker in ["FOOD", "BED", "POOP", "AFF"] {
         assert!(
             text.contains(marker),
             "Minimal affordance missing {marker}: {text}"
         );
     }
+    assert!(
+        !text.contains("PET"),
+        "Minimal should render a mascot instead of a text-only PET control: {text}"
+    );
 }
 
 /// Wide production layouts must expose visible object-shaped care targets,
@@ -1035,7 +1215,7 @@ fn wide_room_keeps_named_targets_and_minimal_keeps_a_pet_mark() {
         None,
     );
     let compact_text = buffer_text(&compact_buffer, compact.width, compact.height);
-    for marker in ["PET", "FOOD", "BED", "POOP"] {
+    for marker in ["Calm", "FOOD", "BED", "POOP"] {
         assert!(
             compact_text.contains(marker),
             "wide Compact affordance missing {marker}: {compact_text}"
@@ -1053,8 +1233,8 @@ fn wide_room_keeps_named_targets_and_minimal_keeps_a_pet_mark() {
     );
     let minimal_text = buffer_text(&minimal_buffer, minimal.width, minimal.height);
     assert!(
-        minimal_text.contains("(=^.^=)"),
-        "Minimal must retain a visible pet mark: {minimal_text}"
+        minimal_text.contains("CG ok") && !minimal_text.contains("PET"),
+        "Minimal must retain the packed mascot without a debug PET label: {minimal_text}"
     );
 }
 
@@ -1249,4 +1429,140 @@ fn minimal_care_labels_start_inside_their_hit_regions() {
     assert_eq!(row(bed.x, 5), "[BED]");
     let (_, poop) = geometry.poops.first().expect("seeded poop");
     assert_eq!(row(poop.x, 6), "[POOP]");
+}
+
+#[test]
+fn minimal_empty_poop_copy_reflows_after_a_wide_food_count() {
+    let now = Utc::now();
+    let mut inventory = FoodInventory::new();
+    inventory.add(FoodKind::Kibble, u32::MAX);
+    let pet = Pet::with_inventory(
+        Uuid::from_u128(19),
+        "Mochi",
+        PetSpecies::Cat,
+        now,
+        inventory,
+    );
+    let snapshot = PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot();
+    let area = Rect::new(0, 0, 120, 3);
+    let geometry = codegotchi_cli::terminal::room_geometry(area, &snapshot);
+    let bed = geometry.bed.expect("Minimal bed");
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let poop_start = (0..area.width.saturating_sub(5))
+        .find(|x| {
+            "[POOP]".chars().enumerate().all(|(offset, expected)| {
+                buffer
+                    .cell((x.saturating_add(u16::try_from(offset).unwrap()), 1))
+                    .is_some_and(|cell| cell.symbol() == expected.to_string())
+            })
+        })
+        .expect("disabled poop copy");
+
+    assert!(
+        poop_start >= bed.right().saturating_sub(area.x).saturating_add(2),
+        "empty poop copy overlaps the bed: poop_start={poop_start} bed={bed:?}"
+    );
+}
+
+#[test]
+fn compact_bed_hit_region_covers_the_sleeping_mascot() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot.behavior = PetBehavior::Sleeping;
+    snapshot.napping_until = Some(now + Duration::minutes(30));
+    let area = Rect::new(0, 0, 120, 7);
+    let geometry = codegotchi_cli::terminal::room_geometry(area, &snapshot);
+    let bed = geometry.bed.expect("Compact bed");
+
+    assert!(
+        bed.bottom() >= area.bottom(),
+        "Compact sleep mascot extends below its bed hit region: {bed:?} area={area:?}"
+    );
+}
+
+#[test]
+fn minimal_demand_cues_keep_activity_and_snack_separated() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot.pending_demands.push(PetDemand::new(
+        Uuid::from_u128(20),
+        PetDemandKind::Affection,
+        now,
+    ));
+    snapshot.pending_demands.push(PetDemand::new(
+        Uuid::from_u128(21),
+        PetDemandKind::Snack,
+        now,
+    ));
+    let area = Rect::new(0, 0, 120, 3);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let row = (0..area.width)
+        .map(|x| buffer.cell((x, 2)).expect("Minimal cue cell").symbol())
+        .collect::<String>();
+
+    assert!(
+        row.contains("AFF x1 Calm  SNACK"),
+        "Minimal demand cues overlap: {row:?}"
+    );
+}
+
+#[test]
+fn compact_authoritative_sleep_keeps_the_bed_label_visible() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot.behavior = PetBehavior::Sleeping;
+    snapshot.napping_until = Some(now + Duration::minutes(30));
+    let area = Rect::new(0, 0, 120, 7);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let text = buffer_text(&buffer, area.width, area.height);
+
+    assert!(
+        text.contains("BED"),
+        "Compact authoritative sleep must keep the bed discoverable: {text}"
+    );
+}
+
+#[test]
+fn compact_eighty_column_geometry_keeps_care_targets_in_bounds() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot
+        .pending_poops
+        .push(Poop::new(Uuid::from_u128(22), now));
+    let area = Rect::new(0, 0, 80, 7);
+    let geometry = room_geometry(area, &snapshot);
+
+    let bed = geometry.bed.expect("Compact bed");
+    assert!(
+        bed.right() <= area.right(),
+        "bed clipped: {bed:?} area={area:?}"
+    );
+    assert!(
+        geometry
+            .food_sources
+            .iter()
+            .all(|source| source.rect.right() <= area.right())
+    );
+    assert!(
+        geometry
+            .poops
+            .iter()
+            .all(|(_, poop)| poop.right() <= area.right())
+    );
+    assert!(geometry.food_sources.iter().all(|source| {
+        geometry
+            .poops
+            .iter()
+            .all(|(_, poop)| !rects_overlap(source.rect, *poop))
+    }));
+
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let text = buffer_text(&buffer, area.width, area.height);
+    for marker in ["FOOD", "TRT", "FRT", "ENE", "BED", "POOP"] {
+        assert!(text.contains(marker), "Compact 80 missing {marker}: {text}");
+    }
 }
