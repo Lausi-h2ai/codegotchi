@@ -1715,7 +1715,7 @@ fn full_wide_furniture_layout(
             furniture.push(FullFurnitureSprite {
                 sprite: &PLANTS_COMPACT_FULL,
                 x: pet_x.saturating_sub(12),
-                y: 8,
+                y: 4,
             });
         }
     }
@@ -2007,6 +2007,19 @@ mod tests {
                     !rects_overlap(rect, bed),
                     "furniture overlaps bed at width {width}: furniture={rect:?} bed={bed:?}"
                 );
+                for source in &geometry.food_sources {
+                    assert!(
+                        !rects_overlap(rect, source.rect),
+                        "furniture overlaps food at width {width}: furniture={rect:?} food={:?}",
+                        source.rect
+                    );
+                }
+                for (_, poop) in &geometry.poops {
+                    assert!(
+                        !rects_overlap(rect, *poop),
+                        "furniture overlaps poop at width {width}: furniture={rect:?} poop={poop:?}"
+                    );
+                }
             }
         }
     }
