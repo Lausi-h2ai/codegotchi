@@ -78,14 +78,29 @@ ImageMagick `import`, and a usable X display, redirects CodeGotchi XDG
 state/runtime/data/config/cache/home paths into a run-owned temporary tree,
 sets `CODEGOTCHI_BROWSER=none`, and never prints Codex arguments, auth
 contents, runtime metadata, or bearer tokens. Codex arguments are supplied to
-the launcher through a private NUL-delimited file rather than process `argv`,
-and state polling keeps the bearer token in a private curl config file. Cleanup
-records only run roots, verifies start time/role, walks every live descendant,
-and sends `SIGTERM` before bounded escalation; diagnostics omit command lines.
-A private `Xvfb` path uses an authenticated local Unix socket and is available
-only when a supported lightweight window manager is installed.
-Hook trust is opt-in through `CODEGOTCHI_LIVE_TRUST_HOOKS=1` so a run cannot
-silently approve hooks outside a disposable authorized session.
+the launcher through a private NUL-delimited file only when the harness's
+explicit `CODEGOTCHI_LIVE_HARNESS=1` seam is present; the file must be inside
+the run root, owned by the current user, and mode `0600`. State polling keeps
+the bearer token in a private curl config file. Cleanup verifies start time,
+role, and the exact per-run environment marker, walks every live descendant,
+and sends `SIGTERM` before bounded escalation; a second marker scan catches
+descendants reparented after root death. Diagnostics omit command lines, and
+blocked cleanup removes argument, metadata, state, debug, wrapper, and xterm
+log files while retaining only redacted evidence. A private `Xvfb` path uses
+an authenticated local Unix socket and is available only when a supported
+lightweight window manager is installed.
+
+The harness does not capture or parse a Codex screen transcript. Feed, clean,
+and nap can be checked from redacted authoritative state snapshots. Pet is
+deliberately separate: the snapshot's care IDs do not distinguish a final
+`Pet` completion from a `PetStroke`, so the final pet result is reported as
+manual/unavailable and blocks completion. Prompt/model/tool activity, hook
+trust, approval policy receipt, bracketed paste, focus delivery, mouse
+protocol delivery, and Codex PTY resize handling likewise have no non-text
+receipt and are reported manual/unavailable. An xterm outer-geometry change
+is recorded only as that narrow measurement, not as proof of Codex PTY
+handling. Any required manual/unavailable check makes the harness exit
+nonzero with final status `BLOCKED`.
 
 The fresh availability check on 2026-08-21 used `codex-cli 0.149.0`,
 `xterm`, `xdotool`, ImageMagick `import`, and inherited `DISPLAY=:0`.
@@ -128,21 +143,24 @@ the Codex pane was still on its official `Hooks need review` screen, and the
 shared display subsequently failed the window-activation check; the harness
 terminated only its run-owned xterm.
 The corrected harness now labels this pre-interaction frame `full-live-initial`
-and reports `BLOCKED` when care snapshots or required interaction checks do not
-settle; a `full-live-populated` frame is captured only after the bounded prompt
-and tool probes.
+and reports `BLOCKED` with a nonzero exit when authoritative care snapshots or
+required interaction checks do not settle. Screenshots are retained as visual
+evidence only; no `xterm` screen log is retained, and no `full-live-populated`
+claim is made.
 
 The durable round-one blocked report is
 [`live-codex/task-7-round1-blocked.txt`](terminal-room/live-codex/task-7-round1-blocked.txt).
 Therefore these items remain **not claimed**: ordinary prompt/model response,
-tool activity, approval/review, bracketed paste (`xclip`/`xsel` are not
-installed), observable Codex focus reporting, mouse behavior, Full → Compact →
-Minimal → Full resize in a usable Codex session, qualifying pet/feed/clean/nap
-results with settled authoritative snapshots, normal Codex exit, bounded
-termination/restoration proof, and a final release PASS. The report alongside
-the capture is intentionally provisional; the live gate remains open until a
-display with a functioning window manager/focus path and an authorized Codex
-session completes the full checklist.
+tool activity, approval/review, bracketed paste, observable Codex focus
+reporting, mouse protocol behavior, Codex PTY handling for Full → Compact →
+Minimal → Full resize, final pet completion, hook trust, and any visual
+terminal-control cleanup proof. Feed/clean/nap snapshots are asserted only
+when their exact state deltas settle; normal exit and bounded termination are
+reported separately from restoration, while restoration's terminal controls
+remain manual/unavailable. The report alongside the capture is intentionally
+provisional and nonzero-blocked; the live gate remains open until a display
+with a functioning window manager/focus path and an authorized Codex session
+can supply the unavailable non-text receipts.
 
 Browser behavior is covered by the passing production Playwright suite and
 the focused motion/App tests; this does not turn the blocked live Codex TUI

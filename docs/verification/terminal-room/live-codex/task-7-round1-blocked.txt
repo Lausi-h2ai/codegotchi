@@ -33,3 +33,54 @@ transport wiring only, not a real-Codex acceptance result.
 A redaction probe supplied a sentinel custom argument and reached the same
 blocked prerequisite. The process output and generated report contained
 neither the sentinel nor the argument name.
+
+## Round-two correction evidence
+
+Observed: 2026-08-21, after the transcript-free cleanup and launcher seam
+correction.
+
+The focused launcher test and static checks passed:
+
+```text
+cargo test -p codegotchi-cli --lib launcher::tests -- --nocapture
+25 passed; 0 failed
+bash -n scripts/verify-terminal-room-live.sh
+cargo fmt --all -- --check
+git diff --check
+```
+
+The harness has no xterm screen-log option or Codex text-marker parser. Its
+required prompt/model/tool/paste/focus/mouse/approval/hook/PTY-resize checks
+are explicitly recorded as manual/unavailable and block completion. Feed,
+clean, and nap are the only care outcomes asserted from settled redacted
+state deltas; the final pet result remains manual/unavailable because a care
+ID does not distinguish `Pet` from `PetStroke`. Blocked completion returns
+exit status `1`.
+
+The corrected preflight was rerun with no inherited display:
+
+```text
+CODEGOTCHI_LIVE_NO_BUILD=1 DISPLAY= \
+  CODEGOTCHI_LIVE_OUTPUT_DIR=/tmp/codegotchi-live-round2-preflight-clean \
+  ./scripts/verify-terminal-room-live.sh
+```
+
+It exited `1` and reported the expected missing-window-manager block. No
+private X server, xterm, Codex session, screen transcript, or interaction
+claim was produced. The report retained at
+`/tmp/codegotchi-live-round2-preflight-clean/20260821T211654Z-1696649-verification.txt`
+contains only redacted checklist/restoration evidence; the exact generated
+run identifier may differ when this check is repeated.
+
+A custom-argument redaction probe also exited `1` at the same preflight gate:
+
+```text
+CODEGOTCHI_LIVE_NO_BUILD=1 DISPLAY= \
+  CODEGOTCHI_LIVE_OUTPUT_DIR=/tmp/codegotchi-live-round2-redaction \
+  ./scripts/verify-terminal-room-live.sh -- --ask-for-approval never \
+    --sandbox read-only --model round2-sentinel-9f5a
+```
+
+Neither the sentinel nor its option name appeared in process output or the
+retained report. The report is
+`/tmp/codegotchi-live-round2-redaction/20260821T211818Z-1698668-verification.txt`.

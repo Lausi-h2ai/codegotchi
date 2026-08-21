@@ -43,6 +43,9 @@ const RUNTIME_DIRECTORY_NAME: &str = "codegotchi";
 const SESSION_FILE_PREFIX: &str = "session-";
 const SESSION_FILE_SUFFIX: &str = ".json";
 const REPOSITORY_ID_NAMESPACE: &str = "codegotchi-repository-v1";
+const LIVE_HARNESS_ENV: &str = "CODEGOTCHI_LIVE_HARNESS";
+const LIVE_ARGUMENTS_FILE_ENV: &str = "CODEGOTCHI_LIVE_CODEX_ARGUMENTS_FILE";
+const LIVE_ARGUMENTS_ROOT_ENV: &str = "CODEGOTCHI_LIVE_ARGUMENTS_ROOT";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LauncherSignal {
@@ -291,21 +294,26 @@ pub fn run(arguments: impl IntoIterator<Item = OsString>) -> Result<i32, Launche
     runtime.block_on(run_async(arguments.into_iter().collect()))
 }
 
-/// Loads trailing Codex arguments from a private NUL-delimited file when the
-/// live acceptance harness needs to keep operator-provided values out of the
-/// process table. Ordinary CLI arguments remain the default path.
+/// Loads trailing Codex arguments from the explicitly enabled live acceptance
+/// harness seam. Ordinary CLI invocations never consult this file path.
 fn load_codex_arguments(cli_arguments: &[OsString]) -> Result<Vec<OsString>, LauncherError> {
     if !cli_arguments.is_empty() {
         return Ok(cli_arguments.to_vec());
     }
-    let Some(path) = env::var_os("CODEGOTCHI_CODEX_ARGUMENTS_FILE") else {
+    if env::var_os(LIVE_HARNESS_ENV).as_deref() != Some(OsStr::new("1")) {
         return Ok(Vec::new());
-    };
-    let bytes = fs::read(&path).map_err(|error| {
+    }
+    let path = env::var_os(LIVE_ARGUMENTS_FILE_ENV).ok_or_else(|| {
         LauncherError::message(format!(
-            "could not read CODEGOTCHI_CODEX_ARGUMENTS_FILE: {error}"
+            "{LIVE_ARGUMENTS_FILE_ENV} is required when {LIVE_HARNESS_ENV}=1"
         ))
     })?;
+    let root = env::var_os(LIVE_ARGUMENTS_ROOT_ENV).ok_or_else(|| {
+        LauncherError::message(format!(
+            "{LIVE_ARGUMENTS_ROOT_ENV} is required when {LIVE_HARNESS_ENV}=1"
+        ))
+    })?;
+    let bytes = read_live_argument_file(Path::new(&path), Path::new(&root))?;
     let arguments = parse_codex_argument_file(&bytes)?;
     if arguments.iter().any(is_profile_conflict) {
         return Err(LauncherError::message(
@@ -315,13 +323,67 @@ fn load_codex_arguments(cli_arguments: &[OsString]) -> Result<Vec<OsString>, Lau
     Ok(arguments)
 }
 
+fn read_live_argument_file(path: &Path, root: &Path) -> Result<Vec<u8>, LauncherError> {
+    let canonical_root = fs::canonicalize(root).map_err(|error| {
+        LauncherError::message(format!(
+            "could not resolve the live harness argument root: {error}"
+        ))
+    })?;
+    if !canonical_root.is_dir() {
+        return Err(LauncherError::message(
+            "the live harness argument root must be a directory",
+        ));
+    }
+    let canonical_path = fs::canonicalize(path).map_err(|error| {
+        LauncherError::message(format!(
+            "could not resolve the live harness argument file: {error}"
+        ))
+    })?;
+    if !canonical_path.starts_with(&canonical_root) {
+        return Err(LauncherError::message(
+            "the live harness argument file must remain inside its run root",
+        ));
+    }
+    let metadata = fs::metadata(&canonical_path).map_err(|error| {
+        LauncherError::message(format!(
+            "could not inspect the live harness argument file: {error}"
+        ))
+    })?;
+    if !metadata.is_file() {
+        return Err(LauncherError::message(
+            "the live harness argument path must be a regular file",
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        use std::os::unix::fs::PermissionsExt;
+
+        if metadata.uid() != nix::unistd::geteuid().as_raw() {
+            return Err(LauncherError::message(
+                "the live harness argument file must be owned by the current user",
+            ));
+        }
+        if metadata.permissions().mode() & 0o777 != 0o600 {
+            return Err(LauncherError::message(
+                "the live harness argument file must have mode 0600",
+            ));
+        }
+    }
+    fs::read(&canonical_path).map_err(|error| {
+        LauncherError::message(format!(
+            "could not read the live harness argument file: {error}"
+        ))
+    })
+}
+
 fn parse_codex_argument_file(bytes: &[u8]) -> Result<Vec<OsString>, LauncherError> {
     if bytes.is_empty() {
         return Ok(Vec::new());
     }
     if !bytes.ends_with(&[0]) {
         return Err(LauncherError::message(
-            "CODEGOTCHI_CODEX_ARGUMENTS_FILE must be NUL-delimited",
+            "the live harness Codex argument file must be NUL-delimited",
         ));
     }
     Ok(bytes[..bytes.len() - 1]
@@ -1571,12 +1633,18 @@ fn numeric_exit_status(status: ExitStatus) -> i32 {
 mod tests {
     use super::{
         InheritedSignalSource, LaunchRequest, LauncherError, TerminalAttemptError, UiMode,
-        execute_ui_route, parse_codex_argument_file, parse_launch_request,
+        execute_ui_route, parse_codex_argument_file, parse_launch_request, read_live_argument_file,
     };
     use crate::terminal::TerminalThemePreset;
     use std::ffi::OsString;
+    #[cfg(unix)]
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     #[cfg(target_os = "macos")]
     use std::path::PathBuf;
+    #[cfg(unix)]
+    use uuid::Uuid;
 
     use crate::terminal::{
         TerminalSessionError, TerminalSessionSignal, terminal_session_signal_channel,
@@ -1603,6 +1671,59 @@ mod tests {
         let error = parse_codex_argument_file(b"--sandbox\0read-only").unwrap_err();
 
         assert!(error.to_string().contains("must be NUL-delimited"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn accepts_private_live_argument_file_inside_its_run_root() {
+        let root = std::env::temp_dir().join(format!("codegotchi-live-args-{}", Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("codex-arguments.nul");
+        let bytes = b"--sandbox\0read-only\0";
+        fs::write(&path, bytes).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        assert_eq!(read_live_argument_file(&path, &root).unwrap(), bytes);
+
+        fs::remove_file(path).unwrap();
+        fs::remove_dir(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_live_argument_file_outside_its_run_root() {
+        let base = std::env::temp_dir().join(format!("codegotchi-live-args-{}", Uuid::new_v4()));
+        let root = base.join("run");
+        let outside = base.join("outside.nul");
+        fs::create_dir(&base).unwrap();
+        fs::create_dir(&root).unwrap();
+        fs::write(&outside, b"--sandbox\0read-only\0").unwrap();
+        fs::set_permissions(&outside, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let error = read_live_argument_file(&outside, &root).unwrap_err();
+
+        assert!(error.to_string().contains("inside its run root"));
+
+        fs::remove_file(outside).unwrap();
+        fs::remove_dir(root).unwrap();
+        fs::remove_dir(base).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_live_argument_file_with_broader_permissions() {
+        let root = std::env::temp_dir().join(format!("codegotchi-live-args-{}", Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("codex-arguments.nul");
+        fs::write(&path, b"--sandbox\0read-only\0").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        let error = read_live_argument_file(&path, &root).unwrap_err();
+
+        assert!(error.to_string().contains("mode 0600"));
+
+        fs::remove_file(path).unwrap();
+        fs::remove_dir(root).unwrap();
     }
 
     #[test]
