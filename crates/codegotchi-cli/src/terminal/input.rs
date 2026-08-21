@@ -178,6 +178,35 @@ impl RoomInputSession {
     ) -> Vec<RoomCareRequest> {
         let geometry = room_geometry_with_frame(room, snapshot, frame);
         let point = Position::new(event.column, event.row);
+        if self.has_active_capture() {
+            match event.kind {
+                MouseEventKind::Down(_)
+                | MouseEventKind::Up(MouseButton::Right)
+                | MouseEventKind::Up(MouseButton::Middle) => {
+                    self.cancel();
+                    return Vec::new();
+                }
+                MouseEventKind::Up(MouseButton::Left) => {}
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    if let Some(gesture) = self.gesture.as_mut() {
+                        gesture.move_to(point);
+                    }
+                    if self.dragging_food.is_some() {
+                        self.drag_position = Some(point);
+                    }
+                    return Vec::new();
+                }
+                MouseEventKind::Drag(_) => {
+                    self.cancel();
+                    return Vec::new();
+                }
+                MouseEventKind::Moved
+                | MouseEventKind::ScrollLeft
+                | MouseEventKind::ScrollRight
+                | MouseEventKind::ScrollDown
+                | MouseEventKind::ScrollUp => return Vec::new(),
+            }
+        }
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 // The pet remains the primary care target when a wandering

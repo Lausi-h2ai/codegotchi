@@ -2051,6 +2051,89 @@ mod tests {
     }
 
     #[test]
+    fn invalid_captured_terminating_events_do_not_reach_codex() {
+        for (capture_name, capture_point) in [("food", true), ("pet", false)] {
+            let mut compositor = fixed_test_compositor(80, 24);
+            let writer_bytes = Arc::new(Mutex::new(Vec::new()));
+            let mut core = TerminalSessionCore::new(24, 80);
+            core.process_output(b"\x1b[?1000h\x1b[?1006h");
+            core.set_snapshot(test_snapshot());
+            let room = core.layout().room;
+            let geometry = super::super::room_geometry_with_frame(
+                room,
+                core.snapshot().expect("snapshot exists"),
+                &core.presentation_frame(),
+            );
+            let point = if capture_point {
+                let food = geometry.food_sources.first().expect("food source exists");
+                Position::new(food.rect.x + 1, food.rect.y)
+            } else {
+                let pet = geometry.pet;
+                Position::new(pet.x + 1, pet.y)
+            };
+            let mut writer = Some(Box::new(RecordingWriter {
+                bytes: Arc::clone(&writer_bytes),
+            }) as super::PtyWriter);
+            let mut room_input = RoomInputSession::default();
+            let outside = if room.y > 0 {
+                Position::new(room.x, room.y - 1)
+            } else {
+                Position::new(room.right(), room.y)
+            };
+            assert!(!room.contains(outside));
+
+            let invalid_kinds = [
+                MouseEventKind::Down(MouseButton::Left),
+                MouseEventKind::Drag(MouseButton::Right),
+                MouseEventKind::Drag(MouseButton::Middle),
+                MouseEventKind::Up(MouseButton::Right),
+                MouseEventKind::Up(MouseButton::Middle),
+            ];
+            for kind in invalid_kinds {
+                handle_event(
+                    &mut compositor,
+                    &mut core,
+                    &mut None,
+                    &mut writer,
+                    Event::Mouse(MouseEvent {
+                        kind: MouseEventKind::Down(MouseButton::Left),
+                        column: point.x,
+                        row: point.y,
+                        modifiers: KeyModifiers::NONE,
+                    }),
+                    None,
+                    &mut room_input,
+                    Duration::ZERO,
+                )
+                .expect("capture press should start");
+                assert!(room_input.has_active_capture());
+
+                handle_event(
+                    &mut compositor,
+                    &mut core,
+                    &mut None,
+                    &mut writer,
+                    Event::Mouse(MouseEvent {
+                        kind,
+                        column: outside.x,
+                        row: outside.y,
+                        modifiers: KeyModifiers::NONE,
+                    }),
+                    None,
+                    &mut room_input,
+                    Duration::ZERO,
+                )
+                .expect("invalid captured event should be consumed");
+                assert!(!room_input.has_active_capture());
+                assert!(
+                    writer_bytes.lock().expect("writer lock").is_empty(),
+                    "invalid outside {capture_name} events must never reach Codex"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn focus_loss_cancels_both_room_capture_kinds() {
         for food_capture in [true, false] {
             let mut compositor = fixed_test_compositor(80, 24);

@@ -589,6 +589,297 @@ fn pet_gesture_captures_outside_room_until_release_then_cancels() {
     assert!(!input.petting_qualified());
 }
 
+#[test]
+fn active_capture_uses_strict_left_button_lifecycle() {
+    let snapshot = base_snapshot();
+    let room = Rect::new(0, 0, 40, 14);
+    let geometry = room_geometry_with_frame(room, &snapshot, &default_frame());
+    let pet_point = Position::new(geometry.pet.x + 1, geometry.pet.y);
+    let food = geometry.food_sources.first().expect("food target");
+    let food_point = Position::new(food.rect.x + 1, food.rect.y);
+    let empty_point = Position::new(room.width - 1, room.height - 1);
+
+    for (capture_name, capture_point) in [("pet", pet_point), ("food", food_point)] {
+        let invalid_kinds = [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Down(MouseButton::Right),
+            MouseEventKind::Down(MouseButton::Middle),
+            MouseEventKind::Drag(MouseButton::Right),
+            MouseEventKind::Drag(MouseButton::Middle),
+            MouseEventKind::Up(MouseButton::Right),
+            MouseEventKind::Up(MouseButton::Middle),
+        ];
+        for invalid_kind in invalid_kinds {
+            let mut input = RoomInputSession::default();
+            let gateway = RecordingCareGateway::default();
+            apply(
+                &gateway,
+                input.process(
+                    room,
+                    &snapshot,
+                    &default_frame(),
+                    &mouse(
+                        MouseEventKind::Down(MouseButton::Left),
+                        capture_point.x,
+                        capture_point.y,
+                    ),
+                ),
+            );
+            assert!(
+                input.has_active_capture(),
+                "{capture_name} press should start capture"
+            );
+
+            let invalid_point = if matches!(invalid_kind, MouseEventKind::Down(MouseButton::Left)) {
+                if capture_name == "pet" {
+                    food_point
+                } else {
+                    pet_point
+                }
+            } else {
+                empty_point
+            };
+            assert!(
+                input
+                    .process(
+                        room,
+                        &snapshot,
+                        &default_frame(),
+                        &mouse(invalid_kind, invalid_point.x, invalid_point.y)
+                    )
+                    .is_empty(),
+                "{capture_name} + {invalid_kind:?} must produce no care request"
+            );
+            assert!(
+                !input.has_active_capture(),
+                "{capture_name} + {invalid_kind:?} must cancel without replacement capture"
+            );
+            assert!(gateway.requests.lock().unwrap().is_empty());
+        }
+
+        let mut input = RoomInputSession::default();
+        apply(
+            &RecordingCareGateway::default(),
+            input.process(
+                room,
+                &snapshot,
+                &default_frame(),
+                &mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    capture_point.x,
+                    capture_point.y,
+                ),
+            ),
+        );
+        let _ = input.process(
+            room,
+            &snapshot,
+            &default_frame(),
+            &mouse(MouseEventKind::Drag(MouseButton::Left), 20, 7),
+        );
+        assert!(
+            input.has_active_capture(),
+            "left drag advances {capture_name}"
+        );
+        assert!(
+            input
+                .process(
+                    room,
+                    &snapshot,
+                    &default_frame(),
+                    &mouse(MouseEventKind::Moved, 30, 8)
+                )
+                .is_empty()
+        );
+        assert!(input.has_active_capture());
+    }
+
+    for kind in [
+        MouseEventKind::Drag(MouseButton::Left),
+        MouseEventKind::Drag(MouseButton::Right),
+        MouseEventKind::Drag(MouseButton::Middle),
+    ] {
+        let mut input = RoomInputSession::default();
+        let gateway = RecordingCareGateway::default();
+        assert!(
+            input
+                .process(room, &snapshot, &default_frame(), &mouse(kind, 20, 7))
+                .is_empty()
+        );
+        assert!(
+            !input.has_active_capture(),
+            "bare drag never starts capture"
+        );
+        assert!(gateway.requests.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn captured_scroll_does_not_mutate_pet_or_food_state() {
+    let snapshot = base_snapshot();
+    let room = Rect::new(0, 0, 40, 14);
+    let geometry = room_geometry_with_frame(room, &snapshot, &default_frame());
+    let pet_point = Position::new(geometry.pet.x + 1, geometry.pet.y);
+    let food = geometry.food_sources.first().expect("food target");
+    let food_point = Position::new(food.rect.x + 1, food.rect.y);
+
+    let mut pet_input = RoomInputSession::default();
+    let _ = pet_input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            pet_point.x,
+            pet_point.y,
+        ),
+    );
+    let pet_evidence = pet_input.petting_evidence();
+    for kind in [
+        MouseEventKind::ScrollUp,
+        MouseEventKind::ScrollDown,
+        MouseEventKind::ScrollLeft,
+        MouseEventKind::ScrollRight,
+    ] {
+        assert!(
+            pet_input
+                .process(room, &snapshot, &default_frame(), &mouse(kind, 30, 8))
+                .is_empty()
+        );
+    }
+    assert!(pet_input.has_active_capture());
+    assert_eq!(pet_input.petting_evidence(), pet_evidence);
+
+    let mut food_input = RoomInputSession::default();
+    let _ = food_input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            food_point.x,
+            food_point.y,
+        ),
+    );
+    let food_drag = food_input.active_drag();
+    for kind in [
+        MouseEventKind::ScrollUp,
+        MouseEventKind::ScrollDown,
+        MouseEventKind::ScrollLeft,
+        MouseEventKind::ScrollRight,
+    ] {
+        assert!(
+            food_input
+                .process(room, &snapshot, &default_frame(), &mouse(kind, 30, 8))
+                .is_empty()
+        );
+    }
+    assert!(food_input.has_active_capture());
+    assert_eq!(food_input.active_drag(), food_drag);
+}
+
+#[test]
+fn captured_left_release_completes_pet_and_food_actions() {
+    let snapshot = base_snapshot();
+    let room = Rect::new(0, 0, 40, 14);
+    let geometry = room_geometry_with_frame(room, &snapshot, &default_frame());
+    let pet_point = Position::new(geometry.pet.x + 1, geometry.pet.y);
+    let food = geometry.food_sources.first().expect("food target");
+    let food_point = Position::new(food.rect.x + 1, food.rect.y);
+
+    let mut pet_input = RoomInputSession::default();
+    let _ = pet_input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            pet_point.x,
+            pet_point.y,
+        ),
+    );
+    std::thread::sleep(Duration::from_millis(1_600));
+    let pet_requests = pet_input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            pet_point.x + 8,
+            pet_point.y,
+        ),
+    );
+    assert!(matches!(
+        pet_requests.as_slice(),
+        [RoomCareRequest::Pet { .. }]
+    ));
+
+    let mut food_input = RoomInputSession::default();
+    let _ = food_input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            food_point.x,
+            food_point.y,
+        ),
+    );
+    let food_requests = food_input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            pet_point.x,
+            pet_point.y,
+        ),
+    );
+    assert!(matches!(
+        food_requests.as_slice(),
+        [RoomCareRequest::Feed { food_id, .. }] if food_id == "kibble"
+    ));
+}
+
+#[test]
+fn second_left_press_over_empty_space_cancels_without_restart() {
+    let snapshot = base_snapshot();
+    let room = Rect::new(0, 0, 40, 14);
+    let geometry = room_geometry_with_frame(room, &snapshot, &default_frame());
+    let mut input = RoomInputSession::default();
+    let gateway = RecordingCareGateway::default();
+
+    let _ = input.process(
+        room,
+        &snapshot,
+        &default_frame(),
+        &mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            geometry.pet.x + 1,
+            geometry.pet.y,
+        ),
+    );
+    assert!(input.has_active_capture());
+
+    let empty_point = Position::new(room.width - 1, room.height - 1);
+    assert!(
+        input
+            .process(
+                room,
+                &snapshot,
+                &default_frame(),
+                &mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    empty_point.x,
+                    empty_point.y
+                )
+            )
+            .is_empty()
+    );
+    assert!(!input.has_active_capture());
+    assert!(gateway.requests.lock().unwrap().is_empty());
+}
+
 /// When the wandering pet and a food source share a cell, the pet remains the
 /// primary target and a press starts petting rather than a food drag.
 #[test]
