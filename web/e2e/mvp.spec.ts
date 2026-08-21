@@ -415,6 +415,16 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     }) => {
         await page.emulateMedia({ reducedMotion: "no-preference" });
         await page.clock.install();
+        await page.addInitScript(() => {
+            const clockOrigin = Date.now();
+            Math.random = () => {
+                const elapsedMs = Date.now() - clockOrigin;
+                if (elapsedMs < 8_000) {
+                    return 0.75;
+                }
+                return elapsedMs < 15_000 ? 0.8 : 0.9;
+            };
+        });
         await resetFixture(page, "default");
         await page.goto(launchUrl);
         await expect(petLocator(page)).toBeVisible();
@@ -455,66 +465,50 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
                     return null;
                 }
                 const roomRect = room.getBoundingClientRect();
-                const petRect = pet.getBoundingClientRect();
                 return {
                     floorTop: roomRect.top + roomRect.height * 0.7,
                     roomBottom: roomRect.bottom,
-                    petFeet: petRect.bottom,
+                    petFeet: roomRect.top + pet.offsetTop,
+                    positionTransitioning: pet
+                        .getAnimations()
+                        .some(
+                            (animation) =>
+                                animation.constructor.name ===
+                                    "CSSTransition" &&
+                                animation.playState === "running",
+                        ),
                 };
             });
-        let previousMotionSample:
-            | {
-                  region: string;
-                  mode: string | null;
-                  phase: string | null;
-                  action: string | null;
-              }
-            | undefined;
-        let hasObservedRoam = false;
-        let previousWaypoint: string | null = null;
-
         for (let elapsedMs = 0; elapsedMs <= 31_000; elapsedMs += 250) {
-            if (
-                previousMotionSample &&
-                previousMotionSample.mode === "free_time" &&
-                hasObservedRoam &&
-                previousMotionSample.phase !== "traveling" &&
-                previousMotionSample.action !== "roll"
-            ) {
-                const geometry = await renderedRoomGeometry();
+            const [region, mode, phase, action, label, geometry] =
+                await Promise.all([
+                    motionAttribute(page, "data-motion-region"),
+                    motionAttribute(page, "data-motion-mode"),
+                    motionAttribute(page, "data-motion-phase"),
+                    motionAttribute(page, "data-motion-action"),
+                    page.getByTestId("activity-label").textContent(),
+                    renderedRoomGeometry(),
+                ]);
+            expect(mode).toBe("free_time");
+            expect(region).not.toBeNull();
+            expect(motionRegions.has(region as string)).toBe(true);
+            if (mode === "free_time" && region) {
+                observedRegions.add(region);
+                observedRoll ||= mode === "free_time" && action === "roll";
+                observedIdleTravel ||= mode === "free_time" && isIdle(label);
                 if (
+                    phase !== "traveling" &&
+                    !geometry?.positionTransitioning &&
                     !firstUngroundedPosition &&
                     geometry !== null &&
                     (geometry.petFeet < geometry.floorTop - 8 ||
                         geometry.petFeet > geometry.roomBottom + 1)
                 ) {
                     firstUngroundedPosition = {
-                        region: previousMotionSample.region,
+                        region,
                         ...geometry,
                     };
                 }
-            }
-
-            const [region, mode, phase, action, waypoint, label] =
-                await Promise.all([
-                    motionAttribute(page, "data-motion-region"),
-                    motionAttribute(page, "data-motion-mode"),
-                    motionAttribute(page, "data-motion-phase"),
-                    motionAttribute(page, "data-motion-action"),
-                    petLocator(page).getAttribute("data-motion-waypoint"),
-                    page.getByTestId("activity-label").textContent(),
-                ]);
-            expect(region).not.toBeNull();
-            expect(motionRegions.has(region as string)).toBe(true);
-            observedRegions.add(region as string);
-
-            if (region) {
-                hasObservedRoam ||=
-                    previousWaypoint !== null && waypoint !== previousWaypoint;
-                previousWaypoint = waypoint;
-                previousMotionSample = { region, mode, phase, action };
-                observedRoll ||= action === "roll";
-                observedIdleTravel ||= isIdle(label);
             }
 
             if (elapsedMs < 31_000) {
