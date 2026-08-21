@@ -1616,47 +1616,110 @@ fn render_furniture_full_wide(
     ambience: RoomAmbience,
 ) {
     render_room_backdrop(area, buffer, palette);
-    let window = match ambience {
+    let window: &'static [&'static str] = match ambience {
         RoomAmbience::Day => &WINDOW_FULL_DAY,
         RoomAmbience::Night => &WINDOW_FULL_NIGHT,
     };
-    let bed_x = area.width.saturating_sub(24);
-    if area.width >= 100 {
-        put_sprite(area, buffer, &DESK_FULL, 1, 1, palette);
-        put_sprite(area, buffer, window, 27, 1, palette);
-        put_sprite(area, buffer, &SHELF_FULL, 47, 1, palette);
-        put_sprite(area, buffer, &WARDROBE_FULL, 66, 1, palette);
-        put_sprite(area, buffer, &RUG_FULL, 36, 7, palette);
-        put_sprite(area, buffer, &PLANTS_FULL, 38, 8, palette);
+    for furniture in full_wide_furniture_layout(area, window) {
+        put_sprite(
+            area,
+            buffer,
+            furniture.sprite,
+            furniture.x,
+            furniture.y,
+            palette,
+        );
+    }
+}
+
+#[derive(Clone, Copy)]
+struct FullFurnitureSprite {
+    sprite: &'static [&'static str],
+    x: u16,
+    y: u16,
+}
+
+fn full_wide_furniture_layout(
+    area: Rect,
+    window: &'static [&'static str],
+) -> Vec<FullFurnitureSprite> {
+    let mut furniture = Vec::new();
+    if area.width >= 120 {
+        furniture.extend([
+            FullFurnitureSprite {
+                sprite: &DESK_FULL,
+                x: 1,
+                y: 1,
+            },
+            FullFurnitureSprite {
+                sprite: window,
+                x: 27,
+                y: 1,
+            },
+            FullFurnitureSprite {
+                sprite: &SHELF_FULL,
+                x: 47,
+                y: 1,
+            },
+            FullFurnitureSprite {
+                sprite: &WARDROBE_FULL,
+                x: 66,
+                y: 1,
+            },
+            FullFurnitureSprite {
+                sprite: &RUG_FULL,
+                x: 36,
+                y: 7,
+            },
+            FullFurnitureSprite {
+                sprite: &PLANTS_FULL,
+                x: 38,
+                y: 8,
+            },
+        ]);
     } else {
-        put_sprite(area, buffer, &DESK_COMPACT_FULL, 1, 1, palette);
-        put_sprite(area, buffer, window, 18, 1, palette);
-        put_sprite(area, buffer, &SHELF_COMPACT_FULL, 38, 1, palette);
-        put_sprite(area, buffer, &WARDROBE_COMPACT_FULL, 48, 1, palette);
+        furniture.extend([
+            FullFurnitureSprite {
+                sprite: &DESK_COMPACT_FULL,
+                x: 1,
+                y: 1,
+            },
+            FullFurnitureSprite {
+                sprite: window,
+                x: 18,
+                y: 1,
+            },
+        ]);
         if area.width >= 90 {
-            put_sprite(area, buffer, &PLANTS_COMPACT_FULL, 48, 8, palette);
+            furniture.extend([
+                FullFurnitureSprite {
+                    sprite: &SHELF_COMPACT_FULL,
+                    x: 38,
+                    y: 1,
+                },
+                FullFurnitureSprite {
+                    sprite: &WARDROBE_COMPACT_FULL,
+                    x: 38,
+                    y: 4,
+                },
+            ]);
+        } else {
+            furniture.push(FullFurnitureSprite {
+                sprite: &SHELF_COMPACT_FULL,
+                x: 1,
+                y: 5,
+            });
+        }
+        if area.width >= 100 {
+            let pet_x = area.width.saturating_sub(42);
+            furniture.push(FullFurnitureSprite {
+                sprite: &PLANTS_COMPACT_FULL,
+                x: pet_x.saturating_sub(12),
+                y: 8,
+            });
         }
     }
-    for x in (0..area.width).step_by(3) {
-        put(
-            area,
-            buffer,
-            x,
-            area.height.saturating_sub(4),
-            "·",
-            palette.cell_style(SemanticTone::Tone1),
-        );
-    }
-    if bed_x > 1 {
-        put_text(
-            area,
-            buffer,
-            bed_x.saturating_sub(2),
-            4,
-            "╎",
-            palette.cell_style(SemanticTone::Tone1),
-        );
-    }
+    furniture
 }
 
 fn render_room_backdrop(area: Rect, buffer: &mut Buffer, palette: ResolvedPalette) {
@@ -1881,6 +1944,13 @@ mod tests {
         }
     }
 
+    fn rects_overlap(first: Rect, second: Rect) -> bool {
+        first.x < second.right()
+            && second.x < first.right()
+            && first.y < second.bottom()
+            && second.y < first.bottom()
+    }
+
     #[test]
     fn sparse_wide_food_sources_do_not_double_gap_after_empty_kind() {
         let now = Utc::now();
@@ -1898,5 +1968,46 @@ mod tests {
             sources[0].rect.right().saturating_add(2),
             "an empty Treat source must not reserve a second gap"
         );
+    }
+
+    #[test]
+    fn wide_furniture_stays_outside_pet_and_bed_across_supported_widths() {
+        let now = Utc::now();
+        let pet = Pet::with_inventory(
+            Uuid::from_u128(2),
+            "Mochi",
+            PetSpecies::Cat,
+            now,
+            FoodInventory::starter(),
+        );
+        let snapshot =
+            PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot();
+
+        for width in 80..=121 {
+            let area = Rect::new(0, 0, width, 14);
+            let geometry = full_geometry(area, &snapshot, (0, 0));
+            let bed = geometry.bed.expect("Full room has a bed");
+            for furniture in full_wide_furniture_layout(area, &WINDOW_FULL_DAY) {
+                let rect = Rect::new(
+                    area.x.saturating_add(furniture.x),
+                    area.y.saturating_add(furniture.y),
+                    sprite_width(furniture.sprite),
+                    furniture.sprite.len() as u16,
+                );
+                assert!(
+                    rect.right() <= area.right() && rect.bottom() <= area.bottom(),
+                    "furniture clipped at width {width}: {rect:?} area={area:?}"
+                );
+                assert!(
+                    !rects_overlap(rect, geometry.pet),
+                    "furniture overlaps pet at width {width}: furniture={rect:?} pet={:?}",
+                    geometry.pet
+                );
+                assert!(
+                    !rects_overlap(rect, bed),
+                    "furniture overlaps bed at width {width}: furniture={rect:?} bed={bed:?}"
+                );
+            }
+        }
     }
 }
