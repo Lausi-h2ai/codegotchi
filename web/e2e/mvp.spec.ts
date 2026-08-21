@@ -465,18 +465,28 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
                     return null;
                 }
                 const roomRect = room.getBoundingClientRect();
+                const petRect = pet.getBoundingClientRect();
                 return {
                     floorTop: roomRect.top + roomRect.height * 0.7,
                     roomBottom: roomRect.bottom,
-                    petFeet: roomRect.top + pet.offsetTop,
+                    petFeet: petRect.bottom,
                     positionTransitioning: pet
                         .getAnimations()
-                        .some(
-                            (animation) =>
-                                animation.constructor.name ===
-                                    "CSSTransition" &&
-                                animation.playState === "running",
-                        ),
+                        .some((animation) => {
+                            if (animation.playState !== "running") {
+                                return false;
+                            }
+                            if (
+                                animation.constructor.name === "CSSTransition"
+                            ) {
+                                return true;
+                            }
+                            return (
+                                animation.constructor.name === "CSSAnimation" &&
+                                (animation as CSSAnimation).animationName ===
+                                    "pet-roll"
+                            );
+                        }),
                 };
             });
         for (let elapsedMs = 0; elapsedMs <= 31_000; elapsedMs += 250) {
