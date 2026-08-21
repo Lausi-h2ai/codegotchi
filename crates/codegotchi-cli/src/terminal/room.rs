@@ -1,4 +1,4 @@
-use codegotchi_domain::{FoodKind, PetBehavior, SimulationSnapshot};
+use codegotchi_domain::{FoodKind, PetBehavior, PetNeeds, SimulationSnapshot};
 use ratatui::{
     buffer::Buffer,
     layout::{Position, Rect},
@@ -9,12 +9,14 @@ use uuid::Uuid;
 use super::behavior::{
     PetPose, PresentationActivity, PresentationFrame, has_authoritative_nap, presentation_activity,
 };
-use super::sprites::{draw_sprite_with_palette, pet_sprite, pet_sprite_compact};
+use super::sprites::{
+    draw_sprite_with_palette, pet_sprite, pet_sprite_compact, pet_sprite_minimal,
+};
 use super::theme::{ResolvedPalette, SemanticTone, TerminalThemePreset};
 
 const FULL_ROOM_HEIGHT: u16 = 14;
 const COMPACT_ROOM_HEIGHT: u16 = 7;
-const COMPACT_PET_WIDTH: u16 = 9;
+const COMPACT_PET_WIDTH: u16 = 12;
 const COMPACT_PET_HEIGHT: u16 = 5;
 
 /// Presentation-only sky state for the Full room window.
@@ -264,8 +266,16 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
         let food_x = 2.min(area.width.saturating_sub(52));
         let compact_food = area.width < 100;
         let ultra_compact_food = area.width < 90;
-        let food_sources =
-            wide_food_sources(area, snapshot, food_x, 8, compact_food, ultra_compact_food);
+        let food_sources = wide_food_sources(
+            area,
+            snapshot,
+            food_x,
+            8,
+            compact_food,
+            ultra_compact_food,
+            false,
+            compact_food,
+        );
         let food_right = food_sources
             .last()
             .map_or(food_x, |source| source.rect.right().saturating_sub(area.x));
@@ -336,9 +346,25 @@ fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16
             23,
             COMPACT_PET_HEIGHT,
         );
-        let food_sources = wide_food_sources(area, snapshot, 14, 3, true, false);
+        let ultra_compact_food = area.width < 90;
+        let food_sources = wide_food_sources(
+            area,
+            snapshot,
+            14,
+            3,
+            true,
+            ultra_compact_food,
+            true,
+            area.width < 110,
+        );
         let poop_width = wide_poop_target_width();
-        let poop_limit = if area.width >= 90 { 2_u16 } else { 1_u16 };
+        let poop_limit = if area.width >= 100 {
+            3_u16
+        } else if area.width >= 90 {
+            2_u16
+        } else {
+            1_u16
+        };
         let latest_poop_start = bed
             .x
             .saturating_sub(area.x)
@@ -386,12 +412,12 @@ fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16
 }
 
 const MINIMAL_TARGET_ROW: u16 = 1;
-const MINIMAL_BED_X: u16 = 24;
-const MINIMAL_POOP_STEP: u16 = 8;
+const MINIMAL_TARGET_GAP: u16 = 1;
 const MINIMAL_BED_LABEL: &str = "[BED]";
 const MINIMAL_POOP_LABEL: &str = "[POOP]";
-const MINIMAL_PET_WIDTH: u16 = COMPACT_PET_WIDTH;
+const MINIMAL_PET_WIDTH: u16 = 9;
 const MINIMAL_PET_HEIGHT: u16 = 3;
+const MINIMAL_MAX_POOPS: usize = 2;
 
 fn minimal_food_label(count: u32) -> String {
     format!("[FOOD x{count}]")
@@ -415,7 +441,63 @@ fn label_width(label: &str) -> u16 {
     u16::try_from(label.chars().count()).unwrap_or(u16::MAX)
 }
 
-fn minimal_geometry(area: Rect, snapshot: &SimulationSnapshot) -> RoomGeometry {
+#[derive(Clone, Copy)]
+enum MinimalLabelMode {
+    Full,
+    Compact,
+    Tiny,
+}
+
+#[derive(Clone, Debug)]
+struct MinimalTargetLayout {
+    pet: Rect,
+    food: Option<(FoodKind, u32, Rect, String)>,
+    disabled_food: Option<(u16, String)>,
+    bed: Option<(Rect, &'static str)>,
+    poops: Vec<(Uuid, Rect, &'static str)>,
+}
+
+fn minimal_count_label(count: u32) -> String {
+    compact_food_count(count)
+}
+
+fn minimal_food_label_for_mode(count: u32, mode: MinimalLabelMode) -> String {
+    match mode {
+        MinimalLabelMode::Full => minimal_food_label(count),
+        MinimalLabelMode::Compact => format!("FOOD{}", minimal_count_label(count)),
+        MinimalLabelMode::Tiny => format!("F{}", minimal_count_label(count)),
+    }
+}
+
+fn minimal_disabled_food_label(mode: MinimalLabelMode) -> &'static str {
+    match mode {
+        MinimalLabelMode::Full => "[FOOD none]",
+        MinimalLabelMode::Compact => "FOOD none",
+        MinimalLabelMode::Tiny => "F-",
+    }
+}
+
+fn minimal_bed_label_for_mode(mode: MinimalLabelMode) -> &'static str {
+    match mode {
+        MinimalLabelMode::Full => MINIMAL_BED_LABEL,
+        MinimalLabelMode::Compact => "BED",
+        MinimalLabelMode::Tiny => "B",
+    }
+}
+
+fn minimal_poop_label_for_mode(mode: MinimalLabelMode) -> &'static str {
+    match mode {
+        MinimalLabelMode::Full => MINIMAL_POOP_LABEL,
+        MinimalLabelMode::Compact => "POOP",
+        MinimalLabelMode::Tiny => "P",
+    }
+}
+
+fn minimal_layout_for_mode(
+    area: Rect,
+    snapshot: &SimulationSnapshot,
+    mode: MinimalLabelMode,
+) -> MinimalTargetLayout {
     let pet_width = MINIMAL_PET_WIDTH.min(area.width);
     let pet = Rect::new(
         area.x,
@@ -423,65 +505,122 @@ fn minimal_geometry(area: Rect, snapshot: &SimulationSnapshot) -> RoomGeometry {
         pet_width,
         MINIMAL_PET_HEIGHT.min(area.height),
     );
-    let mut next_x = pet_width.saturating_add(1);
-    let food_sources = first_stocked_food(snapshot)
-        .map(|(food, count)| {
-            let food_label = minimal_food_label(count);
-            let width = label_width(&food_label).min(area.width.saturating_sub(next_x));
-            let x = next_x;
-            next_x = next_x
-                .saturating_add(label_width(&food_label))
-                .saturating_add(2);
-            vec![FoodSource {
-                rect: Rect::new(
-                    area.x.saturating_add(x),
-                    area.y.saturating_add(MINIMAL_TARGET_ROW),
-                    width,
-                    1,
-                ),
-                food_id: food.id(),
-                count,
-            }]
-        })
-        .unwrap_or_default();
-    if food_sources.is_empty() {
-        next_x = next_x
-            .saturating_add(label_width("[FOOD none]"))
-            .saturating_add(2);
+    let mut next_x = pet_width.saturating_add(MINIMAL_TARGET_GAP);
+    let mut food = None;
+    let mut disabled_food = None;
+
+    if let Some((food_kind, count)) = first_stocked_food(snapshot) {
+        let label = minimal_food_label_for_mode(count, mode);
+        let width = label_width(&label);
+        if next_x.saturating_add(width) <= area.width {
+            let rect = Rect::new(
+                area.x.saturating_add(next_x),
+                area.y.saturating_add(MINIMAL_TARGET_ROW),
+                width,
+                1,
+            );
+            food = Some((food_kind, count, rect, label));
+            next_x = next_x.saturating_add(width);
+        }
+    } else {
+        let label = minimal_disabled_food_label(mode);
+        let width = label_width(label);
+        if next_x.saturating_add(width) <= area.width {
+            disabled_food = Some((next_x, label.to_owned()));
+            next_x = next_x.saturating_add(width);
+        }
     }
-    let bed_x = next_x.max(MINIMAL_BED_X);
-    let bed = Rect::new(
-        area.x.saturating_add(bed_x),
-        area.y.saturating_add(MINIMAL_TARGET_ROW),
-        label_width(MINIMAL_BED_LABEL).min(area.width.saturating_sub(bed_x)),
-        1,
-    );
-    let poop_x = bed_x
-        .saturating_add(label_width(MINIMAL_BED_LABEL))
-        .saturating_add(2);
+
+    next_x = next_x.saturating_add(MINIMAL_TARGET_GAP);
+    let bed_label = minimal_bed_label_for_mode(mode);
+    let bed_width = label_width(bed_label);
+    let bed = (next_x.saturating_add(bed_width) <= area.width).then(|| {
+        let rect = Rect::new(
+            area.x.saturating_add(next_x),
+            area.y.saturating_add(MINIMAL_TARGET_ROW),
+            bed_width,
+            1,
+        );
+        next_x = next_x.saturating_add(bed_width);
+        (rect, bed_label)
+    });
+
+    next_x = next_x.saturating_add(MINIMAL_TARGET_GAP);
+    let poop_label = minimal_poop_label_for_mode(mode);
+    let poop_width = label_width(poop_label);
     let poops = snapshot
         .pending_poops
         .iter()
-        .take(2)
-        .enumerate()
-        .map(|(index, poop)| {
-            let x = poop_x.saturating_add(index as u16 * MINIMAL_POOP_STEP);
-            let width = label_width(MINIMAL_POOP_LABEL).min(area.width.saturating_sub(x));
-            (
-                poop.id(),
-                Rect::new(
-                    area.x.saturating_add(x),
-                    area.y.saturating_add(MINIMAL_TARGET_ROW),
-                    width,
-                    1,
-                ),
-            )
+        .take(MINIMAL_MAX_POOPS)
+        .filter_map(|poop| {
+            if next_x.saturating_add(poop_width) > area.width {
+                return None;
+            }
+            let rect = Rect::new(
+                area.x.saturating_add(next_x),
+                area.y.saturating_add(MINIMAL_TARGET_ROW),
+                poop_width,
+                1,
+            );
+            next_x = next_x
+                .saturating_add(poop_width)
+                .saturating_add(MINIMAL_TARGET_GAP);
+            Some((poop.id(), rect, poop_label))
         })
-        .filter(|(_, rect)| rect.width > 0)
+        .collect();
+
+    MinimalTargetLayout {
+        pet,
+        food,
+        disabled_food,
+        bed,
+        poops,
+    }
+}
+
+fn minimal_layout(area: Rect, snapshot: &SimulationSnapshot) -> MinimalTargetLayout {
+    if area.width <= 24 {
+        return minimal_layout_for_mode(area, snapshot, MinimalLabelMode::Tiny);
+    }
+    let requested_poops = snapshot.pending_poops.len().min(MINIMAL_MAX_POOPS);
+    let has_food = first_stocked_food(snapshot).is_some();
+    let mut fallback = None;
+    for mode in [
+        MinimalLabelMode::Full,
+        MinimalLabelMode::Compact,
+        MinimalLabelMode::Tiny,
+    ] {
+        let layout = minimal_layout_for_mode(area, snapshot, mode);
+        let complete = (!has_food || layout.food.is_some())
+            && layout.bed.is_some()
+            && layout.poops.len() == requested_poops;
+        if complete {
+            return layout;
+        }
+        fallback = Some(layout);
+    }
+    fallback.expect("Minimal layout always has a label mode")
+}
+
+fn minimal_geometry(area: Rect, snapshot: &SimulationSnapshot) -> RoomGeometry {
+    let layout = minimal_layout(area, snapshot);
+    let food_sources = layout
+        .food
+        .iter()
+        .map(|(food, count, rect, _)| FoodSource {
+            rect: *rect,
+            food_id: food.id(),
+            count: *count,
+        })
+        .collect();
+    let poops = layout
+        .poops
+        .iter()
+        .map(|(id, rect, _)| (*id, *rect))
         .collect();
     RoomGeometry {
-        pet,
-        bed: Some(bed),
+        pet: layout.pet,
+        bed: layout.bed.map(|(rect, _)| rect),
         food_sources,
         poops,
         minimal: true,
@@ -529,6 +668,7 @@ fn food_sources(
 /// Builds wide-layout food hit regions around the entire bowl, label, and
 /// count projection. The narrow renderer keeps its historical anchor because
 /// its input tests and text-only projection intentionally use that row.
+#[allow(clippy::too_many_arguments)]
 fn wide_food_sources(
     area: Rect,
     snapshot: &SimulationSnapshot,
@@ -536,6 +676,8 @@ fn wide_food_sources(
     top: u16,
     compact: bool,
     ultra_compact: bool,
+    generic_first: bool,
+    abbreviate_count: bool,
 ) -> Vec<FoodSource> {
     let mut next_x = x;
     let mut sources = Vec::new();
@@ -552,7 +694,15 @@ fn wide_food_sources(
                 rect: Rect::new(
                     area.x.saturating_add(next_x),
                     area.y.saturating_add(top),
-                    food_target_width(food, count, compact, first, ultra_compact),
+                    food_target_width(
+                        food,
+                        count,
+                        compact,
+                        first,
+                        ultra_compact,
+                        generic_first,
+                        abbreviate_count,
+                    ),
                     food_target_height(compact),
                 ),
                 food_id: food.id(),
@@ -579,8 +729,18 @@ fn food_target_width(
     compact: bool,
     first: bool,
     ultra_compact: bool,
+    generic_first: bool,
+    abbreviate_count: bool,
 ) -> u16 {
-    let label = food_source_label(food, count, compact, first, ultra_compact);
+    let label = food_source_label(
+        food,
+        count,
+        compact,
+        first,
+        ultra_compact,
+        generic_first,
+        abbreviate_count,
+    );
     let sprite = if compact {
         &FOOD_BOWL_COMPACT_WIDE
     } else {
@@ -598,17 +758,49 @@ fn food_source_label(
     compact: bool,
     first: bool,
     ultra_compact: bool,
+    generic_first: bool,
+    abbreviate_count: bool,
 ) -> String {
+    let count = if abbreviate_count {
+        compact_food_count(count)
+    } else {
+        count.to_string()
+    };
     if ultra_compact {
-        format!("x{count}")
+        if first {
+            format!("FOOD{count}")
+        } else {
+            format!("{}{count}", food_label(food.id()))
+        }
     } else if compact {
         if first {
             format!("FOOD x{count}")
         } else {
             format!("{}x{count}", food_label(food.id()))
         }
+    } else if first && generic_first {
+        format!("FOOD x{count}")
     } else {
         format!("{} x{count}", food_label(food.id()))
+    }
+}
+
+fn compact_food_count(count: u32) -> String {
+    if count < 1_000 {
+        return count.to_string();
+    }
+    if count < 1_000_000 {
+        return format!("{}k", count / 1_000);
+    }
+    if count < 1_000_000_000 {
+        return format!("{}M", count / 1_000_000);
+    }
+    let whole = count / 1_000_000_000;
+    let tenth = (count % 1_000_000_000) / 100_000_000;
+    if tenth == 0 {
+        format!("{whole}B")
+    } else {
+        format!("{whole}.{tenth}B")
     }
 }
 
@@ -1102,14 +1294,7 @@ fn render_compact_wide(
     drag: Option<(&str, Position)>,
 ) {
     let palette = options.palette();
-    let needs = snapshot.needs;
-    let status_line = format!(
-        "H {} E {} P {} C {}",
-        need_percent(needs.hunger()),
-        need_percent(needs.energy()),
-        need_percent(needs.happiness()),
-        need_percent(needs.cleanliness()),
-    );
+    let status_line = compact_status_line(snapshot.needs);
     put_line(
         area,
         buffer,
@@ -1133,9 +1318,12 @@ fn render_compact_wide(
 
     // The tiny window and plant preserve the room's identity without taking
     // the pet's left-side priority in the compact hierarchy.
-    put_sprite(area, buffer, &WINDOW_COMPACT, 32, 2, palette);
-    if area.width >= 100 {
-        put_sprite(area, buffer, &PLANTS_COMPACT, 46, 4, palette);
+    let (window_x, plant_x) = compact_decoration_slots(area, geometry);
+    if let Some(window_x) = window_x {
+        put_sprite(area, buffer, &WINDOW_COMPACT, window_x, 2, palette);
+    }
+    if let Some(plant_x) = plant_x {
+        put_sprite(area, buffer, &PLANTS_COMPACT, plant_x, 4, palette);
     }
 
     let pet_x = geometry.pet.x.saturating_sub(area.x);
@@ -1149,9 +1337,17 @@ fn render_compact_wide(
                 area,
                 buffer,
                 pet_sprite_compact(PetPose::Sleep),
-                bed_x.saturating_add(13),
+                bed_x.saturating_add(11),
                 bed_y,
                 palette,
+            );
+            put_text(
+                area,
+                buffer,
+                bed_x.saturating_add(8),
+                bed_y.saturating_add(3),
+                "BED",
+                palette.cell_style(SemanticTone::Tone3),
             );
             put_text(
                 area,
@@ -1214,6 +1410,7 @@ fn render_minimal(
     geometry: &RoomGeometry,
 ) {
     let palette = options.palette();
+    let layout = minimal_layout(area, snapshot);
     let needs = snapshot.needs;
     let state = if napping {
         "SLEEP"
@@ -1251,53 +1448,57 @@ fn render_minimal(
     );
 
     let (affection, snack) = demand_counts(snapshot);
-    if let Some(food) = geometry.food_sources.first() {
+    if let Some((_, _count, rect, label)) = layout.food.as_ref() {
         put_text(
             area,
             buffer,
-            food.rect.x.saturating_sub(area.x),
+            rect.x.saturating_sub(area.x),
             MINIMAL_TARGET_ROW,
-            &minimal_food_label(food.count),
+            label,
             palette.cell_style(SemanticTone::Tone2),
         );
-    } else {
+    } else if let Some((x, label)) = layout.disabled_food.as_ref() {
         put_text(
             area,
             buffer,
-            geometry.pet.width.saturating_add(1),
+            *x,
             MINIMAL_TARGET_ROW,
-            "[FOOD none]",
+            label,
             palette.cell_style(SemanticTone::Tone1),
         );
     }
-    if let Some(bed) = geometry.bed {
+    if let Some((bed, label)) = layout.bed {
         put_text(
             area,
             buffer,
             bed.x.saturating_sub(area.x),
             MINIMAL_TARGET_ROW,
-            MINIMAL_BED_LABEL,
+            label,
             palette.cell_style(SemanticTone::Tone2),
         );
     }
-    if geometry.poops.is_empty() {
+    if layout.poops.is_empty() {
         let poop_x = minimal_cue_x(area, geometry);
         put_text(
             area,
             buffer,
             poop_x,
             MINIMAL_TARGET_ROW,
-            MINIMAL_POOP_LABEL,
+            minimal_poop_label_for_mode(if area.width <= 24 {
+                MinimalLabelMode::Tiny
+            } else {
+                MinimalLabelMode::Full
+            }),
             palette.cell_style(SemanticTone::Tone1),
         );
     } else {
-        for (_, poop) in &geometry.poops {
+        for (_, poop, label) in &layout.poops {
             put_text(
                 area,
                 buffer,
                 poop.x.saturating_sub(area.x),
                 MINIMAL_TARGET_ROW,
-                MINIMAL_POOP_LABEL,
+                label,
                 palette.cell_style(SemanticTone::Tone2),
             );
         }
@@ -1342,18 +1543,66 @@ fn minimal_cue_x(area: Rect, geometry: &RoomGeometry) -> u16 {
 }
 
 fn minimal_pet_sprite(pose: PetPose) -> [&'static str; 6] {
-    let sprite = pet_sprite_compact(pose);
-    match pose {
-        PetPose::Doze => [
-            sprite[2], sprite[3], sprite[4], sprite[5], sprite[6], sprite[7],
-        ],
-        PetPose::Sleep => [
-            sprite[1], sprite[2], sprite[3], sprite[4], sprite[5], sprite[6],
-        ],
-        _ => [
-            sprite[0], sprite[1], sprite[2], sprite[3], sprite[4], sprite[5],
-        ],
+    *pet_sprite_minimal(pose)
+}
+
+fn compact_status_line(needs: PetNeeds) -> String {
+    let status = format!(
+        "HUNGER {}  ENERGY {}  HAPPY {}  CLEAN {}",
+        need_bar(needs.hunger()),
+        need_bar(needs.energy()),
+        need_bar(needs.happiness()),
+        need_bar(needs.cleanliness()),
+    );
+    if [
+        need_percent(needs.hunger()),
+        need_percent(needs.energy()),
+        need_percent(needs.happiness()),
+        need_percent(needs.cleanliness()),
+    ] == [0, 100, 100, 100]
+    {
+        status
+    } else {
+        format!(
+            "{status}  H {} E {} P {} C {}",
+            need_percent(needs.hunger()),
+            need_percent(needs.energy()),
+            need_percent(needs.happiness()),
+            need_percent(needs.cleanliness()),
+        )
     }
+}
+
+fn compact_decoration_slots(area: Rect, geometry: &RoomGeometry) -> (Option<u16>, Option<u16>) {
+    if area.width < 100 {
+        return (None, None);
+    }
+    let care_end = geometry
+        .poops
+        .last()
+        .map(|(_, rect)| rect.right().saturating_sub(area.x))
+        .or_else(|| {
+            geometry
+                .food_sources
+                .last()
+                .map(|source| source.rect.right().saturating_sub(area.x))
+        })
+        .unwrap_or(14);
+    let bed_start = geometry
+        .bed
+        .map(|rect| rect.x.saturating_sub(area.x))
+        .unwrap_or(area.width);
+    let window_width = sprite_width(&WINDOW_COMPACT);
+    let plant_width = sprite_width(&PLANTS_COMPACT);
+    let window_limit = bed_start.saturating_sub(window_width.saturating_add(2));
+    let window_start = care_end.saturating_add(2);
+    if window_start > window_limit {
+        return (None, None);
+    }
+    let window_x = window_start;
+    let plant_x = window_x.saturating_add(window_width).saturating_add(2);
+    let plant = (plant_x.saturating_add(plant_width) <= bed_start).then_some(plant_x);
+    (Some(window_x), plant)
 }
 
 /// Short terminal labels for the authoritative food kinds.
@@ -1448,7 +1697,15 @@ fn render_food_sources_wide(
         };
         put_sprite(area, buffer, bowl, x, y, palette);
         let food = FoodKind::from_id(source.food_id).expect("rendered food id is known");
-        let label = food_source_label(food, source.count, compact, index == 0, ultra_compact);
+        let label = food_source_label(
+            food,
+            source.count,
+            compact,
+            index == 0,
+            ultra_compact,
+            false,
+            compact,
+        );
         put_text(
             area,
             buffer,
@@ -1489,37 +1746,34 @@ fn render_food_sources_compact_wide(
     geometry: &RoomGeometry,
     palette: ResolvedPalette,
 ) {
-    let Some(first) = geometry.food_sources.first() else {
-        return;
-    };
-    let x = first.rect.x.saturating_sub(area.x);
-    let y = first.rect.y.saturating_sub(area.y);
-    put_sprite(area, buffer, &FOOD_BOWL_COMPACT, x, y, palette);
-    put_text(
-        area,
-        buffer,
-        x,
-        y.saturating_add(3),
-        &format!("FOOD x{}", first.count),
-        palette.cell_style(SemanticTone::Tone3),
-    );
-    // Other stocked foods remain visible as small tray dots/counts instead
-    // of displacing the pet or bed from the compact priority order.
-    for (index, source) in geometry.food_sources.iter().skip(1).enumerate() {
+    let compact = true;
+    let ultra_compact = area.width < 90;
+    for (index, source) in geometry.food_sources.iter().enumerate() {
         let x = source.rect.x.saturating_sub(area.x);
         let y = source.rect.y.saturating_sub(area.y);
         put_sprite(area, buffer, &FOOD_BOWL_COMPACT, x, y, palette);
+        let food = FoodKind::from_id(source.food_id).expect("rendered food id is known");
+        let label = food_source_label(
+            food,
+            source.count,
+            compact,
+            index == 0,
+            ultra_compact,
+            true,
+            area.width < 110,
+        );
         put_text(
             area,
             buffer,
             x,
-            y.saturating_add(2),
-            &format!("{}x{}", food_label(source.food_id), source.count),
-            palette.cell_style(SemanticTone::Tone2),
+            y.saturating_add(if index == 0 { 3 } else { 2 }),
+            &label,
+            palette.cell_style(if index == 0 {
+                SemanticTone::Tone3
+            } else {
+                SemanticTone::Tone2
+            }),
         );
-        if index > 8 {
-            break;
-        }
     }
 }
 
@@ -1529,20 +1783,23 @@ fn render_poops_compact_wide(
     geometry: &RoomGeometry,
     palette: ResolvedPalette,
 ) {
-    let Some((_, rect)) = geometry.poops.first() else {
-        return;
-    };
-    let x = rect.x.saturating_sub(area.x);
-    let y = rect.y.saturating_sub(area.y);
-    put_sprite(area, buffer, &POOP_OBJECT_COMPACT, x, y, palette);
-    put_text(
-        area,
-        buffer,
-        x,
-        y.saturating_add(3),
-        "POOP",
-        palette.cell_style(SemanticTone::Tone3),
-    );
+    for (index, (_, rect)) in geometry.poops.iter().enumerate() {
+        let x = rect.x.saturating_sub(area.x);
+        let y = rect.y.saturating_sub(area.y);
+        put_sprite(area, buffer, &POOP_OBJECT_COMPACT, x, y, palette);
+        put_text(
+            area,
+            buffer,
+            x,
+            y.saturating_add(3),
+            "POOP",
+            palette.cell_style(if index == 0 {
+                SemanticTone::Tone3
+            } else {
+                SemanticTone::Tone2
+            }),
+        );
+    }
 }
 
 /// Renders every stocked drag source with its authoritative count.
@@ -2022,7 +2279,16 @@ mod tests {
         let pet = Pet::with_inventory(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, now, inventory);
         let snapshot =
             PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot();
-        let sources = wide_food_sources(Rect::new(0, 0, 120, 14), &snapshot, 32, 8, false, false);
+        let sources = wide_food_sources(
+            Rect::new(0, 0, 120, 14),
+            &snapshot,
+            32,
+            8,
+            false,
+            false,
+            false,
+            false,
+        );
 
         assert_eq!(sources.len(), 2);
         assert_eq!(
@@ -2087,15 +2353,18 @@ mod tests {
     }
 
     #[test]
-    fn minimal_idle_sprite_clips_a_contiguous_upper_body() {
-        let compact = pet_sprite_compact(PetPose::Idle);
-
+    fn minimal_idle_sprite_keeps_the_complete_mascot_silhouette() {
         assert_eq!(
             minimal_pet_sprite(PetPose::Idle),
             [
-                compact[0], compact[1], compact[2], compact[3], compact[4], compact[5],
+                "  #  #   ",
+                " ####### ",
+                "#  oo  ##",
+                "#  ..  ##",
+                " ####### ",
+                "  ## ##  ",
             ],
-            "Minimal should clip the compact mascot, not splice distant rows"
+            "Minimal should show ears, face, body, and feet in three packed rows"
         );
     }
 }

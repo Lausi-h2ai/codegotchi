@@ -42,6 +42,24 @@ fn buffer_text(buffer: &Buffer, width: u16, height: u16) -> String {
     text
 }
 
+fn row_text(buffer: &Buffer, width: u16, y: u16) -> String {
+    (0..width)
+        .map(|x| buffer.cell((x, y)).expect("row cell").symbol())
+        .collect()
+}
+
+fn find_row_text(buffer: &Buffer, width: u16, y: u16, needle: &str) -> Option<u16> {
+    let row = row_text(buffer, width, y);
+    let needle_width = u16::try_from(needle.chars().count()).ok()?;
+    (0..=width.saturating_sub(needle_width)).find(|start| {
+        row.chars()
+            .skip(usize::from(*start))
+            .take(usize::from(needle_width))
+            .collect::<String>()
+            == needle
+    })
+}
+
 /// The presentation mapping must be exact and exhaustive: current aggregate
 /// activity wins over stale recent outcomes, blocked/waiting always win, and
 /// only `Idle` may fall back to a recent outcome. Every current `ActivityKind`
@@ -500,7 +518,10 @@ fn compact_is_a_seven_row_vignette_with_segmented_needs_and_care_objects() {
     let text = buffer_text(&buffer, area.width, area.height);
 
     for marker in [
-        "H 0 E 100 P 100 C 100",
+        "HUNGER",
+        "ENERGY",
+        "HAPPY",
+        "CLEAN",
         "Calm  A1 S1",
         "FOOD",
         "BED",
@@ -529,6 +550,111 @@ fn compact_is_a_seven_row_vignette_with_segmented_needs_and_care_objects() {
         !text.contains("╭──────────────────────╮"),
         "Compact must remove Full desk decoration"
     );
+}
+
+#[test]
+fn compact_status_strip_has_exact_named_segments() {
+    let snapshot = base_snapshot(Utc::now());
+    let area = Rect::new(0, 0, 120, 7);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+
+    let expected = "HUNGER ░░░░░░░░  ENERGY ████████  HAPPY ████████  CLEAN ████████";
+    assert_eq!(
+        row_text(&buffer, area.width, 0)
+            .chars()
+            .take(expected.chars().count())
+            .collect::<String>(),
+        expected
+    );
+    assert_eq!(row_text(&buffer, area.width, 1).trim_end(), "Calm");
+}
+
+#[test]
+fn compact_uses_named_segmented_need_indicators() {
+    let snapshot = base_snapshot(Utc::now());
+    let area = Rect::new(0, 0, 120, 7);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let text = buffer_text(&buffer, area.width, area.height);
+
+    for marker in ["HUNGER", "ENERGY", "HAPPY", "CLEAN"] {
+        assert!(
+            text.contains(marker),
+            "Compact missing named need {marker}: {text}"
+        );
+    }
+    assert!(
+        text.contains('█') && text.contains('░'),
+        "Compact needs must use visible filled and empty segments: {text}"
+    );
+    assert!(!text.contains("H 0 E 100 P 100 C 100"));
+}
+
+#[test]
+fn compact_renders_every_authoritative_pooped_target() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    for index in 0..3_u128 {
+        snapshot
+            .pending_poops
+            .push(Poop::new(Uuid::from_u128(100 + index), now));
+    }
+    let area = Rect::new(0, 0, 120, 7);
+    let geometry = room_geometry(area, &snapshot);
+    assert_eq!(
+        geometry.poops.len(),
+        3,
+        "Compact must retain every visible poop"
+    );
+
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    for (_, rect) in &geometry.poops {
+        assert!(
+            (rect.y..rect.bottom()).any(|y| {
+                (rect.x..rect.right())
+                    .any(|x| buffer.cell((x, y)).is_some_and(|cell| cell.symbol() != " "))
+            }),
+            "Compact poop target has no rendered counterpart: {rect:?}"
+        );
+    }
+    let text = buffer_text(&buffer, area.width, area.height);
+    assert_eq!(text.matches("POOP").count(), 3, "{text}");
+}
+
+#[test]
+fn compact_decorations_are_separate_from_care_targets() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot
+        .pending_poops
+        .push(Poop::new(Uuid::from_u128(101), now));
+    let area = Rect::new(0, 0, 120, 7);
+    let geometry = room_geometry(area, &snapshot);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+
+    let window_x =
+        find_row_text(&buffer, area.width, 2, "┌──────────┐").expect("Compact window border");
+    let window = Rect::new(window_x, 2, 12, 3);
+    let plant_x = find_row_text(&buffer, area.width, 6, "┌───┐").expect("Compact plant pot");
+    let plants = Rect::new(plant_x, 4, 5, 3);
+    for target in geometry
+        .food_sources
+        .iter()
+        .map(|source| source.rect)
+        .chain(geometry.poops.iter().map(|(_, rect)| *rect))
+    {
+        assert!(
+            !rects_overlap(window, target),
+            "window overlaps care target {target:?}"
+        );
+        assert!(
+            !rects_overlap(plants, target),
+            "plants overlap care target {target:?}"
+        );
+    }
 }
 
 #[test]
@@ -648,6 +774,109 @@ fn minimal_target_labels_are_drawn_inside_their_hit_regions() {
     assert!(
         geometry.poops.iter().all(|(_, rect)| visible(*rect)),
         "Minimal poop affordance is outside its hitbox"
+    );
+}
+
+#[test]
+fn minimal_narrow_targets_are_packed_without_collisions() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    for index in 0..3_u128 {
+        snapshot
+            .pending_poops
+            .push(Poop::new(Uuid::from_u128(30 + index), now));
+    }
+
+    for width in [24, 32, 40] {
+        let area = Rect::new(0, 0, width, 3);
+        let geometry = room_geometry(area, &snapshot);
+        let mut buffer = Buffer::filled(area, Cell::new(" "));
+        render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+        let targets = geometry
+            .food_sources
+            .iter()
+            .map(|source| source.rect)
+            .chain(geometry.bed.iter().copied())
+            .chain(geometry.poops.iter().map(|(_, rect)| *rect))
+            .collect::<Vec<_>>();
+
+        for (index, target) in targets.iter().enumerate() {
+            assert!(
+                target.width > 0,
+                "zero-width target at width {width}: {target:?}"
+            );
+            assert!(
+                target.right() <= area.right(),
+                "target clipped at width {width}: {target:?}"
+            );
+            assert!(
+                (target.x..target.right()).any(|x| {
+                    buffer
+                        .cell((x, target.y))
+                        .is_some_and(|cell| cell.symbol() != " ")
+                }),
+                "target has no visible label at width {width}: {target:?}"
+            );
+            for other in targets.iter().skip(index + 1) {
+                assert!(
+                    !rects_overlap(*target, *other),
+                    "targets overlap at width {width}: {target:?} and {other:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn minimal_renderer_uses_the_selected_narrow_target_labels() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot
+        .pending_poops
+        .push(Poop::new(Uuid::from_u128(40), now));
+    snapshot
+        .pending_poops
+        .push(Poop::new(Uuid::from_u128(41), now));
+
+    let area = Rect::new(0, 0, 24, 3);
+    let geometry = room_geometry(area, &snapshot);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+
+    let row = |rect: Rect| {
+        (rect.x..rect.right())
+            .map(|x| {
+                buffer
+                    .cell((x, rect.y))
+                    .expect("minimal target cell")
+                    .symbol()
+            })
+            .collect::<String>()
+    };
+    assert_eq!(row(geometry.food_sources[0].rect), "F50");
+    assert_eq!(row(geometry.bed.expect("minimal bed")), "B");
+    assert_eq!(row(geometry.poops[0].1), "P");
+    assert_eq!(row(geometry.poops[1].1), "P");
+}
+
+#[test]
+fn minimal_renderer_uses_the_selected_no_food_label() {
+    let now = Utc::now();
+    let pet = Pet::with_inventory(
+        Uuid::from_u128(42),
+        "Mochi",
+        PetSpecies::Cat,
+        now,
+        FoodInventory::default(),
+    );
+    let snapshot = PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot();
+    let area = Rect::new(0, 0, 24, 3);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    assert!(
+        row_text(&buffer, area.width, 1).contains("F-"),
+        "narrow Minimal should use the packed disabled-food label: {}",
+        row_text(&buffer, area.width, 1)
     );
 }
 
@@ -1268,6 +1497,12 @@ fn rendered_care_extents_are_inside_their_hit_regions() {
             };
             let label = if area.height >= 14 {
                 format!("{food_name} x{}", food.count)
+            } else if area.width < 110 {
+                if food_name == "FOOD" {
+                    format!("FOOD{}", compact_count_for_test(food.count))
+                } else {
+                    format!("{}{}", food_name, compact_count_for_test(food.count))
+                }
             } else {
                 format!("FOOD x{}", food.count)
             };
@@ -1336,6 +1571,24 @@ fn rendered_care_extents_are_inside_their_hit_regions() {
                     "poop hit region must contain every rendered sprite cell: rect={poop:?} point={point:?}"
                 );
             }
+        }
+    }
+}
+
+fn compact_count_for_test(count: u32) -> String {
+    if count < 1_000 {
+        count.to_string()
+    } else if count < 1_000_000 {
+        format!("{}k", count / 1_000)
+    } else if count < 1_000_000_000 {
+        format!("{}M", count / 1_000_000)
+    } else {
+        let whole = count / 1_000_000_000;
+        let tenth = (count % 1_000_000_000) / 100_000_000;
+        if tenth == 0 {
+            format!("{whole}B")
+        } else {
+            format!("{whole}.{tenth}B")
         }
     }
 }
@@ -1558,6 +1811,60 @@ fn compact_eighty_column_geometry_keeps_care_targets_in_bounds() {
             .iter()
             .all(|(_, poop)| !rects_overlap(source.rect, *poop))
     }));
+
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let text = buffer_text(&buffer, area.width, area.height);
+    for marker in ["FOOD", "TRT", "FRT", "ENE", "BED", "POOP"] {
+        assert!(text.contains(marker), "Compact 80 missing {marker}: {text}");
+    }
+}
+
+#[test]
+fn compact_eighty_column_geometry_abbreviates_large_authoritative_counts() {
+    let now = Utc::now();
+    let mut inventory = FoodInventory::new();
+    for food in [
+        FoodKind::Kibble,
+        FoodKind::Treat,
+        FoodKind::Fruit,
+        FoodKind::EnergyDrink,
+    ] {
+        inventory.add(food, u32::MAX);
+    }
+    let pet = Pet::with_inventory(
+        Uuid::from_u128(23),
+        "Mochi",
+        PetSpecies::Cat,
+        now,
+        inventory,
+    );
+    let mut snapshot =
+        PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot();
+    snapshot
+        .pending_poops
+        .push(Poop::new(Uuid::from_u128(24), now));
+    let area = Rect::new(0, 0, 80, 7);
+    let geometry = room_geometry(area, &snapshot);
+
+    assert_eq!(geometry.food_sources.len(), 4);
+    assert!(
+        geometry
+            .food_sources
+            .iter()
+            .all(|source| source.rect.right() <= area.right())
+    );
+    for (index, source) in geometry.food_sources.iter().enumerate() {
+        for other in geometry.food_sources.iter().skip(index + 1) {
+            assert!(!rects_overlap(source.rect, other.rect));
+        }
+        assert!(
+            geometry
+                .poops
+                .iter()
+                .all(|(_, poop)| !rects_overlap(source.rect, *poop))
+        );
+    }
 
     let mut buffer = Buffer::filled(area, Cell::new(" "));
     render_room(area, &mut buffer, &snapshot, &default_frame(), None);
