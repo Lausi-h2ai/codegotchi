@@ -1,0 +1,35 @@
+# Task 7 round-one blocked evidence
+
+Observed: 2026-08-21, `codex-cli 0.149.0`.
+
+Command:
+
+```text
+CODEGOTCHI_LIVE_NO_BUILD=1 DISPLAY= \
+  CODEGOTCHI_LIVE_OUTPUT_DIR=/tmp/codegotchi-live-round1-preflight-final \
+  ./scripts/verify-terminal-room-live.sh
+```
+
+Observed result: exit status `1`, final report status `BLOCKED`.
+
+```text
+[live] installed Codex: codex-cli 0.149.0
+[live] Codex argument isolation: trailing arguments are supplied through a private NUL-delimited file, not process argv
+[live] DISPLAY is unset; attempting a private display
+[live] BLOCKED: no lightweight window manager is installed; private Xvfb acceptance requires openbox, fluxbox, xfwm4, icewm, matchbox-window-manager, jwm, or twm
+```
+
+No private X server, xterm, Codex session, or cleanup signal was launched by
+this preflight. No interaction or visual PASS is claimed. The report is
+durable because the generated temporary report was redacted and transcribed
+here; it contains no Codex arguments, runtime metadata, or bearer token.
+
+A separate disposable transport-only check used a fake Codex executable and a
+test window-manager shim. It reached `private display transport: verified
+authenticated local Unix-socket X transport before xdotool use`, then stopped
+at the expected fake-window visibility check. It is evidence for the private
+transport wiring only, not a real-Codex acceptance result.
+
+A redaction probe supplied a sentinel custom argument and reached the same
+blocked prerequisite. The process output and generated report contained
+neither the sentinel nor the argument name.

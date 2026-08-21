@@ -77,10 +77,13 @@ It prints the installed Codex version, requires `xterm`, `xdotool`,
 ImageMagick `import`, and a usable X display, redirects CodeGotchi XDG
 state/runtime/data/config/cache/home paths into a run-owned temporary tree,
 sets `CODEGOTCHI_BROWSER=none`, and never prints Codex arguments, auth
-contents, runtime metadata, or bearer tokens. It records only PIDs it starts;
-cleanup verifies each PID's start time and command marker before sending
-`SIGTERM`, and uses no broad `pgrep codex` cleanup. A private `Xvfb` path is
-available only when a supported lightweight window manager is installed.
+contents, runtime metadata, or bearer tokens. Codex arguments are supplied to
+the launcher through a private NUL-delimited file rather than process `argv`,
+and state polling keeps the bearer token in a private curl config file. Cleanup
+records only run roots, verifies start time/role, walks every live descendant,
+and sends `SIGTERM` before bounded escalation; diagnostics omit command lines.
+A private `Xvfb` path uses an authenticated local Unix socket and is available
+only when a supported lightweight window manager is installed.
 Hook trust is opt-in through `CODEGOTCHI_LIVE_TRUST_HOOKS=1` so a run cannot
 silently approve hooks outside a disposable authorized session.
 
@@ -115,19 +118,22 @@ CODEGOTCHI_LIVE_NO_BUILD=1 CODEGOTCHI_LIVE_TIMEOUT_SEC=10 \
 ```
 
 The production room and the official Codex pane rendered at terminal geometry
-`120x45`. The fresh initial live capture was
+`120x45` during an earlier preliminary run. Its temporary capture was
 `/tmp/codegotchi-live-evidence-t7-rerun/20260821T200006Z-1672739-full-live-populated.png`
 (`724x589`, SHA-256
 `afdc62b0857de763b9c47bbe152b1beec7ad7f486df07d7d25d9d076e4441d59`). Direct
-image inspection confirmed the real Codex pane above a populated CodeGotchi
-room, with no visible bearer token. The Codex pane was still on its official
-`Hooks need review` screen, and the shared display subsequently failed the
-window-activation check; the harness terminated only its run-owned xterm.
+image inspection confirmed the real Codex pane above a visible CodeGotchi
+room, with no visible bearer token. It was not a populated interaction frame:
+the Codex pane was still on its official `Hooks need review` screen, and the
+shared display subsequently failed the window-activation check; the harness
+terminated only its run-owned xterm.
 The corrected harness now labels this pre-interaction frame `full-live-initial`
 and reports `BLOCKED` when care snapshots or required interaction checks do not
 settle; a `full-live-populated` frame is captured only after the bounded prompt
 and tool probes.
 
+The durable round-one blocked report is
+[`live-codex/task-7-round1-blocked.txt`](terminal-room/live-codex/task-7-round1-blocked.txt).
 Therefore these items remain **not claimed**: ordinary prompt/model response,
 tool activity, approval/review, bracketed paste (`xclip`/`xsel` are not
 installed), observable Codex focus reporting, mouse behavior, Full → Compact →

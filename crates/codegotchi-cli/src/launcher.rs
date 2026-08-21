@@ -14,6 +14,8 @@ use nix::sys::signal::{SigSet, Signal, killpg};
 #[cfg(unix)]
 use nix::unistd::{Pid, getpgid, getpgrp, setpgid, tcgetpgrp, tcsetpgrp};
 #[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use thiserror::Error;
 #[cfg(unix)]
@@ -289,8 +291,58 @@ pub fn run(arguments: impl IntoIterator<Item = OsString>) -> Result<i32, Launche
     runtime.block_on(run_async(arguments.into_iter().collect()))
 }
 
+/// Loads trailing Codex arguments from a private NUL-delimited file when the
+/// live acceptance harness needs to keep operator-provided values out of the
+/// process table. Ordinary CLI arguments remain the default path.
+fn load_codex_arguments(cli_arguments: &[OsString]) -> Result<Vec<OsString>, LauncherError> {
+    if !cli_arguments.is_empty() {
+        return Ok(cli_arguments.to_vec());
+    }
+    let Some(path) = env::var_os("CODEGOTCHI_CODEX_ARGUMENTS_FILE") else {
+        return Ok(Vec::new());
+    };
+    let bytes = fs::read(&path).map_err(|error| {
+        LauncherError::message(format!(
+            "could not read CODEGOTCHI_CODEX_ARGUMENTS_FILE: {error}"
+        ))
+    })?;
+    let arguments = parse_codex_argument_file(&bytes)?;
+    if arguments.iter().any(is_profile_conflict) {
+        return Err(LauncherError::message(
+            "a private Codex argument file contains a profile argument that conflicts with CodeGotchi's generated additive profile",
+        ));
+    }
+    Ok(arguments)
+}
+
+fn parse_codex_argument_file(bytes: &[u8]) -> Result<Vec<OsString>, LauncherError> {
+    if bytes.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !bytes.ends_with(&[0]) {
+        return Err(LauncherError::message(
+            "CODEGOTCHI_CODEX_ARGUMENTS_FILE must be NUL-delimited",
+        ));
+    }
+    Ok(bytes[..bytes.len() - 1]
+        .split(|byte| *byte == 0)
+        .map(os_string_from_bytes)
+        .collect::<Vec<_>>())
+}
+
+#[cfg(unix)]
+fn os_string_from_bytes(bytes: &[u8]) -> OsString {
+    OsString::from_vec(bytes.to_vec())
+}
+
+#[cfg(not(unix))]
+fn os_string_from_bytes(bytes: &[u8]) -> OsString {
+    OsString::from(String::from_utf8_lossy(bytes).into_owned())
+}
+
 async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
     let validated = validate(arguments)?;
+    let trailing_codex_arguments = load_codex_arguments(&validated.trailing_arguments)?;
     let mut signals = SignalController::install()?;
     if let Some(signal) = signals.try_setup_termination().await {
         return Ok(signal.exit_status());
@@ -413,7 +465,7 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
             )));
         }
     };
-    let invocation = profile_guard.invocation(&validated.codex_path, &validated.trailing_arguments);
+    let invocation = profile_guard.invocation(&validated.codex_path, &trailing_codex_arguments);
     if let Some(signal) = signals.try_setup_termination().await {
         drop(profile_guard);
         drop(profile);
@@ -1519,7 +1571,7 @@ fn numeric_exit_status(status: ExitStatus) -> i32 {
 mod tests {
     use super::{
         InheritedSignalSource, LaunchRequest, LauncherError, TerminalAttemptError, UiMode,
-        execute_ui_route, parse_launch_request,
+        execute_ui_route, parse_codex_argument_file, parse_launch_request,
     };
     use crate::terminal::TerminalThemePreset;
     use std::ffi::OsString;
@@ -1532,6 +1584,25 @@ mod tests {
 
     fn os(arguments: &[&str]) -> Vec<OsString> {
         arguments.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn parses_private_codex_argument_file_without_argv_encoding() {
+        let parsed =
+            parse_codex_argument_file(b"--ask-for-approval\0never\0--sandbox\0read-only\0")
+                .unwrap();
+
+        assert_eq!(
+            parsed,
+            os(&["--ask-for-approval", "never", "--sandbox", "read-only"])
+        );
+    }
+
+    #[test]
+    fn rejects_unterminated_private_codex_argument_file() {
+        let error = parse_codex_argument_file(b"--sandbox\0read-only").unwrap_err();
+
+        assert!(error.to_string().contains("must be NUL-delimited"));
     }
 
     #[test]

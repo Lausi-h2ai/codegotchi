@@ -40,9 +40,11 @@ if [[ ${1-} == "--help" || ${1-} == "-h" ]]; then
 fi
 
 CODEX_ARGUMENTS=(--disable apps --ask-for-approval never --sandbox read-only)
+CUSTOM_CODEX_ARGUMENTS=0
 if [[ ${1-} == "--" ]]; then
     shift
     CODEX_ARGUMENTS=("$@")
+    CUSTOM_CODEX_ARGUMENTS=1
 elif (($# > 0)); then
     usage >&2
     exit 2
@@ -67,6 +69,9 @@ CACHE_HOME="$RUN_ROOT/cache"
 TEMP_HOME="$RUN_ROOT/home"
 mkdir -p -- "$STATE_HOME" "$RUNTIME_HOME" "$DATA_HOME" "$CONFIG_HOME" "$CACHE_HOME" "$TEMP_HOME"
 chmod 700 "$RUN_ROOT" "$STATE_HOME" "$RUNTIME_HOME" "$DATA_HOME" "$CONFIG_HOME" "$CACHE_HOME" "$TEMP_HOME"
+if [[ -t 0 ]] && [[ -e /dev/tty ]]; then
+    HOST_TTY_STATE_BEFORE=$(stty -g </dev/tty 2>/dev/null || true)
+fi
 
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 REPORT_PATH="$OUTPUT_DIR/$RUN_ID-verification.txt"
@@ -80,6 +85,7 @@ declare -a CREATED_MARKERS=()
 declare -A STATE_SUMMARIES=()
 
 DISPLAY_USED=""
+DISPLAY_AUTHORITY=""
 DISPLAY_STARTED=0
 XVFB_PID=""
 WM_PID=""
@@ -87,6 +93,11 @@ XTERM_PID=""
 XTERM_START=""
 WINDOW_ID=""
 WINDOW_TITLE="codegotchi-live-$RUN_ID"
+XTERM_SCREEN_LOG=""
+CODEX_ARGUMENTS_FILE=""
+CODEGOTCHI_ARGUMENTS_FILE=""
+CODEGOTCHI_WRAPPER=""
+RESTORE_PREFIX=""
 CURRENT_ROWS=45
 CURRENT_COLUMNS=120
 CAPTURED_FRAMES=()
@@ -95,8 +106,17 @@ API_URL=""
 API_TOKEN=""
 REPORT_WRITTEN=0
 CLEANUP_STARTED=0
+CLEANUP_BLOCKED=0
 FINAL_STATUS="not-run"
 REQUIRED_GATE_BLOCKED=0
+PROMPT_VERIFIED=0
+PASTE_VERIFIED=0
+TOOL_VERIFIED=0
+HOOK_TRUST_PENDING=0
+MOUSE_MODE_VERIFIED=0
+FOCUS_MODE_VERIFIED=0
+PASTE_MODE_VERIFIED=0
+HOST_TTY_STATE_BEFORE=""
 
 log() {
     local message=$1
@@ -120,6 +140,13 @@ fail() {
     exit 1
 }
 
+block_and_exit() {
+    log "BLOCKED: $1"
+    FINAL_STATUS='BLOCKED'
+    REQUIRED_GATE_BLOCKED=1
+    exit 1
+}
+
 require_command() {
     local command_name=$1
     if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -133,10 +160,22 @@ pid_start_time() {
     awk '{print $22}' "/proc/$pid/stat"
 }
 
+pid_is_running() {
+    local pid=$1
+    [[ -r "/proc/$pid/stat" ]] || return 1
+    [[ $(awk '{print $3}' "/proc/$pid/stat") != Z ]]
+}
+
 pid_cmdline() {
     local pid=$1
     [[ -r "/proc/$pid/cmdline" ]] || return 1
     tr '\0' ' ' < "/proc/$pid/cmdline"
+}
+
+pid_parent() {
+    local pid=$1
+    [[ -r "/proc/$pid/status" ]] || return 1
+    awk '/^PPid:/ {print $2; exit}' "/proc/$pid/status"
 }
 
 ancestor_chain_contains() {
@@ -145,15 +184,52 @@ ancestor_chain_contains() {
     local parent
     while [[ $pid =~ ^[0-9]+$ && $pid -gt 0 ]]; do
         [[ $pid == "$target" ]] && return 0
-        [[ -r "/proc/$pid/stat" ]] || break
-        parent=$(awk '{print $4}' "/proc/$pid/stat")
+        parent=$(pid_parent "$pid" 2>/dev/null || true)
         [[ $parent == "$pid" || -z $parent ]] && break
         pid=$parent
     done
     return 1
 }
 
-register_created_pid() {
+descendant_pids() {
+    local root=$1
+    local -a pending=("$root")
+    local -a found=()
+    local current child
+    while ((${#pending[@]} > 0)); do
+        current=${pending[0]}
+        pending=("${pending[@]:1}")
+        pid_is_running "$current" || continue
+        found+=("$current")
+        for child in /proc/[0-9]*; do
+            child=${child##*/}
+            [[ $child =~ ^[0-9]+$ ]] || continue
+            pid_is_running "$child" || continue
+            [[ $(pid_parent "$child" 2>/dev/null || true) == "$current" ]] || continue
+            if ! printf '%s\n' "${found[@]}" | grep -Fxq "$child"; then
+                pending+=("$child")
+            fi
+        done
+    done
+    if ((${#found[@]} > 0)); then
+        printf '%s\n' "${found[@]}"
+    fi
+}
+
+tree_reaches_root() {
+    local pid=$1
+    local root=$2
+    local parent
+    while [[ $pid =~ ^[0-9]+$ && $pid -gt 0 ]]; do
+        [[ $pid == "$root" ]] && return 0
+        parent=$(pid_parent "$pid" 2>/dev/null || true)
+        [[ -z $parent || $parent == "$pid" ]] && break
+        pid=$parent
+    done
+    return 1
+}
+
+register_created_root() {
     local pid=$1
     local marker=$2
     local start
@@ -163,45 +239,144 @@ register_created_pid() {
     CREATED_MARKERS+=("$marker")
 }
 
-safe_stop_created_pid() {
+safe_stop_created_tree() {
     local index=$1
-    local pid=${CREATED_PIDS[$index]}
+    local root=${CREATED_PIDS[$index]}
     local expected_start=${CREATED_STARTS[$index]}
     local marker=${CREATED_MARKERS[$index]}
+    local pid
     local current_start
     local command_line
+    local -a candidates=()
+    local -a remaining=()
+    local -a live_descendants=()
+    declare -A candidate_starts=()
 
-    [[ -n $pid ]] || return 0
-    if ! kill -0 "$pid" 2>/dev/null; then
+    [[ -n $root ]] || return 0
+    if ! kill -0 "$root" 2>/dev/null || ! pid_is_running "$root"; then
         return 0
     fi
-    if ancestor_chain_contains "$pid"; then
-        log "refusing to signal session ancestor PID $pid"
+    if ancestor_chain_contains "$root"; then
+        log "refusing to signal session ancestor PID $root"
+        CLEANUP_BLOCKED=1
+        block_required_gate
         return 0
     fi
-    current_start=$(pid_start_time "$pid" 2>/dev/null || true)
+    current_start=$(pid_start_time "$root" 2>/dev/null || true)
     if [[ -z $current_start || $current_start != "$expected_start" ]]; then
-        log "refusing to signal reused PID $pid"
+        log "refusing to signal reused PID $root"
+        CLEANUP_BLOCKED=1
+        block_required_gate
         return 0
     fi
-    command_line=$(pid_cmdline "$pid" 2>/dev/null || true)
+    command_line=$(pid_cmdline "$root" 2>/dev/null || true)
     if [[ -z $command_line || $command_line != *"$marker"* ]]; then
-        log "refusing to signal unverified PID $pid"
+        log "refusing to signal unverified PID $root"
+        CLEANUP_BLOCKED=1
+        block_required_gate
         return 0
     fi
 
-    log "cleanup candidate: $(ps -o pid=,ppid=,stat=,etime=,cmd= -p "$pid" 2>/dev/null || true)"
-    kill -TERM "$pid" 2>/dev/null || true
+    mapfile -t candidates < <(descendant_pids "$root")
+    local candidate
+    for candidate in "${candidates[@]}"; do
+        if ancestor_chain_contains "$candidate" || ! tree_reaches_root "$candidate" "$root"; then
+            log "refusing to signal protected or detached descendant PID $candidate"
+            continue
+        fi
+        candidate_starts["$candidate"]=$(pid_start_time "$candidate" 2>/dev/null || true)
+        [[ -n ${candidate_starts[$candidate]} ]] || continue
+        log "cleanup candidate: $(ps -o pid=,ppid=,stat=,etime= -p "$candidate" 2>/dev/null || true)"
+    done
+    for ((index = ${#candidates[@]} - 1; index >= 0; index--)); do
+        pid=${candidates[$index]}
+        [[ $pid == "$root" ]] && continue
+        if ancestor_chain_contains "$pid" || ! tree_reaches_root "$pid" "$root"; then
+            CLEANUP_BLOCKED=1
+            continue
+        fi
+        current_start=$(pid_start_time "$pid" 2>/dev/null || true)
+        [[ $current_start == "${candidate_starts[$pid]-}" ]] || continue
+        kill -TERM "$pid" 2>/dev/null || true
+    done
     for _ in {1..20}; do
-        kill -0 "$pid" 2>/dev/null || return 0
+        mapfile -t live_descendants < <(descendant_pids "$root" 2>/dev/null || true)
+        remaining=()
+        for pid in "${live_descendants[@]}"; do
+            [[ $pid != "$root" ]] && remaining+=("$pid")
+        done
+        ((${#remaining[@]} == 0)) && break
         sleep 0.1
     done
-    log "cleanup candidate still alive: $(ps -o pid=,ppid=,stat=,etime=,cmd= -p "$pid" 2>/dev/null || true)"
-    current_start=$(pid_start_time "$pid" 2>/dev/null || true)
-    command_line=$(pid_cmdline "$pid" 2>/dev/null || true)
-    if [[ $current_start == "$expected_start" && $command_line == *"$marker"* ]] && ! ancestor_chain_contains "$pid"; then
-        kill -KILL "$pid" 2>/dev/null || true
+    mapfile -t live_descendants < <(descendant_pids "$root" 2>/dev/null || true)
+    remaining=()
+    for pid in "${live_descendants[@]}"; do
+        [[ $pid != "$root" ]] && remaining+=("$pid")
+    done
+    for pid in "${remaining[@]}"; do
+        log "cleanup candidate still alive: $(ps -o pid=,ppid=,stat=,etime= -p "$pid" 2>/dev/null || true)"
+        current_start=$(pid_start_time "$pid" 2>/dev/null || true)
+        if ancestor_chain_contains "$pid" || ! tree_reaches_root "$pid" "$root"; then
+            CLEANUP_BLOCKED=1
+            continue
+        fi
+        [[ $current_start == "${candidate_starts[$pid]-}" ]] && kill -KILL "$pid" 2>/dev/null || true
+    done
+    for _ in {1..20}; do
+        mapfile -t live_descendants < <(descendant_pids "$root" 2>/dev/null || true)
+        remaining=()
+        for pid in "${live_descendants[@]}"; do
+            [[ $pid != "$root" ]] && remaining+=("$pid")
+        done
+        ((${#remaining[@]} == 0)) && break
+        sleep 0.1
+    done
+    mapfile -t live_descendants < <(descendant_pids "$root" 2>/dev/null || true)
+    remaining=()
+    for pid in "${live_descendants[@]}"; do
+        [[ $pid != "$root" ]] && remaining+=("$pid")
+    done
+    if ((${#remaining[@]} > 0)); then
+        CLEANUP_BLOCKED=1
+        block_required_gate
+        log "BLOCKED: run-owned descendants rooted at PID $root did not fully terminate"
+        return 0
     fi
+    for pid in "${candidates[@]}"; do
+        [[ $pid == "$root" ]] && continue
+        if pid_is_running "$pid"; then
+            current_start=$(pid_start_time "$pid" 2>/dev/null || true)
+            CLEANUP_BLOCKED=1
+            block_required_gate
+            if [[ $current_start == "${candidate_starts[$pid]-}" ]]; then
+                log "BLOCKED: verified run-owned descendant PID $pid escaped the root ancestry before root termination"
+            else
+                log "BLOCKED: candidate PID $pid was reused before root termination"
+            fi
+            return 0
+        fi
+    done
+
+    current_start=$(pid_start_time "$root" 2>/dev/null || true)
+    if [[ $current_start != "$expected_start" ]]; then
+        return 0
+    fi
+    kill -TERM "$root" 2>/dev/null || true
+    for _ in {1..20}; do
+        pid_is_running "$root" || return 0
+        sleep 0.1
+    done
+    current_start=$(pid_start_time "$root" 2>/dev/null || true)
+    if [[ $current_start == "$expected_start" ]]; then
+        kill -KILL "$root" 2>/dev/null || true
+    fi
+    for _ in {1..20}; do
+        pid_is_running "$root" || return 0
+        sleep 0.1
+    done
+    CLEANUP_BLOCKED=1
+    block_required_gate
+    log "BLOCKED: run-owned process root PID $root did not terminate"
 }
 
 write_report() {
@@ -237,8 +412,13 @@ write_report() {
             done
         fi
         printf '\n## Restoration\n\n'
-        printf '%s\n' '- Temporary XDG state/runtime/data/config/cache/home paths are removed by the harness cleanup.'
-        printf '%s\n' '- Only PIDs recorded from this run are considered for cleanup; no broad Codex/process matching is used.'
+        if ((CLEANUP_BLOCKED == 0)); then
+            printf '%s\n' '- Temporary XDG state/runtime/data/config/cache/home paths are removed by the harness cleanup.'
+        else
+            printf '%s\n' '- BLOCKED: the run root is retained because cleanup could not prove full process-tree termination.'
+        fi
+        printf '%s\n' '- Only run-root process trees recorded from this run are considered; descendants are verified by ancestry, start time, and role marker before TERM/KILL.'
+        printf '%s\n' '- Process diagnostics intentionally omit command lines so operator arguments and credentials cannot enter the report.'
     } > "$REPORT_PATH"
 }
 
@@ -250,10 +430,28 @@ cleanup() {
 
     local index
     for ((index = ${#CREATED_PIDS[@]} - 1; index >= 0; index--)); do
-        safe_stop_created_pid "$index"
+        safe_stop_created_tree "$index"
     done
+    if [[ $REQUIRED_GATE_BLOCKED == 1 && $FINAL_STATUS == PASS ]]; then
+        FINAL_STATUS='BLOCKED'
+    fi
+    if [[ -n $HOST_TTY_STATE_BEFORE ]]; then
+        local host_tty_state_after
+        host_tty_state_after=$(stty -g </dev/tty 2>/dev/null || true)
+        if [[ $host_tty_state_after == "$HOST_TTY_STATE_BEFORE" ]]; then
+            record 'controller terminal usability' 'parent tty stty state matched before/after the harness'
+        else
+            record 'controller terminal usability' 'not verified (parent tty stty state changed or became unavailable)'
+            REQUIRED_GATE_BLOCKED=1
+            [[ $FINAL_STATUS == PASS ]] && FINAL_STATUS='BLOCKED'
+        fi
+    fi
     write_report "$exit_status"
-    rm -rf -- "$RUN_ROOT"
+    if ((CLEANUP_BLOCKED == 0)); then
+        rm -rf -- "$RUN_ROOT"
+    else
+        log "BLOCKED: retained run root for safe cleanup follow-up"
+    fi
     exit "$exit_status"
 }
 
@@ -264,8 +462,21 @@ trap 'exit 143' TERM HUP
 is_display_usable() {
     local candidate=$1
     [[ -n $candidate ]] || return 1
-    DISPLAY="$candidate" xdpyinfo >/dev/null 2>&1 || return 1
-    DISPLAY="$candidate" xdotool getdisplaygeometry >/dev/null 2>&1 || return 1
+    if [[ -n $DISPLAY_AUTHORITY ]]; then
+        DISPLAY="$candidate" XAUTHORITY="$DISPLAY_AUTHORITY" xdpyinfo >/dev/null 2>&1 || return 1
+        DISPLAY="$candidate" XAUTHORITY="$DISPLAY_AUTHORITY" xdotool getdisplaygeometry >/dev/null 2>&1 || return 1
+    else
+        DISPLAY="$candidate" xdpyinfo >/dev/null 2>&1 || return 1
+        DISPLAY="$candidate" xdotool getdisplaygeometry >/dev/null 2>&1 || return 1
+    fi
+}
+
+display_command() {
+    if [[ -n $DISPLAY_AUTHORITY ]]; then
+        DISPLAY="$DISPLAY_USED" XAUTHORITY="$DISPLAY_AUTHORITY" "$@"
+    else
+        DISPLAY="$DISPLAY_USED" "$@"
+    fi
 }
 
 choose_window_manager() {
@@ -287,7 +498,8 @@ start_private_display() {
     local -a wm_arguments=()
 
     require_command Xvfb
-    wm_binary=$(choose_window_manager) || fail "no lightweight window manager is installed; private Xvfb acceptance requires openbox, fluxbox, xfwm4, icewm, matchbox-window-manager, jwm, or twm"
+    require_command xauth
+    wm_binary=$(choose_window_manager) || block_and_exit "no lightweight window manager is installed; private Xvfb acceptance requires openbox, fluxbox, xfwm4, icewm, matchbox-window-manager, jwm, or twm"
     wm_name=$(basename "$wm_binary")
 
     for display_number in $(seq 90 199); do
@@ -295,9 +507,17 @@ start_private_display() {
         if is_display_usable "$candidate"; then
             continue
         fi
-        DISPLAY="$candidate" Xvfb "$candidate" -screen 0 1920x1200x24 -ac -nolisten tcp -nolisten unix >"$RUN_ROOT/xvfb.log" 2>&1 &
+        DISPLAY_AUTHORITY="$RUN_ROOT/Xauthority-$display_number"
+        local cookie
+        cookie=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+        printf 'add %s MIT-MAGIC-COOKIE-1 %s\n' "$candidate" "$cookie" \
+            | xauth -f "$DISPLAY_AUTHORITY" >/dev/null 2>&1
+        chmod 600 "$DISPLAY_AUTHORITY"
+        DISPLAY="$candidate" XAUTHORITY="$DISPLAY_AUTHORITY" Xvfb "$candidate" \
+            -screen 0 1920x1200x24 -auth "$DISPLAY_AUTHORITY" -listen unix -nolisten tcp \
+            >"$RUN_ROOT/xvfb.log" 2>&1 &
         XVFB_PID=$!
-        register_created_pid "$XVFB_PID" "Xvfb $candidate"
+        register_created_root "$XVFB_PID" "Xvfb $candidate"
         for _ in {1..50}; do
             if is_display_usable "$candidate"; then
                 break
@@ -313,9 +533,10 @@ start_private_display() {
             fluxbox) wm_arguments=(-no-slit) ;;
             *) wm_arguments=() ;;
         esac
-        DISPLAY="$candidate" "$wm_binary" "${wm_arguments[@]}" >"$RUN_ROOT/window-manager.log" 2>&1 &
+        DISPLAY="$candidate" XAUTHORITY="$DISPLAY_AUTHORITY" "$wm_binary" "${wm_arguments[@]}" \
+            >"$RUN_ROOT/window-manager.log" 2>&1 &
         WM_PID=$!
-        register_created_pid "$WM_PID" "$wm_binary"
+        register_created_root "$WM_PID" "$wm_binary"
         sleep 0.5
         if ! kill -0 "$WM_PID" 2>/dev/null; then
             fail "window manager '$wm_name' exited on private Xvfb $candidate; xdotool activation cannot be trusted"
@@ -323,6 +544,7 @@ start_private_display() {
         DISPLAY_USED=$candidate
         DISPLAY_STARTED=1
         log "using private display with window manager '$wm_name'"
+        record 'private display transport' 'verified authenticated local Unix-socket X transport before xdotool use'
         return 0
     done
     fail 'could not allocate a private X display in the bounded range :90..:199'
@@ -331,6 +553,7 @@ start_private_display() {
 select_display() {
     if [[ -n ${DISPLAY-} ]] && is_display_usable "$DISPLAY"; then
         DISPLAY_USED=$DISPLAY
+        DISPLAY_AUTHORITY=${XAUTHORITY-}
         DISPLAY_STARTED=0
         log 'reusing the existing usable DISPLAY'
         return 0
@@ -395,22 +618,67 @@ select_codex_home() {
     record 'auth isolation' 'references the selected authorized CODEX_HOME without copying or printing its contents'
 }
 
+prepare_launch_files() {
+    CODEGOTCHI_ARGUMENTS_FILE="$RUN_ROOT/codex-arguments.nul"
+    CODEGOTCHI_WRAPPER="$RUN_ROOT/launch-codegotchi.sh"
+    if ((${#CODEX_ARGUMENTS[@]} > 0)); then
+        printf '%s\0' "${CODEX_ARGUMENTS[@]}" >"$CODEGOTCHI_ARGUMENTS_FILE"
+    else
+        : >"$CODEGOTCHI_ARGUMENTS_FILE"
+    fi
+    chmod 600 "$CODEGOTCHI_ARGUMENTS_FILE"
+    cat >"$CODEGOTCHI_WRAPPER" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+restore_prefix=${CODEGOTCHI_LIVE_RESTORE_PREFIX:?}
+stty -g >"${restore_prefix}-before" 2>/dev/null || printf '%s\n' unavailable >"${restore_prefix}-before"
+set +e
+"${CODEGOTCHI_LIVE_CODEGOTCHI_BIN:?}" run --ui terminal --terminal-theme auto -- codex
+status=$?
+set -e
+stty -g >"${restore_prefix}-after" 2>/dev/null || printf '%s\n' unavailable >"${restore_prefix}-after"
+printf '%s\n' "$status" >"${restore_prefix}-status"
+exit "$status"
+EOF
+    chmod 700 "$CODEGOTCHI_WRAPPER"
+    record 'Codex argument isolation' 'trailing arguments are supplied through a private NUL-delimited file, not process argv'
+}
+
+codex_approval_policy() {
+    local argument
+    local next_is_value=0
+    local value='never'
+    for argument in "${CODEX_ARGUMENTS[@]}"; do
+        if ((next_is_value)); then
+            value=$argument
+            next_is_value=0
+            continue
+        fi
+        case "$argument" in
+            --ask-for-approval) next_is_value=1 ;;
+            --ask-for-approval=*) value=${argument#*=} ;;
+        esac
+    done
+    printf '%s\n' "$value"
+}
+
 window_exists() {
     [[ -n $WINDOW_ID ]] || return 1
-    DISPLAY="$DISPLAY_USED" xdotool getwindowname "$WINDOW_ID" >/dev/null 2>&1
+    display_command xdotool getwindowname "$WINDOW_ID" >/dev/null 2>&1
 }
 
 active_window_is_target() {
     local active
-    active=$(DISPLAY="$DISPLAY_USED" xdotool getactivewindow 2>/dev/null || true)
+    active=$(display_command xdotool getactivewindow 2>/dev/null || true)
     [[ $active == "$WINDOW_ID" ]]
 }
 
 activate_window() {
     local attempt
     for attempt in {1..5}; do
-        if DISPLAY="$DISPLAY_USED" xdotool windowmap "$WINDOW_ID" >/dev/null 2>&1 && \
-            DISPLAY="$DISPLAY_USED" xdotool windowactivate --sync "$WINDOW_ID" >/dev/null 2>&1 && \
+        if display_command xdotool windowmap "$WINDOW_ID" >/dev/null 2>&1 && \
+            display_command xdotool windowactivate --sync "$WINDOW_ID" >/dev/null 2>&1 && \
             active_window_is_target; then
             return 0
         fi
@@ -422,9 +690,8 @@ activate_window() {
 wait_for_window() {
     local attempt
     for attempt in $(seq 1 "${CODEGOTCHI_LIVE_TIMEOUT_SEC:-30}"); do
-        WINDOW_ID=$(DISPLAY="$DISPLAY_USED" xdotool search --onlyvisible --name "$WINDOW_TITLE" 2>/dev/null | sed -n '1p' || true)
+        WINDOW_ID=$(display_command xdotool search --onlyvisible --name "$WINDOW_TITLE" 2>/dev/null | sed -n '1p' || true)
         if [[ -n $WINDOW_ID ]] && window_exists; then
-            register_created_pid "$XTERM_PID" "-title $WINDOW_TITLE"
             activate_window
             record 'window activation' 'verified with xdotool before timed interaction'
             return 0
@@ -436,19 +703,148 @@ wait_for_window() {
 
 window_geometry_value() {
     local key=$1
-    DISPLAY="$DISPLAY_USED" xdotool getwindowgeometry --shell "$WINDOW_ID" 2>/dev/null \
+    display_command xdotool getwindowgeometry --shell "$WINDOW_ID" 2>/dev/null \
         | sed -n "s/^${key}=//p" | sed -n '1p'
 }
 
 capture_frame() {
     local label=$1
     local path="$OUTPUT_DIR/$RUN_ID-$label.png"
-    if ! timeout 10s env DISPLAY="$DISPLAY_USED" import -silent -window "$WINDOW_ID" "$path" >/dev/null 2>&1; then
+    if [[ -n $DISPLAY_AUTHORITY ]]; then
+        timeout 10s env DISPLAY="$DISPLAY_USED" XAUTHORITY="$DISPLAY_AUTHORITY" import -silent -window "$WINDOW_ID" "$path" >/dev/null 2>&1 || fail "ImageMagick import could not capture the live $label frame"
+    elif ! timeout 10s env DISPLAY="$DISPLAY_USED" import -silent -window "$WINDOW_ID" "$path" >/dev/null 2>&1; then
         fail "ImageMagick import could not capture the live $label frame"
     fi
     [[ -s $path ]] || fail "the live $label capture is empty"
     CAPTURED_FRAMES+=("$path")
     record "capture $label" "saved (terminal geometry ${CURRENT_COLUMNS}x${CURRENT_ROWS})"
+}
+
+screen_log_has() {
+    local marker=$1
+    [[ -s $XTERM_SCREEN_LOG ]] || return 1
+    LC_ALL=C grep -aFq -- "$marker" "$XTERM_SCREEN_LOG"
+}
+
+screen_log_count() {
+    local marker=$1
+    [[ -s $XTERM_SCREEN_LOG ]] || {
+        printf '0\n'
+        return 0
+    }
+    LC_ALL=C grep -aoF -- "$marker" "$XTERM_SCREEN_LOG" 2>/dev/null | wc -l | tr -d ' '
+}
+
+wait_for_screen_control() {
+    local marker=$1
+    local attempts=${2:-10}
+    for _ in $(seq 1 "$attempts"); do
+        screen_log_has "$marker" && return 0
+        sleep 0.2
+    done
+    return 1
+}
+
+verify_terminal_protocol_modes() {
+    local paste=$'\033[?2004h'
+    local focus=$'\033[?1004h'
+    local mouse=''
+    if screen_log_has $'\033[?1003h' || screen_log_has $'\033[?1002h' || screen_log_has $'\033[?1000h'; then
+        mouse='enabled'
+    fi
+    if wait_for_screen_control "$paste" 15; then
+        PASTE_MODE_VERIFIED=1
+        record 'bracketed paste negotiation' 'Codex/host enabled bracketed paste before the live probe'
+    else
+        record 'bracketed paste negotiation' 'not observed in the live terminal control stream'
+        block_required_gate
+    fi
+    if wait_for_screen_control "$focus" 15; then
+        FOCUS_MODE_VERIFIED=1
+        record 'focus negotiation' 'Codex/host enabled DEC focus reporting before the live probe'
+    else
+        record 'focus negotiation' 'not observed in the live terminal control stream'
+        block_required_gate
+    fi
+    if [[ $mouse == enabled ]]; then
+        MOUSE_MODE_VERIFIED=1
+        record 'mouse negotiation' 'Codex/host enabled a supported mouse-reporting mode'
+    else
+        record 'mouse negotiation' 'not available in this Codex/terminal invocation'
+        block_required_gate
+    fi
+}
+
+verify_restoration() {
+    local label=$1
+    local prefix=$2
+    local before after status
+    for _ in {1..20}; do
+        [[ -e "${prefix}-before" && -e "${prefix}-after" && -e "${prefix}-status" ]] && break
+        sleep 0.1
+    done
+    before=$(sed -n '1p' "${prefix}-before" 2>/dev/null || true)
+    after=$(sed -n '1p' "${prefix}-after" 2>/dev/null || true)
+    status=$(sed -n '1p' "${prefix}-status" 2>/dev/null || true)
+    if [[ -n $before && $before != unavailable && $before == "$after" && $status =~ ^[0-9]+$ ]]; then
+        record "$label raw-mode restoration" 'run-owned PTY stty state matched before/after the session'
+    else
+        record "$label raw-mode restoration" 'not verified (run-owned PTY state was unavailable or changed)'
+        block_required_gate
+    fi
+    local marker
+    local missing=0
+    for marker in $'\033[?1049l' $'\033[?25h' $'\033[?1000l' $'\033[?1004l' $'\033[?2004l'; do
+        if ! screen_log_has "$marker"; then
+            missing=1
+        fi
+    done
+    if ((missing == 0)); then
+        record "$label terminal controls" 'alternate screen, cursor, mouse, focus, and paste cleanup sequences were emitted'
+    else
+        record "$label terminal controls" 'not verified (one or more terminal cleanup sequences were absent)'
+        block_required_gate
+    fi
+}
+
+focus_out_in_probe() {
+    local main_window=$WINDOW_ID
+    local probe_title="codegotchi-focus-probe-$RUN_ID"
+    local probe_script="$RUN_ROOT/focus-probe.sh"
+    local probe_pid probe_window active
+    printf '#!/usr/bin/env bash\nsleep 60\n' >"$probe_script"
+    chmod 700 "$probe_script"
+    if [[ -n $DISPLAY_AUTHORITY ]]; then
+        DISPLAY="$DISPLAY_USED" XAUTHORITY="$DISPLAY_AUTHORITY" xterm -title "$probe_title" -geometry 20x5 -e "$probe_script" >/dev/null 2>&1 &
+    else
+        DISPLAY="$DISPLAY_USED" xterm -title "$probe_title" -geometry 20x5 -e "$probe_script" >/dev/null 2>&1 &
+    fi
+    probe_pid=$!
+    register_created_root "$probe_pid" "-title $probe_title"
+    for _ in {1..20}; do
+        probe_window=$(display_command xdotool search --onlyvisible --name "$probe_title" 2>/dev/null | sed -n '1p' || true)
+        [[ -n $probe_window ]] && break
+        sleep 0.1
+    done
+    if [[ -z $probe_window ]]; then
+        record 'focus out/in' 'not verified (run-owned focus probe did not expose a window)'
+        block_required_gate
+        return 0
+    fi
+    if ! display_command xdotool windowactivate --sync "$probe_window" >/dev/null 2>&1; then
+        record 'focus out/in' 'not verified (the run-owned focus probe could not receive focus)'
+        block_required_gate
+        return 0
+    fi
+    active=$(display_command xdotool getactivewindow 2>/dev/null || true)
+    if [[ $active == "$probe_window" && $active != "$main_window" ]] && \
+        display_command xdotool windowactivate --sync "$main_window" >/dev/null 2>&1 && \
+        active_window_is_target; then
+        record 'focus out/in' 'verified by a real focus transfer to a second run-owned window and back'
+    else
+        record 'focus out/in' 'not verified (active-window transitions did not settle on both windows)'
+        block_required_gate
+    fi
 }
 
 assert_window_usable() {
@@ -457,21 +853,182 @@ assert_window_usable() {
 }
 
 send_key() {
-    DISPLAY="$DISPLAY_USED" xdotool key --window "$WINDOW_ID" --clearmodifiers "$1" >/dev/null 2>&1 || fail "xdotool could not send key $1"
+    display_command xdotool key --window "$WINDOW_ID" --clearmodifiers "$1" >/dev/null 2>&1 || fail "xdotool could not send key $1"
 }
 
 send_text() {
-    DISPLAY="$DISPLAY_USED" xdotool type --window "$WINDOW_ID" --delay 12 -- "$1" >/dev/null 2>&1 || fail 'xdotool could not send prompt text'
+    display_command xdotool type --window "$WINDOW_ID" --delay 12 -- "$1" >/dev/null 2>&1 || fail 'xdotool could not send prompt text'
+}
+
+clipboard_set() {
+    local content=$1
+    if command -v xclip >/dev/null 2>&1; then
+        printf '%s' "$content" | display_command xclip -selection clipboard -in >/dev/null 2>&1
+    elif command -v xsel >/dev/null 2>&1; then
+        printf '%s' "$content" | display_command xsel --clipboard --input >/dev/null 2>&1
+    else
+        return 1
+    fi
+}
+
+assert_prompt_activity() {
+    local before_work=$1
+    local after_work=$2
+    local before_activity=$3
+    local after_activity=$4
+    local before_last=$5
+    local after_last=$6
+    local after_outcome=$7
+    local ready_count_before=$8
+    local ready_count_after
+    ready_count_after=$(screen_log_count READY)
+    if [[ $before_work =~ ^[0-9]+$ && $after_work =~ ^[0-9]+$ ]] && \
+        { [[ $after_work -gt $before_work ]] || [[ $before_last != "$after_last" && $after_last != none ]]; } && \
+        [[ $ready_count_after =~ ^[0-9]+$ && $ready_count_before =~ ^[0-9]+$ && $ready_count_after -gt $ready_count_before ]]; then
+        record 'ordinary prompt entry and editing/navigation' 'edited prompt marker was echoed and settled into changed authoritative session activity'
+        PROMPT_VERIFIED=1
+    else
+        record 'ordinary prompt entry and editing/navigation' 'not verified by an authoritative post-submit state transition'
+        block_required_gate
+    fi
+    local normalized_activity=${after_activity,,}
+    local normalized_outcome=${after_outcome,,}
+    if [[ $normalized_activity == waitingforuser || $normalized_activity == waiting_for_user || $normalized_outcome != none ]] && \
+        [[ $before_last != "$after_last" && $after_last != none ]]; then
+        record 'model response' 'authoritative session returned to a waiting/outcome state after the bounded prompt'
+        if ((HOOK_TRUST_PENDING == 1)); then
+            record 'Codex hook trust result' 'verified by the subsequent prompt transition after the explicit disposable trust selection'
+            HOOK_TRUST_PENDING=0
+        fi
+    else
+        record 'model response' 'not verified (the authoritative session did not settle after the bounded prompt)'
+        block_required_gate
+        if ((HOOK_TRUST_PENDING == 1)); then
+            record 'Codex hook trust result' 'not verified because the subsequent prompt did not settle'
+            block_required_gate
+        fi
+    fi
+}
+
+assert_tool_activity() {
+    local before_work=$1
+    local after_work=$2
+    local after_activity=$3
+    local tool_done_count_before=$4
+    local tool_done_count_after
+    tool_done_count_after=$(screen_log_count TOOL_DONE)
+    if [[ $before_work =~ ^[0-9]+$ && $after_work =~ ^[0-9]+$ && $((after_work - before_work)) -ge 5 ]] && \
+        [[ $tool_done_count_before =~ ^[0-9]+$ && $tool_done_count_after =~ ^[0-9]+$ && $tool_done_count_after -gt $tool_done_count_before ]]; then
+        record 'tool activity' "verified by authoritative tool-sized work-point advance and a fresh TOOL_DONE response (activity $after_activity)"
+        TOOL_VERIFIED=1
+    else
+        record 'tool activity' 'not verified by an authoritative tool-sized work-point advance and fresh response marker'
+        block_required_gate
+    fi
+}
+
+assert_mouse_no_room_mutation() {
+    local before after key
+    local unchanged=1
+    for key in kibble poops happiness cleanliness napping; do
+        before=$(state_value mouse-before "$key")
+        after=$(state_value mouse-after "$key")
+        if [[ -z $before || $before != "$after" ]]; then
+            unchanged=0
+        fi
+    done
+    if ((unchanged == 1)); then
+        record 'Codex scroll/click behavior' 'verified upper-pane pointer events did not mutate the room state'
+    else
+        record 'Codex scroll/click behavior' 'not verified (upper-pane pointer events changed room state or snapshots were unavailable)'
+        block_required_gate
+    fi
+}
+
+verify_hook_trust() {
+    local before_count
+    if [[ ${CODEGOTCHI_LIVE_TRUST_HOOKS:-0} != 1 ]]; then
+        record 'Codex hook trust' 'blocked; set CODEGOTCHI_LIVE_TRUST_HOOKS=1 only for a disposable authorized session'
+        block_required_gate
+        return 0
+    fi
+    before_count=$(screen_log_count 'Hooks need review')
+    if [[ $before_count =~ ^[1-9][0-9]*$ ]]; then
+        send_key 2
+        send_key Return
+        sleep 2
+        assert_window_usable
+        HOOK_TRUST_PENDING=1
+        record 'Codex hook trust' 'explicit disposable trust selection sent; clearance is gated on the subsequent authoritative prompt transition'
+    else
+        record 'Codex hook trust' 'not observed in this Codex invocation; no trust selection was sent'
+    fi
+}
+
+verify_approval_probe() {
+    local policy
+    local approval_count_before=$1
+    local approval_count_after
+    policy=$(codex_approval_policy)
+    if [[ $policy == never ]]; then
+        if ((CUSTOM_CODEX_ARGUMENTS == 0)); then
+            record 'approval/review interaction' "not available in $CODEX_VERSION with exact command codex --disable apps --ask-for-approval never --sandbox read-only"
+        else
+            record 'approval/review interaction' "not available in $CODEX_VERSION with supplied --ask-for-approval never arguments (custom arguments intentionally redacted)"
+        fi
+        block_required_gate
+        return 0
+    fi
+    approval_count_after=$(( $(screen_log_count 'Approve') + $(screen_log_count 'approve') ))
+    if [[ $approval_count_before =~ ^[0-9]+$ && $approval_count_after =~ ^[0-9]+$ && $approval_count_after -gt $approval_count_before ]]; then
+        send_key Return
+        sleep 2
+        if window_exists; then
+            record 'approval/review interaction' "verified a bounded approval interaction under policy --ask-for-approval $policy"
+            return 0
+        fi
+    fi
+    record 'approval/review interaction' "not verified in $CODEX_VERSION under the supplied approval policy (no observable approval prompt)"
+    block_required_gate
+}
+
+poll_authoritative_progress() {
+    local label=$1
+    local baseline=$2
+    [[ -n $API_URL && -n $API_TOKEN ]] || return 1
+    local baseline_work baseline_last
+    baseline_work=$(state_value "$baseline" work_points)
+    baseline_last=$(state_value "$baseline" last_activity)
+    for _ in $(seq 1 "${CODEGOTCHI_LIVE_TIMEOUT_SEC:-30}"); do
+        state_summary "$label"
+        if [[ $(state_value "$label" work_points) =~ ^[0-9]+$ && $baseline_work =~ ^[0-9]+$ && $(state_value "$label" work_points) -gt $baseline_work ]] || \
+            [[ $(state_value "$label" last_activity) != "$baseline_last" && $(state_value "$label" last_activity) != none ]]; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
 }
 
 resize_terminal() {
     local rows=$1
-    DISPLAY="$DISPLAY_USED" xdotool windowsize --sync --usehints "$WINDOW_ID" "$CURRENT_COLUMNS" "$rows" >/dev/null 2>&1 || fail "xdotool could not resize the terminal to ${CURRENT_COLUMNS}x${rows}"
+    local before_width before_height after_width after_height resize_hints
+    before_width=$(window_geometry_value WIDTH)
+    before_height=$(window_geometry_value HEIGHT)
+    display_command xdotool windowsize --sync --usehints "$WINDOW_ID" "$CURRENT_COLUMNS" "$rows" >/dev/null 2>&1 || fail "xdotool could not resize the terminal to ${CURRENT_COLUMNS}x${rows}"
     CURRENT_ROWS=$rows
     sleep 0.8
     assert_window_usable
+    after_width=$(window_geometry_value WIDTH)
+    after_height=$(window_geometry_value HEIGHT)
+    resize_hints=$(display_command xprop -id "$WINDOW_ID" WM_NORMAL_HINTS 2>/dev/null || true)
+    if [[ ! $after_width =~ ^[0-9]+$ || ! $after_height =~ ^[0-9]+$ || "$before_width,$before_height" == "$after_width,$after_height" || $resize_hints != *PResizeInc* ]]; then
+        record "resize ${CURRENT_COLUMNS}x${CURRENT_ROWS}" 'not verified (outer geometry or PTY resize hints did not settle)'
+        block_required_gate
+    else
+        record "resize ${CURRENT_COLUMNS}x${CURRENT_ROWS}" "verified by changed xterm geometry with WM PTY resize hints (${after_width}x${after_height})"
+    fi
     capture_frame "${CURRENT_COLUMNS}x${CURRENT_ROWS}"
-    record "resize ${CURRENT_COLUMNS}x${CURRENT_ROWS}" 'xterm remained active and the production session remained alive'
 }
 
 cell_move() {
@@ -486,25 +1043,25 @@ cell_move() {
     [[ $width =~ ^[0-9]+$ && $height =~ ^[0-9]+$ ]] || fail 'could not read xterm pixel geometry for a care gesture'
     pixel_x=$((column * width / CURRENT_COLUMNS + width / (CURRENT_COLUMNS * 2)))
     pixel_y=$((row * height / CURRENT_ROWS + height / (CURRENT_ROWS * 2)))
-    DISPLAY="$DISPLAY_USED" xdotool mousemove --window "$WINDOW_ID" --sync "$pixel_x" "$pixel_y" >/dev/null 2>&1 || fail 'xdotool could not move the pointer into the terminal room'
+    display_command xdotool mousemove --window "$WINDOW_ID" --sync "$pixel_x" "$pixel_y" >/dev/null 2>&1 || fail 'xdotool could not move the pointer into the terminal room'
 }
 
 cell_click() {
     local column=$1
     local row=$2
     cell_move "$column" "$row"
-    DISPLAY="$DISPLAY_USED" xdotool click --window "$WINDOW_ID" 1 >/dev/null 2>&1 || fail 'xdotool could not click a terminal-room target'
+    display_command xdotool click --window "$WINDOW_ID" 1 >/dev/null 2>&1 || fail 'xdotool could not click a terminal-room target'
 }
 
 full_pet() {
     local column
     cell_move 86 38
-    DISPLAY="$DISPLAY_USED" xdotool mousedown 1 >/dev/null 2>&1 || fail 'could not start the Full pet gesture'
+    display_command xdotool mousedown 1 >/dev/null 2>&1 || fail 'could not start the Full pet gesture'
     for column in 80 84 88 92 95; do
         cell_move "$column" 38
         sleep 0.35
     done
-    DISPLAY="$DISPLAY_USED" xdotool mouseup 1 >/dev/null 2>&1 || fail 'could not release the Full pet gesture'
+    display_command xdotool mouseup 1 >/dev/null 2>&1 || fail 'could not release the Full pet gesture'
     sleep 0.8
     assert_window_usable
     record 'qualifying pet stroke' 'attempted with >1,500 ms hold and >120 backend-distance cell path'
@@ -513,20 +1070,20 @@ full_pet() {
 full_feed() {
     local column
     cell_move 6 41
-    DISPLAY="$DISPLAY_USED" xdotool mousedown 1 >/dev/null 2>&1 || fail 'could not start the stocked-food drag'
+    display_command xdotool mousedown 1 >/dev/null 2>&1 || fail 'could not start the stocked-food drag'
     for column in 20 40 60 80 87; do
         cell_move "$column" 40
         sleep 0.12
     done
     cell_move 87 38
-    DISPLAY="$DISPLAY_USED" xdotool mouseup 1 >/dev/null 2>&1 || fail 'could not release the stocked-food drag'
+    display_command xdotool mouseup 1 >/dev/null 2>&1 || fail 'could not release the stocked-food drag'
     sleep 0.8
     assert_window_usable
     record 'stocked food drag-to-pet' 'attempted from the initial Full kibble source to the pet hit region'
 }
 
 full_clean() {
-    cell_click 62 41
+    cell_click 58 41
     sleep 0.8
     assert_window_usable
     record 'authoritative poop clean' 'attempted against the isolated generated-poop target'
@@ -587,8 +1144,11 @@ state_summary() {
     local label=$1
     local state_path="$RUN_ROOT/state-$label.json"
     local summary_path="$RUN_ROOT/state-$label-summary.txt"
+    local curl_config="$RUN_ROOT/curl-$label.conf"
     [[ -n $API_URL && -n $API_TOKEN ]] || return 0
-    if ! curl --silent --show-error --fail --max-time 3 -H "Authorization: Bearer $API_TOKEN" "$API_URL/api/v1/state" -o "$state_path" >/dev/null 2>&1; then
+    printf 'header = "Authorization: Bearer %s"\n' "$API_TOKEN" >"$curl_config"
+    chmod 600 "$curl_config"
+    if ! curl --silent --show-error --fail --max-time 3 --config "$curl_config" "$API_URL/api/v1/state" -o "$state_path" >/dev/null 2>&1; then
         record "authoritative snapshot $label" 'unavailable (loopback state request did not settle)'
         block_required_gate
         return 0
@@ -600,8 +1160,16 @@ const inventory = state.inventory ?? {};
 const demands = state.pendingDemands ?? state.pending_demands ?? [];
 const poops = state.pendingPoops ?? state.pending_poops ?? [];
 const napping = state.nappingUntil ?? state.napping_until ?? null;
+const needs = state.needs ?? {};
+const careIds = state.processedCareIds ?? state.processed_care_ids ?? [];
+const sessions = state.sessionActivities ?? state.session_activities ?? {};
+const outcome = state.recentOutcome ?? state.recent_outcome ?? {};
 const count = (key) => inventory[key] ?? inventory[key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)] ?? 0;
-process.stdout.write(`poops=${Array.isArray(poops) ? poops.length : 0} demands=${Array.isArray(demands) ? demands.length : 0} kibble=${count('kibble')} treat=${count('treat')} fruit=${count('fruit')} energy=${count('energyDrink')} napping=${napping ? 'active' : 'inactive'}\n`);
+const value = (key) => needs[key] ?? 0;
+const enumName = (value) => typeof value === 'string' ? value : value && typeof value === 'object' ? Object.keys(value)[0] ?? 'unknown' : 'unknown';
+const activityName = enumName(state.activity);
+const outcomeName = enumName(outcome);
+process.stdout.write(`poops=${Array.isArray(poops) ? poops.length : 0} demands=${Array.isArray(demands) ? demands.length : 0} kibble=${count('kibble')} treat=${count('treat')} fruit=${count('fruit')} energy=${count('energyDrink')} happiness=${value('happiness')} cleanliness=${value('cleanliness')} care_ids=${Array.isArray(careIds) ? careIds.length : 0} work_points=${state.workPoints ?? state.work_points ?? 0} activity=${activityName} outcome=${outcomeName} sessions=${Object.keys(sessions).length} last_activity=${state.lastActivityAt ?? state.last_activity_at ?? 'none'} last_outcome=${state.lastOutcomeAt ?? state.last_outcome_at ?? 'none'} napping=${napping ? 'active' : 'inactive'}\n`);
 NODE
     then
         record "authoritative snapshot $label" 'unavailable (state response was not parseable)'
@@ -627,16 +1195,20 @@ verify_care_snapshots() {
     local prepared_poops
     local after_clean_poops
     local after_nap
-    local prepared_demands
-    local after_pet_demands
+    local prepared_happiness
+    local after_pet_happiness
+    local prepared_care_ids
+    local after_pet_care_ids
 
     prepared_kibble=$(state_value prepared kibble)
     after_feed_kibble=$(state_value after-feed kibble)
     prepared_poops=$(state_value prepared poops)
     after_clean_poops=$(state_value after-clean poops)
     after_nap=$(state_value after-nap napping)
-    prepared_demands=$(state_value prepared demands)
-    after_pet_demands=$(state_value after-pet demands)
+    prepared_happiness=$(state_value prepared happiness)
+    after_pet_happiness=$(state_value after-pet happiness)
+    prepared_care_ids=$(state_value prepared care_ids)
+    after_pet_care_ids=$(state_value after-pet care_ids)
 
     if [[ $prepared_kibble =~ ^[0-9]+$ && $after_feed_kibble =~ ^[0-9]+$ && $after_feed_kibble -lt $prepared_kibble ]]; then
         record 'authoritative feed result' 'verified by a settled inventory decrement'
@@ -656,10 +1228,12 @@ verify_care_snapshots() {
         record 'authoritative nap result' 'not verified by the settled snapshot'
         block_required_gate
     fi
-    if [[ $prepared_demands =~ ^[0-9]+$ && $after_pet_demands =~ ^[0-9]+$ && $after_pet_demands -lt $prepared_demands ]]; then
-        record 'authoritative pet result' 'verified by a settled affection-demand decrement'
+    if [[ $prepared_care_ids =~ ^[0-9]+$ && $after_pet_care_ids =~ ^[0-9]+$ && $after_pet_care_ids -gt $prepared_care_ids ]] && \
+        [[ $prepared_happiness =~ ^[0-9]+([.][0-9]+)?$ && $after_pet_happiness =~ ^[0-9]+([.][0-9]+)?$ ]] && \
+        awk -v before="$prepared_happiness" -v after="$after_pet_happiness" 'BEGIN { exit !(after >= before) }'; then
+        record 'authoritative pet result' 'verified by a settled care-id advance with non-decreasing happiness'
     else
-        record 'authoritative pet result' 'not verified (the isolated run had no observable affection demand)'
+        record 'authoritative pet result' 'not verified by the settled happiness snapshot'
         block_required_gate
     fi
 }
@@ -692,29 +1266,41 @@ normal_exit() {
 }
 
 start_xterm_session() {
-    local -a environment_values
-    environment_values=(
-        "HOME=$TEMP_HOME"
-        "XDG_CONFIG_HOME=$CONFIG_HOME"
-        "XDG_CACHE_HOME=$CACHE_HOME"
-        "XDG_DATA_HOME=$DATA_HOME"
-        "XDG_STATE_HOME=$STATE_HOME"
-        "XDG_RUNTIME_DIR=$RUNTIME_HOME"
-        "CODEX_HOME=$CODEX_HOME_VALUE"
-        "CODEGOTCHI_BROWSER=none"
-        "CODEGOTCHI_ENABLE_DEBUG=1"
-        "CODEGOTCHI_REAL_CODEX=$CODEX_EXECUTABLE"
-        "TERM=xterm-256color"
-    )
-    DISPLAY="$DISPLAY_USED" xterm \
+    RESTORE_PREFIX="$RUN_ROOT/$WINDOW_TITLE-restore"
+    XTERM_SCREEN_LOG="$RUN_ROOT/$WINDOW_TITLE-screen.log"
+    export CODEGOTCHI_LIVE_ARGS_FILE="$CODEGOTCHI_ARGUMENTS_FILE"
+    export CODEGOTCHI_LIVE_RESTORE_PREFIX="$RESTORE_PREFIX"
+    export CODEGOTCHI_LIVE_CODEGOTCHI_BIN="$CODEGOTCHI_EXECUTABLE"
+    export CODEGOTCHI_CODEX_ARGUMENTS_FILE="$CODEGOTCHI_ARGUMENTS_FILE"
+    export HOME="$TEMP_HOME"
+    export XDG_CONFIG_HOME="$CONFIG_HOME"
+    export XDG_CACHE_HOME="$CACHE_HOME"
+    export XDG_DATA_HOME="$DATA_HOME"
+    export XDG_STATE_HOME="$STATE_HOME"
+    export XDG_RUNTIME_DIR="$RUNTIME_HOME"
+    export CODEX_HOME="$CODEX_HOME_VALUE"
+    export CODEGOTCHI_BROWSER=none
+    export CODEGOTCHI_ENABLE_DEBUG=1
+    export CODEGOTCHI_REAL_CODEX="$CODEX_EXECUTABLE"
+    export TERM=xterm-256color
+    if [[ -n $DISPLAY_AUTHORITY ]]; then
+        DISPLAY="$DISPLAY_USED" XAUTHORITY="$DISPLAY_AUTHORITY" xterm \
+            -l -lf "$XTERM_SCREEN_LOG" \
+            -title "$WINDOW_TITLE" \
+            -geometry 120x45 \
+            -e "$CODEGOTCHI_WRAPPER" \
+            >"$RUN_ROOT/xterm.log" 2>&1 &
+    else
+        DISPLAY="$DISPLAY_USED" xterm \
+            -l -lf "$XTERM_SCREEN_LOG" \
         -title "$WINDOW_TITLE" \
         -geometry 120x45 \
-        -e env "${environment_values[@]}" "$CODEGOTCHI_EXECUTABLE" run \
-        --ui terminal --terminal-theme auto -- codex "${CODEX_ARGUMENTS[@]}" \
-        >"$RUN_ROOT/xterm.log" 2>&1 &
+            -e "$CODEGOTCHI_WRAPPER" \
+            >"$RUN_ROOT/xterm.log" 2>&1 &
+    fi
     XTERM_PID=$!
     XTERM_START=$(pid_start_time "$XTERM_PID") || fail 'could not record the run-owned xterm process'
-    register_created_pid "$XTERM_PID" "-title $WINDOW_TITLE"
+    register_created_root "$XTERM_PID" "-title $WINDOW_TITLE"
 }
 
 termination_case() {
@@ -724,40 +1310,49 @@ termination_case() {
     start_xterm_session
     wait_for_window
     sleep 1
-    local child_pid
-    child_pid=$(pgrep -P "$XTERM_PID" | sed -n '1p' || true)
-    if [[ -n $child_pid ]]; then
-        local child_command
+    local child_pid child_command found_child=0
+    local -a descendants=()
+    mapfile -t descendants < <(descendant_pids "$XTERM_PID")
+    for child_pid in "${descendants[@]}"; do
+        [[ $child_pid == "$XTERM_PID" ]] && continue
         child_command=$(pid_cmdline "$child_pid" 2>/dev/null || true)
         if [[ $child_command == *"$CODEGOTCHI_EXECUTABLE"* ]]; then
-            register_created_pid "$child_pid" "$CODEGOTCHI_EXECUTABLE"
-            safe_stop_created_pid "$(( ${#CREATED_PIDS[@]} - 1 ))"
-            record 'bounded termination case' 'SIGTERM sent only to the run-owned CodeGotchi child'
-        else
-            record 'bounded termination case' 'not available (run-owned xterm child was not the expected CodeGotchi executable)'
+            register_created_root "$child_pid" "$CODEGOTCHI_EXECUTABLE"
+            safe_stop_created_tree "$(( ${#CREATED_PIDS[@]} - 1 ))"
+            found_child=1
+            record 'bounded termination case' 'SIGTERM sent only to the verified run-owned CodeGotchi descendant tree'
+            break
         fi
-    else
-        record 'bounded termination case' 'not available (run-owned xterm child was not observable)'
+    done
+    if ((found_child == 0)); then
+        record 'bounded termination case' 'not available (the expected CodeGotchi descendant was not observable)'
+        block_required_gate
     fi
     for _ in {1..20}; do
-        if ! kill -0 "$XTERM_PID" 2>/dev/null; then
+        if ! kill -0 "$XTERM_PID" 2>/dev/null || ! pid_is_running "$XTERM_PID"; then
             XTERM_PID=""
+            verify_restoration 'bounded termination' "$RESTORE_PREFIX"
             return 0
         fi
         sleep 0.1
     done
-    record 'bounded termination restoration' 'xterm remained alive after the bounded signal window'
+    record 'bounded termination restoration' 'not verified (xterm remained alive after the bounded signal window)'
+    block_required_gate
     WINDOW_ID=""
 }
 
 main() {
     local command_name
-    for command_name in xterm xdotool import timeout sed awk find ps; do
+    local before_work after_work before_activity after_activity before_last after_last after_outcome
+    local prompt_ready_count_before tool_done_count_before approval_count_before paste_count_before
+    local normal_restore_prefix normal_screen_log
+    for command_name in xterm xdotool xdpyinfo import timeout sed awk find ps xprop od tr wc tail grep basename seq; do
         require_command "$command_name"
     done
     find_codegotchi_binary
     find_codex_binary
     select_codex_home
+    prepare_launch_files
     select_display
 
     start_xterm_session
@@ -772,16 +1367,9 @@ main() {
     sleep 1
     state_summary prepared
     capture_frame 'full-live-initial'
+    verify_terminal_protocol_modes
+    verify_hook_trust
 
-    if [[ ${CODEGOTCHI_LIVE_TRUST_HOOKS:-0} == 1 ]]; then
-        send_key 2
-        send_key Return
-        sleep 2
-        record 'Codex hook trust' 'selected the disposable trust-all option by explicit operator opt-in'
-    else
-        record 'Codex hook trust' 'not attempted; set CODEGOTCHI_LIVE_TRUST_HOOKS=1 only for a disposable authorized session'
-        block_required_gate
-    fi
     full_pet
     state_summary after-pet
     full_feed
@@ -793,48 +1381,105 @@ main() {
     verify_care_snapshots
     capture_frame 'full-live-care'
 
-    send_text 'Reply with the single word READY and do not use tools.'
+    before_work=$(state_value after-nap work_points)
+    before_activity=$(state_value after-nap activity)
+    before_last=$(state_value after-nap last_activity)
+    prompt_ready_count_before=$(screen_log_count READY)
+    send_text 'discard this draft'
     send_key ctrl+a
+    send_text 'Reply with the single word READY and do not use tools.'
     send_key End
     send_key Left
     send_key Right
     send_key Return
-    sleep 3
+    poll_authoritative_progress prompt-after after-nap || true
     assert_window_usable
-    record 'ordinary prompt entry and editing/navigation' 'sent without reading Codex screen text'
+    after_work=$(state_value prompt-after work_points)
+    after_activity=$(state_value prompt-after activity)
+    after_last=$(state_value prompt-after last_activity)
+    after_outcome=$(state_value prompt-after outcome)
+    assert_prompt_activity "$before_work" "$after_work" "$before_activity" "$after_activity" "$before_last" "$after_last" "$after_outcome" "$prompt_ready_count_before"
 
-    if command -v xclip >/dev/null 2>&1 || command -v xsel >/dev/null 2>&1; then
-        record 'bracketed multiline paste' 'clipboard tool is available; paste probe requires operator review of the negotiated Codex mode'
+    if ((PASTE_MODE_VERIFIED == 1)) && (command -v xclip >/dev/null 2>&1 || command -v xsel >/dev/null 2>&1); then
+        paste_count_before=$(screen_log_count PASTE_READY)
+        if screen_log_has $'\033[?2004h' && clipboard_set $'Reply with the single word PASTE_READY and do not use tools.'; then
+            send_key shift+Insert
+            sleep 1
+            if [[ $(screen_log_count PASTE_READY) -gt $paste_count_before ]]; then
+                send_key Return
+                poll_authoritative_progress after-paste prompt-after || true
+                if [[ $(state_value after-paste last_activity) != "$(state_value prompt-after last_activity)" ]]; then
+                    PASTE_VERIFIED=1
+                    record 'bracketed multiline paste' 'verified clipboard insertion and a settled post-paste session transition'
+                else
+                    record 'bracketed multiline paste' 'not verified by a settled post-paste state transition'
+                    block_required_gate
+                fi
+            else
+                record 'bracketed multiline paste' 'not verified (the pasted marker was not observable in the live terminal stream)'
+                block_required_gate
+            fi
+        else
+            record 'bracketed multiline paste' 'not verified (bracketed mode or clipboard insertion was unavailable)'
+            block_required_gate
+        fi
+    elif ((PASTE_MODE_VERIFIED == 0)); then
+        record 'bracketed multiline paste' 'not attempted because the live terminal did not negotiate bracketed paste'
+        block_required_gate
     else
         record 'bracketed multiline paste' 'not available (xclip/xsel is not installed; no clipboard state was changed)'
         block_required_gate
     fi
 
-    DISPLAY="$DISPLAY_USED" xdotool windowminimize "$WINDOW_ID" >/dev/null 2>&1 || true
-    sleep 0.5
-    activate_window
-    record 'focus out/in' 'window-level focus transition observed; Codex focus reporting is not text-scraped'
+    if ((FOCUS_MODE_VERIFIED == 1)); then
+        focus_out_in_probe
+    else
+        record 'focus out/in' 'not attempted because the live terminal did not negotiate focus reporting'
+        block_required_gate
+    fi
 
-    cell_move 60 10
-    DISPLAY="$DISPLAY_USED" xdotool click --window "$WINDOW_ID" 4 >/dev/null 2>&1 || true
-    DISPLAY="$DISPLAY_USED" xdotool click --window "$WINDOW_ID" 1 >/dev/null 2>&1 || true
-    assert_window_usable
-    record 'Codex scroll/click behavior' 'pointer probe sent where current Codex negotiated mouse reporting'
+    if ((MOUSE_MODE_VERIFIED == 1)); then
+        state_summary mouse-before
+        cell_move 60 10
+        display_command xdotool click --window "$WINDOW_ID" 4 >/dev/null 2>&1 || fail 'xdotool could not send a Codex-pane scroll event'
+        display_command xdotool click --window "$WINDOW_ID" 1 >/dev/null 2>&1 || fail 'xdotool could not send a Codex-pane click event'
+        sleep 1
+        assert_window_usable
+        state_summary mouse-after
+        assert_mouse_no_room_mutation
+    else
+        record 'Codex scroll/click behavior' 'not attempted because the live terminal did not negotiate mouse reporting'
+        block_required_gate
+    fi
 
+    before_work=$(state_value prompt-after work_points)
+    tool_done_count_before=$(screen_log_count TOOL_DONE)
+    approval_count_before=$(( $(screen_log_count 'Approve') + $(screen_log_count 'approve') ))
     send_text 'Run pwd with the shell tool, then reply TOOL_DONE.'
     send_key Return
-    sleep 5
+    poll_authoritative_progress after-tool prompt-after || true
     assert_window_usable
-    record 'model response and tool activity' 'bounded prompt sent; window remained active without screen scraping'
-    record 'approval/review interaction' 'not available in this safe default invocation (--ask-for-approval never)'
-    block_required_gate
-    capture_frame 'full-live-populated'
+    after_work=$(state_value after-tool work_points)
+    after_activity=$(state_value after-tool activity)
+    assert_tool_activity "$before_work" "$after_work" "$after_activity" "$tool_done_count_before"
+    verify_approval_probe "$approval_count_before"
+    if ((PROMPT_VERIFIED == 1 && TOOL_VERIFIED == 1)); then
+        capture_frame 'full-live-populated'
+    else
+        capture_frame 'full-live-blocked'
+    fi
 
     resize_terminal 30
     resize_terminal 21
     resize_terminal 45
     capture_frame 'full-live-final'
+    normal_restore_prefix=$RESTORE_PREFIX
+    normal_screen_log=$XTERM_SCREEN_LOG
     normal_exit || true
+    if [[ -n $normal_restore_prefix ]]; then
+        verify_restoration 'normal exit' "$normal_restore_prefix"
+    fi
+    XTERM_SCREEN_LOG=$normal_screen_log
     termination_case
 
     if [[ $REQUIRED_GATE_BLOCKED == 1 ]]; then
