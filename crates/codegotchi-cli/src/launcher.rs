@@ -1233,33 +1233,31 @@ fn spawn_browser_command(program: &Path, arguments: &[OsString]) -> Result<Child
         .map_err(|error| format!("{program:?}: {error}"))
 }
 
+#[cfg(target_os = "macos")]
 fn launch_native_browser(url: &str) -> Result<Child, String> {
-    #[cfg(target_os = "macos")]
-    {
-        let (program, arguments) = native_browser_command(url);
-        return spawn_browser_command(&program, &arguments);
-    }
+    let (program, arguments) = native_browser_command(url);
+    spawn_browser_command(&program, &arguments)
+}
 
-    #[cfg(target_os = "linux")]
-    {
-        for (program, arguments) in [
-            ("xdg-open", vec![OsString::from(url)]),
-            ("gio", vec![OsString::from("open"), OsString::from(url)]),
-        ] {
-            if let Ok(child) = spawn_browser_command(Path::new(program), &arguments) {
-                return Ok(child);
-            }
+#[cfg(target_os = "linux")]
+fn launch_native_browser(url: &str) -> Result<Child, String> {
+    for (program, arguments) in [
+        ("xdg-open", vec![OsString::from(url)]),
+        ("gio", vec![OsString::from("open"), OsString::from(url)]),
+    ] {
+        if let Ok(child) = spawn_browser_command(Path::new(program), &arguments) {
+            return Ok(child);
         }
-        if is_wsl() {
-            let arguments = [
-                OsString::from("/c"),
-                OsString::from("start"),
-                OsString::new(),
-                OsString::from(url),
-            ];
-            if let Ok(child) = spawn_browser_command(Path::new("cmd.exe"), &arguments) {
-                return Ok(child);
-            }
+    }
+    if is_wsl() {
+        let arguments = [
+            OsString::from("/c"),
+            OsString::from("start"),
+            OsString::new(),
+            OsString::from(url),
+        ];
+        if let Ok(child) = spawn_browser_command(Path::new("cmd.exe"), &arguments) {
+            return Ok(child);
         }
     }
     Err(String::from("no supported browser launcher was available"))
@@ -1525,6 +1523,8 @@ mod tests {
     };
     use crate::terminal::TerminalThemePreset;
     use std::ffi::OsString;
+    #[cfg(target_os = "macos")]
+    use std::path::PathBuf;
 
     use crate::terminal::{
         TerminalSessionError, TerminalSessionSignal, terminal_session_signal_channel,
