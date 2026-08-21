@@ -70,29 +70,73 @@ pixel-art-detailed than the supplied references. The reference manifest was
 updated to enumerate the two composition references and seven component
 reference sheets with their actual roles. No visual PASS is claimed.
 
-## Bounded real-Codex/browser/care checklist attempt
+## Real-Codex acceptance harness
 
-One bounded live attempt was made with optional apps disabled; no second live
-retry was made. Availability checks observed `codex-cli 0.148.0`, `xterm`,
-`xdotool`, and ImageMagick `import`. The run used a private temporary
-`CODEX_HOME` containing the local auth file, `CODEGOTCHI_BROWSER=none`, and:
+Task 7 adds [`scripts/verify-terminal-room-live.sh`](../../scripts/verify-terminal-room-live.sh).
+It prints the installed Codex version, requires `xterm`, `xdotool`,
+ImageMagick `import`, and a usable X display, redirects CodeGotchi XDG
+state/runtime/data/config/cache/home paths into a run-owned temporary tree,
+sets `CODEGOTCHI_BROWSER=none`, and never prints Codex arguments, auth
+contents, runtime metadata, or bearer tokens. It records only PIDs it starts;
+cleanup verifies each PID's start time and command marker before sending
+`SIGTERM`, and uses no broad `pgrep codex` cleanup. A private `Xvfb` path is
+available only when a supported lightweight window manager is installed.
+Hook trust is opt-in through `CODEGOTCHI_LIVE_TRUST_HOOKS=1` so a run cannot
+silently approve hooks outside a disposable authorized session.
+
+The fresh availability check on 2026-08-21 used `codex-cli 0.149.0`,
+`xterm`, `xdotool`, ImageMagick `import`, and inherited `DISPLAY=:0`.
+The explicit private-display preflight was:
 
 ```text
-target/debug/codegotchi run --ui terminal --terminal-theme soft-green -- codex \
-  --disable apps --ask-for-approval never --sandbox read-only \
-  --dangerously-bypass-hook-trust
+CODEGOTCHI_LIVE_NO_BUILD=1 DISPLAY= \
+  CODEGOTCHI_LIVE_OUTPUT_DIR=/tmp/codegotchi-live-evidence-t7-prereq \
+  ./scripts/verify-terminal-room-live.sh
 ```
 
-The official TUI trust screen and the production room rendered at 120x45.
-The attempt then blocked before prompt/model/tool interaction: the shared
-Xvfb host had no active-window manager, `_NET_ACTIVE_WINDOW` activation was
-unsupported, and targeted `xdotool` key delivery ended in the X-server
-`BadWindow`/focus error. The bounded process timed out at 50 seconds. Thus
-the following are **not claimed** from this attempt: model response, tool or
-approval flow, bracketed paste, observable focus, mouse care, resize
-Full → Compact → Minimal → Full, pet/feed/clean/nap actions during a usable
-Codex session, or clean terminal restoration. The run-owned xterm process
-ended with the timeout; no broad process cleanup was performed.
+It exited `1` immediately with:
+
+```text
+no lightweight window manager is installed; private Xvfb acceptance requires openbox, fluxbox, xfwm4, icewm, matchbox-window-manager, jwm, or twm
+```
+
+This is the required fail-fast result for the former `_NET_ACTIVE_WINDOW` /
+`BadWindow` loop. No private X server was started by that check.
+
+A bounded live run then reused `DISPLAY=:0` with an explicitly selected
+authorized `CODEX_HOME` (credentials were referenced, never copied or
+printed):
+
+```text
+CODEGOTCHI_LIVE_NO_BUILD=1 CODEGOTCHI_LIVE_TIMEOUT_SEC=10 \
+  CODEGOTCHI_LIVE_CODEX_HOME=/home/laurent/.codex \
+  CODEGOTCHI_LIVE_OUTPUT_DIR=/tmp/codegotchi-live-evidence-t7-rerun \
+  ./scripts/verify-terminal-room-live.sh
+```
+
+The production room and the official Codex pane rendered at terminal geometry
+`120x45`. The fresh initial live capture was
+`/tmp/codegotchi-live-evidence-t7-rerun/20260821T200006Z-1672739-full-live-populated.png`
+(`724x589`, SHA-256
+`afdc62b0857de763b9c47bbe152b1beec7ad7f486df07d7d25d9d076e4441d59`). Direct
+image inspection confirmed the real Codex pane above a populated CodeGotchi
+room, with no visible bearer token. The Codex pane was still on its official
+`Hooks need review` screen, and the shared display subsequently failed the
+window-activation check; the harness terminated only its run-owned xterm.
+The corrected harness now labels this pre-interaction frame `full-live-initial`
+and reports `BLOCKED` when care snapshots or required interaction checks do not
+settle; a `full-live-populated` frame is captured only after the bounded prompt
+and tool probes.
+
+Therefore these items remain **not claimed**: ordinary prompt/model response,
+tool activity, approval/review, bracketed paste (`xclip`/`xsel` are not
+installed), observable Codex focus reporting, mouse behavior, Full → Compact →
+Minimal → Full resize in a usable Codex session, qualifying pet/feed/clean/nap
+results with settled authoritative snapshots, normal Codex exit, bounded
+termination/restoration proof, and a final release PASS. The report alongside
+the capture is intentionally provisional; the live gate remains open until a
+display with a functioning window manager/focus path and an authorized Codex
+session completes the full checklist.
 
 Browser behavior is covered by the passing production Playwright suite and
 the focused motion/App tests; this does not turn the blocked live Codex TUI
