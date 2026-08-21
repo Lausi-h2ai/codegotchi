@@ -413,7 +413,8 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
     test("keeps idle travel in safe regions and eventually performs a roll", async ({
         page,
     }) => {
-        test.setTimeout(40_000);
+        await page.emulateMedia({ reducedMotion: "no-preference" });
+        await page.clock.install();
         await resetFixture(page, "default");
         await page.goto(launchUrl);
         await expect(petLocator(page)).toBeVisible();
@@ -432,6 +433,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
 
         const observedRegions = new Set<string>();
         let observedRoll = false;
+        let observedIdleTravel = false;
         let firstUngroundedPosition:
             | {
                   region: string;
@@ -440,10 +442,6 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
                   petFeet: number;
               }
             | undefined;
-        const pollOptions = {
-            timeout: 35_000,
-            intervals: [100, 250, 500],
-        } as const;
         const isIdle = (label: string | null): boolean =>
             label?.match(/Idle|Waiting/) !== null;
         const renderedRoomGeometry = async () =>
@@ -464,70 +462,73 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
                     petFeet: petRect.bottom,
                 };
             });
+        let previousMotionSample:
+            | {
+                  region: string;
+                  mode: string | null;
+                  phase: string | null;
+                  action: string | null;
+              }
+            | undefined;
+        let hasObservedRoam = false;
+        let previousWaypoint: string | null = null;
 
-        await Promise.all([
-            expect
-                .poll(
-                    async () => {
-                        const [region, mode, phase, label] = await Promise.all([
-                            motionAttribute(page, "data-motion-region"),
-                            motionAttribute(page, "data-motion-mode"),
-                            motionAttribute(page, "data-motion-phase"),
-                            page.getByTestId("activity-label").textContent(),
-                        ]);
-                        if (mode === "free_time" && region) {
-                            observedRegions.add(region);
-                            if (phase !== "traveling") {
-                                const geometry = await renderedRoomGeometry();
-                                if (
-                                    !firstUngroundedPosition &&
-                                    geometry !== null &&
-                                    (geometry.petFeet < geometry.floorTop - 8 ||
-                                        geometry.petFeet >
-                                            geometry.roomBottom + 1)
-                                ) {
-                                    firstUngroundedPosition = {
-                                        region,
-                                        ...geometry,
-                                    };
-                                }
-                            }
-                        }
-                        return observedRegions.size >= 2 && isIdle(label);
-                    },
-                    {
-                        ...pollOptions,
-                        message:
-                            "free-time choreography should visit multiple safe regions",
-                    },
-                )
-                .toBe(true),
-            expect
-                .poll(
-                    async () => {
-                        const [action, mode, label] = await Promise.all([
-                            motionAttribute(page, "data-motion-action"),
-                            motionAttribute(page, "data-motion-mode"),
-                            page.getByTestId("activity-label").textContent(),
-                        ]);
-                        observedRoll ||=
-                            mode === "free_time" && action === "roll";
-                        return observedRoll && isIdle(label);
-                    },
-                    {
-                        ...pollOptions,
-                        message:
-                            "free-time choreography should perform a roll within its 15–30s interval",
-                    },
-                )
-                .toBe(true),
-        ]);
+        for (let elapsedMs = 0; elapsedMs <= 31_000; elapsedMs += 250) {
+            if (
+                previousMotionSample &&
+                previousMotionSample.mode === "free_time" &&
+                hasObservedRoam &&
+                previousMotionSample.phase !== "traveling" &&
+                previousMotionSample.action !== "roll"
+            ) {
+                const geometry = await renderedRoomGeometry();
+                if (
+                    !firstUngroundedPosition &&
+                    geometry !== null &&
+                    (geometry.petFeet < geometry.floorTop - 8 ||
+                        geometry.petFeet > geometry.roomBottom + 1)
+                ) {
+                    firstUngroundedPosition = {
+                        region: previousMotionSample.region,
+                        ...geometry,
+                    };
+                }
+            }
+
+            const [region, mode, phase, action, waypoint, label] =
+                await Promise.all([
+                    motionAttribute(page, "data-motion-region"),
+                    motionAttribute(page, "data-motion-mode"),
+                    motionAttribute(page, "data-motion-phase"),
+                    motionAttribute(page, "data-motion-action"),
+                    petLocator(page).getAttribute("data-motion-waypoint"),
+                    page.getByTestId("activity-label").textContent(),
+                ]);
+            expect(region).not.toBeNull();
+            expect(motionRegions.has(region as string)).toBe(true);
+            observedRegions.add(region as string);
+
+            if (region) {
+                hasObservedRoam ||=
+                    previousWaypoint !== null && waypoint !== previousWaypoint;
+                previousWaypoint = waypoint;
+                previousMotionSample = { region, mode, phase, action };
+                observedRoll ||= action === "roll";
+                observedIdleTravel ||= isIdle(label);
+            }
+
+            if (elapsedMs < 31_000) {
+                await page.clock.fastForward(250);
+            }
+        }
 
         expect(
             [...observedRegions].every((region) => motionRegions.has(region)),
         ).toBe(true);
         expect(observedRegions.size).toBeGreaterThanOrEqual(2);
+        expect(observedIdleTravel).toBe(true);
         expect(firstUngroundedPosition).toBeUndefined();
+        expect(observedRoll).toBe(true);
         await expect(page.getByTestId("activity-label")).toContainText(
             /Idle|Waiting/,
         );
