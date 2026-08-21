@@ -57,9 +57,11 @@ pub fn draw_sprite_with_palette<R: AsRef<str>>(
         for (col, character) in line.chars().enumerate() {
             let logical_x = area
                 .x
+                .saturating_add(x)
                 .saturating_add(u16::try_from(col).unwrap_or(u16::MAX));
             let logical_y = area
                 .y
+                .saturating_add(y)
                 .saturating_add(u16::try_from(logical_row).unwrap_or(u16::MAX));
             let top = palette.sample_logical_tone(tone_for(character), logical_x, logical_y);
             let bottom = if logical_row + 1 < height {
@@ -495,6 +497,79 @@ mod tests {
             symbols.iter().all(|symbol| symbol == "▀" || symbol == "█"),
             "ordered dithering may only replace a foreground pixel with the background, got {symbols:?}"
         );
+    }
+
+    #[test]
+    fn auto_sprite_sampling_uses_each_nonzero_origin_as_room_coordinates() {
+        let area = Rect::new(7, 11, 32, 20);
+        let sprite = ["...", "...", "...", "..."];
+        let palette = TerminalThemePreset::Auto.resolve();
+
+        for &(origin_x, origin_y) in &[(2, 3), (11, 8)] {
+            let mut buffer = Buffer::filled(area, ratatui::buffer::Cell::new(" "));
+            draw_sprite_with_palette(area, &mut buffer, &sprite, origin_x, origin_y, palette);
+
+            for logical_row in (0..sprite.len()).step_by(2) {
+                for col in 0..sprite[logical_row].chars().count() {
+                    let logical_x = area
+                        .x
+                        .saturating_add(origin_x)
+                        .saturating_add(u16::try_from(col).unwrap());
+                    let logical_y = area
+                        .y
+                        .saturating_add(origin_y)
+                        .saturating_add(u16::try_from(logical_row).unwrap());
+                    let top =
+                        palette.sample_logical_tone(SemanticTone::Tone1, logical_x, logical_y);
+                    let bottom = palette.sample_logical_tone(
+                        SemanticTone::Tone1,
+                        logical_x,
+                        logical_y.saturating_add(1),
+                    );
+                    let expected = packed_cell_with_palette(top, bottom, palette).0;
+                    let cell = buffer
+                        .cell((logical_x, area.y + origin_y + logical_row as u16 / 2))
+                        .expect("sprite cell exists");
+                    assert_eq!(
+                        cell.symbol(),
+                        expected,
+                        "sprite origin ({origin_x}, {origin_y}) at logical ({col}, {logical_row})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn auto_sprite_sampling_continues_across_adjacent_layers() {
+        let area = Rect::new(9, 13, 20, 8);
+        let sprite = ["...", "..."];
+        let palette = TerminalThemePreset::Auto.resolve();
+        let mut buffer = Buffer::filled(area, ratatui::buffer::Cell::new(" "));
+        draw_sprite_with_palette(area, &mut buffer, &sprite, 2, 1, palette);
+        draw_sprite_with_palette(area, &mut buffer, &sprite, 5, 1, palette);
+
+        for origin_x in [2, 5] {
+            for col in 0..sprite[0].chars().count() {
+                let logical_x = area
+                    .x
+                    .saturating_add(origin_x)
+                    .saturating_add(u16::try_from(col).unwrap());
+                let logical_y = area.y + 1;
+                let top = palette.sample_logical_tone(SemanticTone::Tone1, logical_x, logical_y);
+                let bottom =
+                    palette.sample_logical_tone(SemanticTone::Tone1, logical_x, logical_y + 1);
+                let expected = packed_cell_with_palette(top, bottom, palette).0;
+                let cell = buffer
+                    .cell((logical_x, area.y + 1))
+                    .expect("sprite cell exists");
+                assert_eq!(
+                    cell.symbol(),
+                    expected,
+                    "adjacent sprite at x {origin_x}, column {col}"
+                );
+            }
+        }
     }
 
     #[test]
