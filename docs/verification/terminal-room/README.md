@@ -1,58 +1,79 @@
 # Terminal Room Visual Acceptance Evidence
 
-Status: **PENDING_VISION_REVIEW — final-candidate captures were recaptured and inspected; visual acceptance remains open**
-
-Renderer/source commit for these six frames: `a611202729bcbcc37beb2c5498bede8002f3cdc0`.
-The source commit contains the terminal-room fixes and the refreshed embedded
-web bundle. These images were captured after that commit with the production
-Rust room renderer; they are not synthetic mockups.
+Status: **PASS — lower-pane visual adjudication is clean; populated live-Codex
+acceptance remains a separate blocked release gate.** These eight PNGs were
+recaptured from the production Rust compositor at source SHA
+`c8371251de26db2cf9d5795873ee95c33ccd4800` on 2026-08-22. The six named-state
+frames also update the matching files in `docs/mockups/current/`.
 
 ## Final-candidate captures
 
-| File | Cells | Pixels | Fixture state | SHA-256 | Inspection result |
+| File | Cells | Pixels | Fixture state / host | SHA-256 | Inspection result |
 |---|---:|---:|---|---|---|
-| [full-120x45-light.png](full-120x45-light.png) | 120x45 | 1324x904 | Full, SoftGreen/day, awake | `edff240b2758847beff22febdf949bf1f553f334ac4788a6bd014353b11be664` | Room, pet, stocked food, poop, bed, demands, and status strip visible; abstract/sparse versus reference. |
-| [full-120x45-dark.png](full-120x45-dark.png) | 120x45 | 1324x904 | Full, Night/night, awake | `d88a5af6f8d8574a745cbe8406838a984bb4d86def2ff4d45fe0b0cb7a141a4c` | Dark palette remains legible; same visual gap remains. |
-| [compact-120x30-light.png](compact-120x30-light.png) | 120x30 | 1324x604 | Compact, SoftGreen/day, awake | `1ed20105ce0eb5c61c933d7cc441f336cbed3cd051bde20dda6446e079f48929` | Compact pet/status/care targets are visible and separated; it is not a pixel-art reference match. |
-| [minimal-120x21-light.png](minimal-120x21-light.png) | 120x21 | 1324x424 | Minimal, SoftGreen/day, awake | `70d02d3545652cddb192bc19ec5cf802adef15a6aa0f5606bfe42595452423c6` | Condensed need row, stocked `[FOOD x50]`, bed, poop, and demand controls are visible. |
-| [full-120x45-bed-sleep.png](full-120x45-bed-sleep.png) | 120x45 | 1324x904 | Full, SoftGreen/night, future authoritative nap | `5b7404aa95882716f8bed4f564dfbad1f7ff49e181a81592acc28f641de5ead7` | Pet is on the bed with `z z z`; bed label is rendered once. |
-| [full-120x45-floor-doze.png](full-120x45-floor-doze.png) | 120x45 | 1324x904 | Full, SoftGreen/day, generic `Sleeping` without deadline | `5fe41414e634758b5447acd278d6d6475de9301e13fa1458e5f9c2bff8f1f215` | Curled floor doze and one `z` are visible; the bed remains empty. |
+| [`full-120x45-light.png`](full-120x45-light.png) | 120×45 | 1324×904 | Full, SoftGreen/day, awake; xterm default light host | `7bc9b05cf8af684e5f9fda35d669755ac1e6e0c2e9be3ea2079931a0cbb86d99` | Layered room, large mascot, stocked care targets, demands, and status strip are legible; no seam or clipping. |
+| [`full-120x45-dark.png`](full-120x45-dark.png) | 120×45 | 1324×904 | Full, Night/night, awake; xterm `-bg black -fg white` | `83adc8d59e2a50ff4c72dc088cdbadf2f3ccaa0555957aafdc624c969003e55f` | Blue night composition and empty bars remain readable against the dark host; no capture artifact. |
+| [`compact-120x30-light.png`](compact-120x30-light.png) | 120×30 | 1324×604 | Compact, SoftGreen/day, awake; xterm default light host | `180625c741eac200b20b2c76d3defe1f13b9592e6e64169bcd4908d6986578ba` | Mascot-led seven-row vignette preserves needs, stocked food, poop, bed, and care cues. |
+| [`minimal-120x21-light.png`](minimal-120x21-light.png) | 120×21 | 1324×424 | Minimal, SoftGreen/day, awake; xterm default light host | `f87796b01124a3744783a8ea6512fe5ed8100cc76e00f6b35d98a49d59557305` | Three-row packed mascot, needs, food, bed, poop, affection, and snack controls fit cleanly. |
+| [`full-120x45-bed-sleep.png`](full-120x45-bed-sleep.png) | 120×45 | 1324×904 | Full, SoftGreen/night, future authoritative bed nap | `50d5ecd24b940e8e3a7b8f852b158afd9540412cab0438afdda4dabdb2f2a216` | Pet is on the bed with `z z z`; the floor is separate and the bed label appears once. |
+| [`full-120x45-floor-doze.png`](full-120x45-floor-doze.png) | 120×45 | 1324×904 | Full, SoftGreen/day, generic sleeping without deadline | `84780797a151d412db4fb4925079fe6263636e9ba5370c3fe38d9d0cb8d6aaaf` | Horizontal floor doze is distinct from bed sleep while the bed remains empty. |
+| [`auto-120x45-light.png`](auto-120x45-light.png) | 120×45 | 1324×904 | Full, Auto/day, awake; xterm default light host | `6efb9088e6926050ba044af5cf48d7b6f57f1d45584c8805684c431523ff4053` | Default foreground/background and ordered intermediate dithering remain readable on the light host. |
+| [`auto-120x45-dark.png`](auto-120x45-dark.png) | 120×45 | 1324×904 | Full, Auto/night, awake; xterm `-bg black -fg white` | `fba969ec9c09f677f1a6766723c1c152dea22148899448f6da91fd188dbf2200` | Auto switches to the dark host's default pair and remains readable; no named-gray assumption is visible. |
 
-## Inspection verdict
+## Inspection adjudication
 
-All six files were opened directly after capture and compared with every
-listed canonical reference in `docs/mockups/terminal-room/`. The captures
-prove the production projection and the required state distinctions:
+All eight fresh PNGs were opened directly on 2026-08-22. The lower pane is
+clean at Full, Compact, and Minimal sizes: the mascot is the visual focal
+element, room layers remain identifiable, and every core care target is
+visible without a seam, xterm capture artifact, or visible hit-target
+clipping. Auto is readable on both host polarities. Authoritative bed sleep
+and generic floor doze remain unmistakably distinct.
 
-- Full frames include the window, shelf, wardrobe, desk, pet, stocked food,
-  poop objects, bed, demand markers, and status strip; the dark frame remains
-  readable.
-- Compact and Minimal retain care controls at their constrained dimensions.
-- Authoritative bed sleep places the pet on the bed, while generic sleeping
-  is a curled floor doze with an empty bed.
-- The wide bed has one visible `BED` label, and sparse food sources do not
-  reserve an extra gap.
-
-The result is still **PENDING_VISION_REVIEW**, not a visual PASS: the supplied
-references show detailed pixel-art sprites, layered furniture, richer status
-icons, and a much larger round mascot, while the terminal renderer remains a
-deliberately simplified ANSI projection. The exact gap is recorded rather
-than converted into an acceptance claim.
+This is a **visual PASS for the lower pane**. The fixture intentionally has no
+real Codex process, leaving the upper host pane blank; that limitation does
+not invalidate the lower-pane adjudication. It does mean these captures do
+not claim the populated live-Codex requirement. The live gate remains
+**BLOCKED** until an authorized session supplies the required non-text
+receipts and a populated Full frame.
 
 ## Capture provenance
 
-The fixture was built from the source commit above:
+The fixture was rebuilt from the exact source SHA recorded above:
 
 ```text
 cargo build -p codegotchi-cli --example terminal_room_fixture
 ```
 
-Each frame used a fresh private Xvfb display, `xterm` with Noto Sans Mono at
-the listed cell size, `CG_FIXTURE_BOTTOM=1`, and
-`target/debug/examples/terminal_room_fixture`. Full light/dark, Compact,
-Minimal, future-deadline bed sleep, and no-deadline floor doze were captured
-as separate fixture states. The fixture calls the same
-`render_room_with_options` production compositor used by the terminal host.
+The capture environment was Ubuntu 24.04 under WSL2
+(`Linux 6.6.87.2-microsoft-standard-WSL2`), fresh TCP-only Xvfb display
+`:127` with a `1600x1200x24` screen, `xterm 390`, Noto Sans Mono 10 pt,
+ImageMagick `6.9.12-98`, `xdotool 3.20160805.1`, and Rust `cargo 1.97.1`.
+Every frame used a fresh xterm with `-fa "Noto Sans Mono" -fs 10`,
+`CG_FIXTURE_BOTTOM=1`, `CG_FIXTURE_PAUSE_MS=5000`, `TERM=xterm-256color`,
+`NO_COLOR=`, and `CODEGOTCHI_BROWSER=none`. The fixture calls the production
+`render_room_with_options` compositor and contains no Codex UI.
 
-The older `task5-*` and `task7` images in this directory remain historical
-records; they are not evidence for the source commit above.
+The exact state substitutions were:
+
+```text
+full-120x45-light       full    soft-green day   awake  default light host
+full-120x45-dark        full    night      night awake  -bg black -fg white
+compact-120x30-light    compact soft-green day   awake  default light host
+minimal-120x21-light    minimal soft-green day   awake  default light host
+full-120x45-bed-sleep   full    soft-green night bed    default light host
+full-120x45-floor-doze full    soft-green day   doze   default light host
+auto-120x45-light       full    auto       day   awake  default light host
+auto-120x45-dark        full    auto       night awake  -bg black -fg white
+```
+
+After each fixture settled, ImageMagick `import -silent -window` captured the
+visible xterm found by `xdotool`. The six current-state files and matching
+final-evidence files were captured in the same pass; dimensions and SHA-256
+values in the table were checked immediately afterward.
+
+## Real-Codex boundary
+
+[`live-codex/task-7-round1-blocked.txt`](live-codex/task-7-round1-blocked.txt)
+remains the durable live-session record. It correctly fails fast when private
+Xvfb has no supported lightweight window manager and does not claim prompt,
+model/tool, approval, paste, focus/mouse, resize, final-pet, or restoration
+receipts. No bearer token or auth contents are included in this evidence.
