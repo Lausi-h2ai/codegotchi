@@ -279,6 +279,7 @@ fn macos_child_exit_observed_before_reap(pid: u32, blocking: bool) -> io::Result
         options |= rustix::process::WaitIdOptions::NOHANG;
     }
     rustix::process::waitid(rustix::process::WaitId::Pid(pid), options)
+        .map_err(io::Error::from)
         .map(|status| status.is_some())
 }
 
