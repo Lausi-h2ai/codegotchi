@@ -3,7 +3,7 @@
 > **Historical record only.** The current release-hardening evidence is
 > [`terminal-room.md`](terminal-room.md) and
 > [`terminal-room/README.md`](terminal-room/README.md), with current code
-> source SHA `fc84168ac87532259c49cb8d8b1f5da0388be095`. Every source SHA,
+> source SHA `3bd781a06382b6d7982f03051d334996e1e0de51`. Every source SHA,
 > `/tmp` transcript, and platform conclusion in the entries below belongs to
 > the historical pass that named it and must not be read as current final
 > evidence. In particular, the old macOS deferment below predates the current
