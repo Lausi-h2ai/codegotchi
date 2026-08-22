@@ -26,24 +26,25 @@ older visual-capture provenance.
 | `cargo test -p codegotchi-cli --test terminal_room authoritative_sleep_hitbox -- --nocapture` | PASS; 2 tests | Full and Compact bed-sleep hitboxes match their rendered sprites. |
 | `cargo test -p codegotchi-cli --lib browser_helper_timeout_terminates_a_stuck_native_wait --no-fail-fast` | PASS | Native browser-helper wait terminates within the injected deadline. |
 | `cargo test -p codegotchi-cli --lib response_read_has_an_outer_deadline_when_peer_dribbles_bytes --no-fail-fast` | PASS | Debug-hook transport rejects a dribbled response at its outer deadline. |
+| `CRATE_CC_NO_DEFAULTS=1 cargo check -p codegotchi-cli --target x86_64-apple-darwin` | PASS | Final-validation artifact `/home/laurent/codegotchi/.superpowers/sdd/2026-08-20-terminal-room-release-hardening/final-validation/final-abfd7ce/macos-cfg.log` reaches and passes Rust cfg/type checking. |
 | `corepack pnpm test` | PASS; 123 tests | Fresh web test run. |
 | `corepack pnpm lint` | PASS | Fresh web lint run. |
 | `corepack pnpm format:check` | PASS | Fresh web format run. |
 | `corepack pnpm build` | PASS | Fresh production web build. |
 | `node web/scripts/embed-web.mjs` | PASS | Embedded production bundle unchanged after the fresh build. |
 | `corepack pnpm playwright:test:production` | PASS; 17 tests | Fresh production Playwright run; no retry classification. |
+| `final idle-travel/roll stress (10 runs)` | PASS; 10/10 | Final-validation artifact `/home/laurent/codegotchi/.superpowers/sdd/2026-08-20-terminal-room-release-hardening/final-validation/final-abfd7ce/idle-stress.log` records `PASS 1` through `PASS 10`. |
 | `cargo build -p codegotchi-cli --example terminal_room_fixture` | PASS | The eight captures were built from visual-capture SHA `c8371251de26db2cf9d5795873ee95c33ccd4800`; no new capture is claimed for `2557115dfa26ac6a425ae199e9ef32a7fea06d31`. |
 
-The Apple compile check was attempted with
-`cargo check -p codegotchi-cli --target x86_64-apple-darwin` and was blocked by
-the Linux host C compiler rejecting Apple `-arch` and deployment-target flags.
-The Apple runtime gate remains **UNAVAILABLE / NOT CLAIMED**; the source now
-uses rustix's `waitid(WNOWAIT)` pre-reap probe and includes a macOS-only unit
-regression, but no hosted macOS execution was available here.
+The final Apple cfg check passed with `CRATE_CC_NO_DEFAULTS=1`; this proves the
+Rust cfg/type path only and does not execute macOS runtime behavior. The hosted
+Apple runtime/production-shared PTY smoke remains **UNAVAILABLE / NOT CLAIMED**;
+the source uses rustix's `waitid(WNOWAIT)` pre-reap probe and includes a
+macOS-only unit regression, but no hosted macOS execution was available here.
 
-The production Playwright suite includes the deterministic idle-travel/roll
-assertion and passed it without retry. A separate ten-run stress ledger is not
-claimed by this evidence-only pass.
+The final-validation artifact also records ten consecutive deterministic
+idle-travel/roll runs, all passing. This is local browser stress evidence only;
+it does not claim live official-Codex acceptance or hosted release gates.
 
 ## Visual evidence
 
