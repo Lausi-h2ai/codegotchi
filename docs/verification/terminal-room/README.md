@@ -4,7 +4,7 @@ Status: **PASS — lower-pane visual adjudication is clean; populated live-Codex
 acceptance remains a separate blocked release gate.** These eight PNGs were
 recaptured from the production Rust compositor at visual-capture source SHA
 `c8371251de26db2cf9d5795873ee95c33ccd4800` on 2026-08-22. The current
-hardening source is `3bd781a06382b6d7982f03051d334996e1e0de51`; no new PNG
+hardening source is `2557115dfa26ac6a425ae199e9ef32a7fea06d31`; no new PNG
 capture is claimed for that fix commit. The six named-state frames also update
 the matching files in `docs/mockups/current/`.
 

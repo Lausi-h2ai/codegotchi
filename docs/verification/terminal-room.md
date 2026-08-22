@@ -2,7 +2,7 @@
 
 Status: **FAIL / BLOCKED**
 
-Current hardening source SHA: `3bd781a06382b6d7982f03051d334996e1e0de51`.
+Current hardening source SHA: `2557115dfa26ac6a425ae199e9ef32a7fea06d31`.
 Visual-capture source SHA: `c8371251de26db2cf9d5795873ee95c33ccd4800`.
 The PNG hashes below are tied to the visual-capture SHA, not silently promoted
 to fresh captures for the current hardening commit. No push or PR metadata
@@ -32,7 +32,7 @@ older visual-capture provenance.
 | `corepack pnpm build` | PASS | Fresh production web build. |
 | `node web/scripts/embed-web.mjs` | PASS | Embedded production bundle unchanged after the fresh build. |
 | `corepack pnpm playwright:test:production` | PASS; 17 tests | Fresh production Playwright run; no retry classification. |
-| `cargo build -p codegotchi-cli --example terminal_room_fixture` | PASS | The eight captures were built from visual-capture SHA `c8371251de26db2cf9d5795873ee95c33ccd4800`; no new capture is claimed for `3bd781a06382b6d7982f03051d334996e1e0de51`. |
+| `cargo build -p codegotchi-cli --example terminal_room_fixture` | PASS | The eight captures were built from visual-capture SHA `c8371251de26db2cf9d5795873ee95c33ccd4800`; no new capture is claimed for `2557115dfa26ac6a425ae199e9ef32a7fea06d31`. |
 
 The Apple compile check was attempted with
 `cargo check -p codegotchi-cli --target x86_64-apple-darwin` and was blocked by
