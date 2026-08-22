@@ -20,6 +20,7 @@ axum = { version = "0.8", features = ["ws"] }
 chrono = { version = "0.4", features = ["clock", "serde"] }
 futures-util = "0.3"
 nix = { version = "0.31", features = ["fs", "process", "signal", "term", "user"] }
+rustix = { version = "1.1.4", features = ["process"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"

@@ -215,6 +215,7 @@ impl ProcessGroupState {
             target_os = "android",
             target_os = "freebsd",
             target_os = "haiku",
+            target_os = "macos",
             all(target_os = "linux", not(target_env = "uclibc")),
         )))]
         {
@@ -266,6 +267,19 @@ impl PtySignal {
             Self::Kill => "SIGKILL",
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_child_exit_observed_before_reap(pid: u32, blocking: bool) -> io::Result<bool> {
+    let pid = rustix::process::Pid::from_raw(pid as i32)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid Codex child PID"))?;
+    let mut options =
+        rustix::process::WaitIdOptions::EXITED | rustix::process::WaitIdOptions::NOWAIT;
+    if !blocking {
+        options |= rustix::process::WaitIdOptions::NOHANG;
+    }
+    rustix::process::waitid(rustix::process::WaitId::Pid(pid), options)
+        .map(|status| status.is_some())
 }
 
 /// A Codex process attached directly to a native PTY.
@@ -473,18 +487,34 @@ impl PtyCodexChild {
         Ok(true)
     }
 
+    #[cfg(target_os = "macos")]
+    fn observe_exit_before_reap(&mut self, blocking: bool) -> Result<bool, PtyCodexError> {
+        let Some(pid) = self.process_id() else {
+            return Ok(true);
+        };
+        if !macos_child_exit_observed_before_reap(pid, blocking)
+            .map_err(|source| PtyCodexError::Wait { source })?
+        {
+            return Ok(false);
+        }
+
+        if self.cleanup_error.is_none() {
+            self.cleanup_error = self.cleanup_descendant_group().err();
+        }
+        Ok(true)
+    }
+
     #[cfg(not(any(
         target_os = "android",
         target_os = "freebsd",
         target_os = "haiku",
+        target_os = "macos",
         all(target_os = "linux", not(target_env = "uclibc")),
     )))]
     fn observe_exit_before_reap(&mut self, _blocking: bool) -> Result<bool, PtyCodexError> {
-        // Keep this fallback deliberately disarmed. In particular, nix 0.31
-        // exposes the WNOWAIT flag on Apple targets but not its safe waitid
-        // wrapper there, so a post-reap PGID signal would be stale. Apple
-        // natural-leader descendant cleanup remains deferred until a pinned
-        // safe pre-reap observation API is selected.
+        // Keep this fallback deliberately disarmed. Without a safe pre-reap
+        // observation API, a post-reap PGID signal could target a recycled
+        // process group identity.
         Ok(true)
     }
 
@@ -713,6 +743,7 @@ mod tests {
             target_os = "android",
             target_os = "freebsd",
             target_os = "haiku",
+            target_os = "macos",
             all(target_os = "linux", not(target_env = "uclibc")),
         ))]
         assert_eq!(state.identity(), Some(42));
@@ -720,6 +751,7 @@ mod tests {
             target_os = "android",
             target_os = "freebsd",
             target_os = "haiku",
+            target_os = "macos",
             all(target_os = "linux", not(target_env = "uclibc")),
         )))]
         assert_eq!(state.identity(), None);
@@ -727,6 +759,7 @@ mod tests {
             target_os = "android",
             target_os = "freebsd",
             target_os = "haiku",
+            target_os = "macos",
             all(target_os = "linux", not(target_env = "uclibc")),
         ))]
         assert_eq!(state.take_for_descendant_cleanup(), Some(42));
@@ -734,6 +767,7 @@ mod tests {
             target_os = "android",
             target_os = "freebsd",
             target_os = "haiku",
+            target_os = "macos",
             all(target_os = "linux", not(target_env = "uclibc")),
         )))]
         assert_eq!(state.take_for_descendant_cleanup(), None);
@@ -760,5 +794,33 @@ mod tests {
 
         assert!(state.cleanup_consumed());
         assert_eq!(state.identity(), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_waitid_probe_observes_exit_without_reaping_the_child() {
+        use std::process::Command;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .expect("spawn short-lived child");
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            if super::macos_child_exit_observed_before_reap(child.id(), false)
+                .expect("waitid probe")
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "child did not exit in time");
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        assert!(
+            child.try_wait().expect("reap after WNOWAIT").is_some(),
+            "the probe must leave the child waitable"
+        );
     }
 }

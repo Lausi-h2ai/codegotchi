@@ -1382,8 +1382,8 @@ fn full_pet_bed_and_sleep_markers_stay_within_their_contexts() {
     let geometry = codegotchi_cli::terminal::room_geometry(area, &snapshot);
     let bed = geometry.bed.expect("Full always has a bed");
     assert!(
-        geometry.pet.x < 80 && bed.x < 100,
-        "Full pet should remain on open floor left of the bed: pet={:?} bed={bed:?}",
+        geometry.pet.x >= bed.x && geometry.pet.right() <= bed.right(),
+        "Full sleeping pet should remain inside the bed hit context: pet={:?} bed={bed:?}",
         geometry.pet
     );
 
@@ -1395,6 +1395,40 @@ fn full_pet_bed_and_sleep_markers_stay_within_their_contexts() {
             .cell((x, bed.y.saturating_sub(1)))
             .is_some_and(|cell| cell.symbol() == "z")),
         "bed sleep markers should sit immediately above the bed"
+    );
+}
+
+#[test]
+fn full_authoritative_sleep_hitbox_matches_the_rendered_bed_pet() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot.behavior = PetBehavior::Sleeping;
+    snapshot.napping_until = Some(now + Duration::minutes(30));
+    let area = Rect::new(0, 0, 120, 14);
+    let geometry = codegotchi_cli::terminal::room_geometry(area, &snapshot);
+    let bed = geometry.bed.expect("Full always has a bed");
+
+    assert_eq!(
+        geometry.pet,
+        Rect::new(bed.x + 2, bed.y, 18, 7),
+        "Full bed-sleep hitbox must match the rendered sleep sprite"
+    );
+}
+
+#[test]
+fn compact_authoritative_sleep_hitbox_matches_the_rendered_bed_pet() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    snapshot.behavior = PetBehavior::Sleeping;
+    snapshot.napping_until = Some(now + Duration::minutes(30));
+    let area = Rect::new(0, 0, 120, 7);
+    let geometry = codegotchi_cli::terminal::room_geometry(area, &snapshot);
+    let bed = geometry.bed.expect("Compact always has a bed");
+
+    assert_eq!(
+        geometry.pet,
+        Rect::new(bed.x + 11, bed.y, 12, 5),
+        "Compact bed-sleep hitbox must match the rendered sleep sprite"
     );
 }
 

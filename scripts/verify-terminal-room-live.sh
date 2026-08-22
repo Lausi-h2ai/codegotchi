@@ -1129,7 +1129,9 @@ debug_command() {
     local command_name=$1
     local stdout_path="$RUN_ROOT/debug-$command_name.out"
     local stderr_path="$RUN_ROOT/debug-$command_name.err"
-    if CODEGOTCHI_ENABLE_DEBUG=1 CODEGOTCHI_SESSION_FILE="$METADATA_PATH" "$CODEGOTCHI_EXECUTABLE" debug "$command_name" >"$stdout_path" 2>"$stderr_path"; then
+    if timeout --foreground --signal=TERM --kill-after=2s "${CODEGOTCHI_LIVE_TIMEOUT_SEC:-30}s" \
+        env CODEGOTCHI_ENABLE_DEBUG=1 CODEGOTCHI_SESSION_FILE="$METADATA_PATH" \
+        "$CODEGOTCHI_EXECUTABLE" debug "$command_name" >"$stdout_path" 2>"$stderr_path"; then
         record "isolated debug $command_name" 'applied without exposing runtime credentials'
     else
         record "isolated debug $command_name" 'not available; care result remains explicitly unclaimed'

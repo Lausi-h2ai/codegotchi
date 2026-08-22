@@ -1,6 +1,6 @@
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use codegotchi_domain::{ActivityKind, AgentEvent, AgentEventKind, EventMetadata, EventSource};
@@ -20,6 +20,7 @@ pub const CODEGOTCHI_SESSION_FILE: &str = "CODEGOTCHI_SESSION_FILE";
 pub const EVENT_INGEST_PATH: &str = "/api/v1/events";
 pub const MAX_HOOK_INPUT_BYTES: usize = 1024 * 1024;
 const HOOK_IO_TIMEOUT: Duration = Duration::from_millis(250);
+const HOOK_TOTAL_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Error)]
@@ -356,14 +357,17 @@ fn send_json_request(
     path: &str,
     body: &[u8],
 ) -> Result<Vec<u8>, HookTransportError> {
+    let deadline = Instant::now() + HOOK_TOTAL_TIMEOUT;
     let endpoint = parse_loopback_endpoint(&metadata.loopback_base_url)?;
+    let connect_timeout = remaining_hook_timeout(deadline).map_err(HookTransportError::Io)?;
     let mut stream =
-        TcpStream::connect_timeout(&endpoint, HOOK_IO_TIMEOUT).map_err(HookTransportError::Io)?;
+        TcpStream::connect_timeout(&endpoint, connect_timeout).map_err(HookTransportError::Io)?;
+    let io_timeout = remaining_hook_timeout(deadline).map_err(HookTransportError::Io)?;
     stream
-        .set_read_timeout(Some(HOOK_IO_TIMEOUT))
+        .set_read_timeout(Some(io_timeout))
         .map_err(HookTransportError::Io)?;
     stream
-        .set_write_timeout(Some(HOOK_IO_TIMEOUT))
+        .set_write_timeout(Some(io_timeout))
         .map_err(HookTransportError::Io)?;
     let debug_header = if path.starts_with("/api/v1/debug/") {
         "X-CodeGotchi-Debug: 1\r\n"
@@ -377,17 +381,35 @@ fn send_json_request(
         body.len()
     );
     stream
+        .set_write_timeout(Some(
+            remaining_hook_timeout(deadline).map_err(HookTransportError::Io)?,
+        ))
+        .map_err(HookTransportError::Io)?;
+    stream
         .write_all(request_head.as_bytes())
         .map_err(HookTransportError::Io)?;
+    stream
+        .set_write_timeout(Some(
+            remaining_hook_timeout(deadline).map_err(HookTransportError::Io)?,
+        ))
+        .map_err(HookTransportError::Io)?;
     stream.write_all(body).map_err(HookTransportError::Io)?;
-    let response = read_http_response(&mut stream)?;
+    let response = read_http_response(&mut stream, deadline)?;
     parse_http_response_body(&response)
 }
 
-fn read_http_response(stream: &mut TcpStream) -> Result<Vec<u8>, HookTransportError> {
+fn read_http_response(
+    stream: &mut TcpStream,
+    deadline: Instant,
+) -> Result<Vec<u8>, HookTransportError> {
     let mut response = Vec::new();
     let mut buffer = [0_u8; 4096];
     loop {
+        stream
+            .set_read_timeout(Some(
+                remaining_hook_timeout(deadline).map_err(HookTransportError::Io)?,
+            ))
+            .map_err(HookTransportError::Io)?;
         let count = match stream.read(&mut buffer) {
             Ok(count) => count,
             Err(error)
@@ -397,6 +419,9 @@ fn read_http_response(stream: &mut TcpStream) -> Result<Vec<u8>, HookTransportEr
                         io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
                     ) =>
             {
+                if Instant::now() >= deadline {
+                    return Err(HookTransportError::Io(hook_deadline_error()));
+                }
                 break;
             }
             Err(error) => return Err(HookTransportError::Io(error)),
@@ -413,6 +438,22 @@ fn read_http_response(stream: &mut TcpStream) -> Result<Vec<u8>, HookTransportEr
         }
     }
     Ok(response)
+}
+
+fn remaining_hook_timeout(deadline: Instant) -> io::Result<Duration> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        Err(hook_deadline_error())
+    } else {
+        Ok(remaining.min(HOOK_IO_TIMEOUT))
+    }
+}
+
+fn hook_deadline_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        "CodeGotchi hook request exceeded its deadline",
+    )
 }
 
 fn response_body_complete(response: &[u8]) -> Result<bool, HookTransportError> {
@@ -609,5 +650,46 @@ fn decode_chunked_body(mut bytes: &[u8]) -> Result<Vec<u8>, HookTransportError> 
             return Err(HookTransportError::Response);
         }
         bytes = &bytes[2..];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::net::{Shutdown, TcpListener, TcpStream};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use super::{HookTransportError, read_http_response};
+
+    #[test]
+    fn response_read_has_an_outer_deadline_when_peer_dribbles_bytes() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback listener");
+        let address = listener.local_addr().expect("listener address");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept hook connection");
+            let response = b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n";
+            for byte in response.iter().copied().cycle().take(100) {
+                if stream.write_all(&[byte]).is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        });
+        let mut stream = TcpStream::connect(address).expect("connect loopback listener");
+        let started = Instant::now();
+
+        let error = read_http_response(&mut stream, Instant::now() + Duration::from_millis(150))
+            .expect_err("dribbled response must hit the outer deadline");
+
+        assert!(matches!(
+            error,
+            HookTransportError::Io(error) if error.kind() == std::io::ErrorKind::TimedOut
+        ));
+        assert!(started.elapsed() < Duration::from_millis(600));
+        stream
+            .shutdown(Shutdown::Both)
+            .expect("close hook connection");
+        server.join().expect("dribble server exits");
     }
 }

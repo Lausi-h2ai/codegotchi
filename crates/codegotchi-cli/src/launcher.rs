@@ -5,7 +5,7 @@ use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use codegotchi_domain::{Pet, PetSpecies};
@@ -46,6 +46,9 @@ const REPOSITORY_ID_NAMESPACE: &str = "codegotchi-repository-v1";
 const LIVE_HARNESS_ENV: &str = "CODEGOTCHI_LIVE_HARNESS";
 const LIVE_ARGUMENTS_FILE_ENV: &str = "CODEGOTCHI_LIVE_CODEX_ARGUMENTS_FILE";
 const LIVE_ARGUMENTS_ROOT_ENV: &str = "CODEGOTCHI_LIVE_ARGUMENTS_ROOT";
+const BROWSER_HELPER_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
+const BROWSER_HELPER_KILL_TIMEOUT: Duration = Duration::from_secs(1);
+const BROWSER_HELPER_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LauncherSignal {
@@ -1388,18 +1391,62 @@ fn native_browser_command(url: &str) -> (PathBuf, Vec<OsString>) {
     (PathBuf::from("/usr/bin/open"), vec![OsString::from(url)])
 }
 
-async fn reap_browser(mut child: Child, url: String) {
-    let result = tokio::task::spawn_blocking(move || child.wait()).await;
-    match result {
-        Ok(Ok(status)) if status.success() => {}
-        Ok(Ok(status)) => eprintln!(
-            "CodeGotchi warning: browser helper exited unsuccessfully ({status}); open {url}"
-        ),
-        Ok(Err(error)) => eprintln!(
-            "CodeGotchi warning: browser helper could not be reaped ({error}); open {url}"
-        ),
-        Err(error) => {
-            eprintln!("CodeGotchi warning: browser helper wait failed ({error}); open {url}")
+async fn reap_browser(child: Child, url: String) {
+    reap_browser_with_timeout(child, url, BROWSER_HELPER_WAIT_TIMEOUT).await;
+}
+
+async fn reap_browser_with_timeout(mut child: Child, url: String, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return,
+            Ok(Some(status)) => {
+                eprintln!(
+                    "CodeGotchi warning: browser helper exited unsuccessfully ({status}); open {url}"
+                );
+                return;
+            }
+            Ok(None) if Instant::now() < deadline => {
+                tokio::time::sleep(BROWSER_HELPER_POLL_INTERVAL).await;
+            }
+            Ok(None) => {
+                eprintln!(
+                    "CodeGotchi warning: browser helper did not exit within {timeout:?}; terminating it; open {url}"
+                );
+                if let Err(error) = child.kill() {
+                    eprintln!(
+                        "CodeGotchi warning: browser helper could not be terminated ({error}); open {url}"
+                    );
+                    return;
+                }
+                let kill_deadline = Instant::now() + BROWSER_HELPER_KILL_TIMEOUT;
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(_)) => return,
+                        Ok(None) if Instant::now() < kill_deadline => {
+                            tokio::time::sleep(BROWSER_HELPER_POLL_INTERVAL).await;
+                        }
+                        Ok(None) => {
+                            eprintln!(
+                                "CodeGotchi warning: terminated browser helper could not be reaped before the kill deadline; open {url}"
+                            );
+                            return;
+                        }
+                        Err(error) => {
+                            eprintln!(
+                                "CodeGotchi warning: browser helper could not be reaped ({error}); open {url}"
+                            );
+                            return;
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                eprintln!(
+                    "CodeGotchi warning: browser helper could not be reaped ({error}); open {url}"
+                );
+                return;
+            }
         }
     }
 }
@@ -1634,6 +1681,7 @@ mod tests {
     use super::{
         InheritedSignalSource, LaunchRequest, LauncherError, TerminalAttemptError, UiMode,
         execute_ui_route, parse_codex_argument_file, parse_launch_request, read_live_argument_file,
+        reap_browser_with_timeout,
     };
     use crate::terminal::TerminalThemePreset;
     use std::ffi::OsString;
@@ -1643,6 +1691,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     #[cfg(target_os = "macos")]
     use std::path::PathBuf;
+    use std::time::Duration;
     #[cfg(unix)]
     use uuid::Uuid;
 
@@ -2002,6 +2051,25 @@ mod tests {
             assert_eq!(inherited_calls_seen, inherited_calls, "{mode:?}");
             assert_eq!(terminal_calls_seen, terminal_calls, "{mode:?}");
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn browser_helper_timeout_terminates_a_stuck_native_wait() {
+        let child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("spawn a stuck browser helper");
+        let started = std::time::Instant::now();
+
+        reap_browser_with_timeout(
+            child,
+            "http://127.0.0.1:1234".to_owned(),
+            Duration::from_millis(20),
+        )
+        .await;
+
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[tokio::test]

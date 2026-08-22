@@ -246,23 +246,32 @@ fn room_mode(height: u16) -> RoomMode {
 fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) -> RoomGeometry {
     if area.width >= 80 {
         let bed_x = area.width.saturating_sub(24);
-        let pet_x = bed_x.saturating_sub(18);
-        let pet = offset_rect(
-            Rect::new(
-                area.x.saturating_add(pet_x),
-                area.y.saturating_add(4),
-                18,
-                7,
-            ),
-            offset,
-            area,
-        );
         let bed = Rect::new(
             area.x.saturating_add(bed_x),
             area.y.saturating_add(5),
             23,
             7,
         );
+        let pet_x = bed_x.saturating_sub(18);
+        let pet = if has_authoritative_nap(snapshot) {
+            packed_sprite_rect(
+                area,
+                bed.x.saturating_add(2),
+                bed.y,
+                pet_sprite(PetPose::Sleep),
+            )
+        } else {
+            offset_rect(
+                Rect::new(
+                    area.x.saturating_add(pet_x),
+                    area.y.saturating_add(4),
+                    18,
+                    7,
+                ),
+                offset,
+                area,
+            )
+        };
         let food_x = 2.min(area.width.saturating_sub(52));
         let compact_food = area.width < 100;
         let ultra_compact_food = area.width < 90;
@@ -299,23 +308,27 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
     } else {
         area.width.saturating_sub(28).max(4)
     };
-    let pet_x = bed_x.saturating_sub(18);
-    let pet = offset_rect(
-        Rect::new(
-            area.x.saturating_add(pet_x),
-            area.y.saturating_add(4),
-            (area.width.saturating_sub(pet_x)).min(18),
-            7,
-        ),
-        offset,
-        area,
-    );
     let bed = Rect::new(
         area.x.saturating_add(bed_x),
         area.y.saturating_add(8),
         (area.width.saturating_sub(bed_x)).min(20),
         5,
     );
+    let pet_x = bed_x.saturating_sub(18);
+    let pet = if has_authoritative_nap(snapshot) {
+        packed_sprite_rect(area, bed.x, bed.y, pet_sprite(PetPose::Sleep))
+    } else {
+        offset_rect(
+            Rect::new(
+                area.x.saturating_add(pet_x),
+                area.y.saturating_add(4),
+                (area.width.saturating_sub(pet_x)).min(18),
+                7,
+            ),
+            offset,
+            area,
+        )
+    };
     let food_sources = food_sources(area, snapshot, 2, 11, 15, 16);
     let poops = poop_slots(area, snapshot, 16, 12, 3);
     RoomGeometry {
@@ -329,16 +342,6 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
 
 fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) -> RoomGeometry {
     if area.width >= 80 {
-        let pet = offset_rect(
-            Rect::new(
-                area.x.saturating_add(2),
-                area.y.saturating_add(2),
-                COMPACT_PET_WIDTH,
-                COMPACT_PET_HEIGHT,
-            ),
-            offset,
-            area,
-        );
         let bed_x = area.width.saturating_sub(24);
         let bed = Rect::new(
             area.x.saturating_add(bed_x),
@@ -346,6 +349,25 @@ fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16
             23,
             COMPACT_PET_HEIGHT,
         );
+        let pet = if has_authoritative_nap(snapshot) {
+            packed_sprite_rect(
+                area,
+                bed.x.saturating_add(11),
+                bed.y,
+                pet_sprite_compact(PetPose::Sleep),
+            )
+        } else {
+            offset_rect(
+                Rect::new(
+                    area.x.saturating_add(2),
+                    area.y.saturating_add(2),
+                    COMPACT_PET_WIDTH,
+                    COMPACT_PET_HEIGHT,
+                ),
+                offset,
+                area,
+            )
+        };
         let ultra_compact_food = area.width < 90;
         let food_sources = wide_food_sources(
             area,
@@ -383,16 +405,6 @@ fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16
         };
     }
     let pet_x = area.width.saturating_sub(52).max(2);
-    let pet = offset_rect(
-        Rect::new(
-            area.x.saturating_add(pet_x),
-            area.y.saturating_add(2),
-            (area.width.saturating_sub(pet_x)).min(COMPACT_PET_WIDTH),
-            COMPACT_PET_HEIGHT.min(area.height.saturating_sub(2)),
-        ),
-        offset,
-        area,
-    );
     let bed_x = area.width.saturating_sub(28).max(4);
     let bed = Rect::new(
         area.x.saturating_add(bed_x),
@@ -400,6 +412,20 @@ fn compact_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16
         (area.width.saturating_sub(bed_x)).min(10),
         COMPACT_PET_HEIGHT.min(area.height.saturating_sub(2)),
     );
+    let pet = if has_authoritative_nap(snapshot) {
+        packed_sprite_rect(area, bed.x, bed.y, pet_sprite_compact(PetPose::Sleep))
+    } else {
+        offset_rect(
+            Rect::new(
+                area.x.saturating_add(pet_x),
+                area.y.saturating_add(2),
+                (area.width.saturating_sub(pet_x)).min(COMPACT_PET_WIDTH),
+                COMPACT_PET_HEIGHT.min(area.height.saturating_sub(2)),
+            ),
+            offset,
+            area,
+        )
+    };
     let food_sources = food_sources(area, snapshot, 2, 5, 8, 10);
     let poops = poop_slots(area, snapshot, 44, 5, 2);
     RoomGeometry {
@@ -897,6 +923,22 @@ fn offset_rect(rect: Rect, offset: (i16, i16), area: Rect) -> Rect {
     let x = (i64::from(rect.x) + i64::from(offset.0)).clamp(i64::from(area.x), max_x);
     let y = (i64::from(rect.y) + i64::from(offset.1)).clamp(i64::from(area.y), max_y);
     Rect::new(x as u16, y as u16, rect.width, rect.height)
+}
+
+fn packed_sprite_rect(area: Rect, x: u16, y: u16, sprite: &[&str]) -> Rect {
+    let width = sprite_width(sprite);
+    let height = u16::try_from(sprite.len().saturating_add(1) / 2).unwrap_or(u16::MAX);
+    let right = area.x.saturating_add(area.width);
+    let bottom = area.y.saturating_add(area.height);
+    if x >= right || y >= bottom {
+        return Rect::new(x, y, 0, 0);
+    }
+    Rect::new(
+        x,
+        y,
+        width.min(right.saturating_sub(x)),
+        height.min(bottom.saturating_sub(y)),
+    )
 }
 
 fn reset_area(area: Rect, buffer: &mut Buffer, palette: ResolvedPalette) {
