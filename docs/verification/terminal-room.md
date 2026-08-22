@@ -2,9 +2,11 @@
 
 Status: **FAIL / BLOCKED**
 
-Product/render source SHA: `c8371251de26db2cf9d5795873ee95c33ccd4800`.
-This evidence is a local, non-pushed follow-up on that source. No push or PR
-metadata change was made.
+Current hardening source SHA: `fc84168ac87532259c49cb8d8b1f5da0388be095`.
+Visual-capture source SHA: `c8371251de26db2cf9d5795873ee95c33ccd4800`.
+The PNG hashes below are tied to the visual-capture SHA, not silently promoted
+to fresh captures for the current hardening commit. No push or PR metadata
+change was made.
 
 The lower-pane visual gate is complete and clean. Final release status remains
 FAIL/BLOCKED only because the required populated live official-Codex session
@@ -12,21 +14,32 @@ has not been accepted and hosted CI has not run on an authorized push.
 
 ## Fresh local matrix
 
-The following commands were run against the exact product source SHA above in
-this evidence pass:
+The Rust and web gates below were run against the current hardening tree whose
+code is committed at the exact SHA above. The fixture row retains its explicit
+older visual-capture provenance.
 
 | Gate | Result | Evidence |
 |---|---|---|
 | `cargo fmt --all -- --check` | PASS | Fresh local run. |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | PASS | Fresh local run. |
 | `cargo test --workspace` | PASS | Fresh local run; workspace tests completed with no failures. |
+| `cargo test -p codegotchi-cli --test terminal_room authoritative_sleep_hitbox -- --nocapture` | PASS; 2 tests | Full and Compact bed-sleep hitboxes match their rendered sprites. |
+| `cargo test -p codegotchi-cli --lib browser_helper_timeout_terminates_a_stuck_native_wait --no-fail-fast` | PASS | Native browser-helper wait terminates within the injected deadline. |
+| `cargo test -p codegotchi-cli --lib response_read_has_an_outer_deadline_when_peer_dribbles_bytes --no-fail-fast` | PASS | Debug-hook transport rejects a dribbled response at its outer deadline. |
 | `corepack pnpm test` | PASS; 123 tests | Fresh web test run. |
 | `corepack pnpm lint` | PASS | Fresh web lint run. |
 | `corepack pnpm format:check` | PASS | Fresh web format run. |
 | `corepack pnpm build` | PASS | Fresh production web build. |
 | `node web/scripts/embed-web.mjs` | PASS | Embedded production bundle unchanged after the fresh build. |
 | `corepack pnpm playwright:test:production` | PASS; 17 tests | Fresh production Playwright run; no retry classification. |
-| `cargo build -p codegotchi-cli --example terminal_room_fixture` | PASS | Fixture used for the eight fresh captures. |
+| `cargo build -p codegotchi-cli --example terminal_room_fixture` | PASS | The eight captures were built from visual-capture SHA `c8371251de26db2cf9d5795873ee95c33ccd4800`; no new capture is claimed for `fc84168ac87532259c49cb8d8b1f5da0388be095`. |
+
+The Apple compile check was attempted with
+`cargo check -p codegotchi-cli --target x86_64-apple-darwin` and was blocked by
+the Linux host C compiler rejecting Apple `-arch` and deployment-target flags.
+The Apple runtime gate remains **UNAVAILABLE / NOT CLAIMED**; the source now
+uses rustix's `waitid(WNOWAIT)` pre-reap probe and includes a macOS-only unit
+regression, but no hosted macOS execution was available here.
 
 The production Playwright suite includes the deterministic idle-travel/roll
 assertion and passed it without retry. A separate ten-run stress ledger is not
@@ -78,7 +91,7 @@ bearer token or auth contents are included in the evidence.
 
 ## Hosted CI and PR boundary
 
-No fresh hosted workflow exists for the exact product source SHA because no
+No fresh hosted workflow exists for the exact hardening source SHA because no
 push was authorized in this worker. Hosted Ubuntu Rust, hosted macOS Rust
 (including the production-shared PTY smoke), and hosted web checks are
 **UNAVAILABLE / NOT CLAIMED**. No PR title, body, labels, or other metadata

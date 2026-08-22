@@ -2,9 +2,11 @@
 
 Status: **PASS — lower-pane visual adjudication is clean; populated live-Codex
 acceptance remains a separate blocked release gate.** These eight PNGs were
-recaptured from the production Rust compositor at source SHA
-`c8371251de26db2cf9d5795873ee95c33ccd4800` on 2026-08-22. The six named-state
-frames also update the matching files in `docs/mockups/current/`.
+recaptured from the production Rust compositor at visual-capture source SHA
+`c8371251de26db2cf9d5795873ee95c33ccd4800` on 2026-08-22. The current
+hardening source is `fc84168ac87532259c49cb8d8b1f5da0388be095`; no new PNG
+capture is claimed for that fix commit. The six named-state frames also update
+the matching files in `docs/mockups/current/`.
 
 ## Final-candidate captures
 
@@ -27,6 +29,10 @@ element, room layers remain identifiable, and every core care target is
 visible without a seam, xterm capture artifact, or visible hit-target
 clipping. Auto is readable on both host polarities. Authoritative bed sleep
 and generic floor doze remain unmistakably distinct.
+
+The same final-candidate PNGs were opened directly during the hardening review
+on 2026-08-22. No lower-pane art was changed by the fix commit; this inspection
+is not a claim of a new capture or of populated live-Codex acceptance.
 
 This is a **visual PASS for the lower pane**. The fixture intentionally has no
 real Codex process, leaving the upper host pane blank; that limitation does

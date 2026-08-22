@@ -1,5 +1,15 @@
 # Terminal-room Codex PTY verification
 
+> **Historical record only.** The current release-hardening evidence is
+> [`terminal-room.md`](terminal-room.md) and
+> [`terminal-room/README.md`](terminal-room/README.md), with current code
+> source SHA `fc84168ac87532259c49cb8d8b1f5da0388be095`. Every source SHA,
+> `/tmp` transcript, and platform conclusion in the entries below belongs to
+> the historical pass that named it and must not be read as current final
+> evidence. In particular, the old macOS deferment below predates the current
+> rustix `waitid(WNOWAIT)` pre-reap implementation; no hosted macOS runtime
+> result is claimed by the current record.
+
 Initial H3 dependency/API gate and managed PTY evidence, recorded 2026-08-14
 on the repository Rust toolchain.
 
@@ -183,7 +193,8 @@ satisfy either later hard gate.
 ## H6c interactive PTY session evidence
 
 Round 3 is based on commit `d08d277ded0166ba3f0626a944caad30dbce9d6e`
-(`fix: make pty session cleanup race-safe`). This pass is Linux/WSL-first.
+(`fix: make pty session cleanup race-safe`). This historical pass is
+Linux/WSL-first.
 macOS terminal-session acceptance is explicitly deferred: nix 0.31 exposes
 the `WNOWAIT` flag on Apple targets but not its safe `waitid` wrapper, so the
 unsupported fallback disarms the cached PGID after portable-pty reaps and
@@ -382,9 +393,11 @@ the launcher-aware entry seam returns its bounded signal receiver when physical
 terminal initialization fails and does not invoke the profile-before-spawn
 callback.
 
-This is Linux/WSL production-routing evidence with a fake Codex and no real
-Codex fidelity claim. macOS terminal lifecycle remains deferred, and the real
-Codex/first-room/screenshot gates remain later orchestrator work.
+This is historical Linux/WSL production-routing evidence with a fake Codex and
+no real Codex fidelity claim. The macOS deferment applies only to this old
+round; the current source has a safe Apple pre-reap probe, while hosted macOS
+runtime execution remains unavailable and unclaimed. The real
+Codex/first-room/screenshot gates remain later task scope for this old record.
 
 ## Task 5 mode, platform, and real-Codex gate (2026-08-20)
 
