@@ -396,6 +396,29 @@ fn full_mascot_and_care_targets_have_release_geometry() {
 }
 
 #[test]
+fn full_room_has_layered_object_density_beyond_outline_boxes() {
+    let snapshot = base_snapshot(Utc::now());
+    let area = Rect::new(0, 0, 120, 14);
+    let geometry = room_geometry(area, &snapshot);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+
+    let room_pixels = (0..area.width)
+        .flat_map(|x| (0..area.height.saturating_sub(1)).map(move |y| (x, y)))
+        .filter(|&(x, y)| {
+            !geometry.pet.contains(Position::new(x, y))
+                && buffer
+                    .cell((x, y))
+                    .is_some_and(|cell| matches!(cell.symbol(), "█" | "▀" | "▄"))
+        })
+        .count();
+    assert!(
+        room_pixels >= 110,
+        "layered furniture and floor objects need filled pixels, got {room_pixels}"
+    );
+}
+
+#[test]
 fn full_bed_sprite_fits_its_23_column_hitbox() {
     let snapshot = base_snapshot(Utc::now());
     let area = Rect::new(0, 0, 120, 14);
@@ -411,7 +434,7 @@ fn full_bed_sprite_fits_its_23_column_hitbox() {
         "│ │  ┌───────────┐  │ │",
         "│ └──┤  pillow   ├──┘ │",
         "│    └───────────┘    │",
-        "│  *  *  *  *  *  *   │",
+        "│  * █ * █ * █ * █    │",
         "└─────────────────────┘",
         "  └────── BED ──────┘  ",
     ];
@@ -1507,7 +1530,7 @@ fn rendered_care_extents_are_inside_their_hit_regions() {
                 format!("FOOD x{}", food.count)
             };
             let food_rows = if area.height >= 14 {
-                ["  ╭──╮ ", " ╱◒◒╲  ", "│◒◒◒│  ", label.as_str()]
+                ["  ╭──╮ ", " ╱██╲  ", "│█◒█│  ", label.as_str()]
             } else {
                 [" ○  ", "◒◒  ", "└─┘ ", label.as_str()]
             };
