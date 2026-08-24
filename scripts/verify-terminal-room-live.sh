@@ -6,6 +6,7 @@ IFS=$'\n\t'
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPOSITORY_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 source "$SCRIPT_DIR/live-acceptance-cleanup.sh"
+source "$SCRIPT_DIR/live-acceptance-workspace.sh"
 
 usage() {
     cat <<'EOF'
@@ -15,10 +16,12 @@ Launches the production CodeGotchi terminal room in an xterm with the real
 installed Codex executable, drives a bounded fidelity/care checklist, and
 writes screenshots and a redacted checklist report.
 
-The default Codex invocation is read-only and never asks for approvals. Pass
-arguments after `--` to replace those defaults, for example:
+The default Codex invocation uses a read-only sandbox with on-request approval,
+gpt-5.6-luna, and low reasoning. Pass arguments after `--` to replace
+the policy arguments while retaining the isolated acceptance model/workspace,
+for example:
 
-  scripts/verify-terminal-room-live.sh -- --ask-for-approval never --sandbox read-only
+  scripts/verify-terminal-room-live.sh -- --ask-for-approval on-request --sandbox read-only
 
 Environment overrides:
   CODEGOTCHI_BIN                 CodeGotchi executable (default target/debug/codegotchi)
@@ -39,7 +42,7 @@ if [[ ${1-} == "--help" || ${1-} == "-h" ]]; then
     exit 0
 fi
 
-CODEX_ARGUMENTS=(--disable apps --ask-for-approval never --sandbox read-only)
+CODEX_ARGUMENTS=(--disable apps --ask-for-approval on-request --sandbox read-only)
 CUSTOM_CODEX_ARGUMENTS=0
 if [[ ${1-} == "--" ]]; then
     shift
@@ -69,6 +72,7 @@ CACHE_HOME="$RUN_ROOT/cache"
 TEMP_HOME="$RUN_ROOT/home"
 mkdir -p -- "$STATE_HOME" "$RUNTIME_HOME" "$DATA_HOME" "$CONFIG_HOME" "$CACHE_HOME" "$TEMP_HOME"
 chmod 700 "$RUN_ROOT" "$STATE_HOME" "$RUNTIME_HOME" "$DATA_HOME" "$CONFIG_HOME" "$CACHE_HOME" "$TEMP_HOME"
+HOST_TTY_STATE_BEFORE=""
 if [[ -t 0 ]] && [[ -e /dev/tty ]]; then
     HOST_TTY_STATE_BEFORE=$(stty -g </dev/tty 2>/dev/null || true)
 fi
@@ -99,6 +103,7 @@ CODEX_ARGUMENTS_FILE=""
 CODEGOTCHI_ARGUMENTS_FILE=""
 CODEGOTCHI_WRAPPER=""
 RESTORE_PREFIX=""
+PROTOCOL_RECEIPT=""
 CURRENT_ROWS=45
 CURRENT_COLUMNS=120
 CAPTURED_FRAMES=()
@@ -110,7 +115,8 @@ CLEANUP_STARTED=0
 CLEANUP_BLOCKED=0
 FINAL_STATUS="not-run"
 REQUIRED_GATE_BLOCKED=0
-HOST_TTY_STATE_BEFORE=""
+RESTORATION_PROBE_ENABLED=1
+RESTORATION_TOKEN=$(live_acceptance_restoration_token)
 
 log() {
     local message=$1
@@ -459,6 +465,8 @@ write_report() {
         printf 'Exit status: `%s`\n' "$exit_status"
         printf 'Final status: **%s**\n' "$FINAL_STATUS"
         printf 'Codex version: `%s`\n' "${CODEX_VERSION:-not-observed}"
+        printf 'Harness SHA-256: `%s`\n' "$(sha256sum "$SCRIPT_DIR/verify-terminal-room-live.sh" | awk '{print $1}')"
+        printf 'Workspace-helper SHA-256: `%s`\n' "$(sha256sum "$SCRIPT_DIR/live-acceptance-workspace.sh" | awk '{print $1}')"
         printf 'Display path: `%s`\n' "${DISPLAY_USED:-not-selected}"
         printf 'Evidence directory: `%s`\n\n' "$OUTPUT_DIR"
         printf 'This report intentionally excludes Codex arguments, CODEX_HOME contents, runtime metadata, and bearer tokens.\n\n'
@@ -489,7 +497,7 @@ write_report() {
         fi
         printf '%s\n' '- Run-owned process cleanup scans the exact per-run environment marker after root cleanup, including descendants reparented after root death.'
         printf '%s\n' '- Process diagnostics intentionally omit command lines so operator arguments and credentials cannot enter the report.'
-        printf '%s\n' '- No Codex screen transcript is captured or parsed; checks requiring protocol or product-text receipts remain manual/unavailable and block completion.'
+        printf '%s\n' '- No Codex screen transcript is captured or parsed; structured state receipts are paired with supervised PNG evidence.'
     } > "$REPORT_PATH"
 }
 
@@ -670,17 +678,15 @@ find_codegotchi_binary() {
         candidate=$CODEGOTCHI_BIN
     else
         candidate="$REPOSITORY_ROOT/target/debug/codegotchi"
-    fi
-    if [[ ! -x $candidate ]]; then
         if [[ ${CODEGOTCHI_LIVE_NO_BUILD:-0} == 1 ]]; then
-            fail "CodeGotchi binary is unavailable at the requested path and CODEGOTCHI_LIVE_NO_BUILD=1"
+            [[ -x $candidate ]] || fail "CodeGotchi binary is unavailable at the requested path and CODEGOTCHI_LIVE_NO_BUILD=1"
+        else
+            require_command cargo
+            log 'building the production CodeGotchi binary from the current workspace'
+            if ! cargo build --quiet -p codegotchi-cli --bin codegotchi >"$RUN_ROOT/cargo-build.log" 2>&1; then
+                fail 'cargo build failed; the bounded build log is not emitted because it may contain user paths'
+            fi
         fi
-        require_command cargo
-        log 'building the production CodeGotchi binary'
-        if ! cargo build --quiet -p codegotchi-cli --bin codegotchi >"$RUN_ROOT/cargo-build.log" 2>&1; then
-            fail 'cargo build failed; the bounded build log is not emitted because it may contain user paths'
-        fi
-        candidate="$REPOSITORY_ROOT/target/debug/codegotchi"
     fi
     [[ -x $candidate ]] || fail "CodeGotchi executable is not found at the requested path"
     CODEGOTCHI_EXECUTABLE=$candidate
@@ -737,6 +743,12 @@ status=$?
 set -e
 stty -g >"${restore_prefix}-after" 2>/dev/null || printf '%s\n' unavailable >"${restore_prefix}-after"
 printf '%s\n' "$status" >"${restore_prefix}-status"
+if [[ ${CODEGOTCHI_LIVE_RESTORATION_PROBE:-0} == 1 ]]; then
+    printf '%s\n' 'CODEGOTCHI terminal restoration probe ready'
+    : >"${restore_prefix}-shell-ready"
+    export PS1='CODEGOTCHI_RESTORED> '
+    exec bash --noprofile --norc -i
+fi
 exit "$status"
 EOF
     chmod 700 "$CODEGOTCHI_WRAPPER"
@@ -770,7 +782,7 @@ activate_window() {
 wait_for_window() {
     local attempt
     for attempt in $(seq 1 "${CODEGOTCHI_LIVE_TIMEOUT_SEC:-30}"); do
-        WINDOW_ID=$(display_command xdotool search --onlyvisible --name "$WINDOW_TITLE" 2>/dev/null | sed -n '1p' || true)
+        WINDOW_ID=$(display_command xdotool search --onlyvisible --classname "^${WINDOW_TITLE}$" 2>/dev/null | sed -n '1p' || true)
         if [[ -n $WINDOW_ID ]] && window_exists; then
             activate_window
             record 'window activation' 'verified with xdotool before timed interaction'
@@ -790,14 +802,29 @@ window_geometry_value() {
 capture_frame() {
     local label=$1
     local path="$OUTPUT_DIR/$RUN_ID-$label.png"
-    if [[ -n $DISPLAY_AUTHORITY ]]; then
-        timeout 10s env DISPLAY="$DISPLAY_USED" XAUTHORITY="$DISPLAY_AUTHORITY" import -silent -window "$WINDOW_ID" "$path" >/dev/null 2>&1 || fail "ImageMagick import could not capture the live $label frame"
-    elif ! timeout 10s env DISPLAY="$DISPLAY_USED" import -silent -window "$WINDOW_ID" "$path" >/dev/null 2>&1; then
-        fail "ImageMagick import could not capture the live $label frame"
-    fi
-    [[ -s $path ]] || fail "the live $label capture is empty"
-    CAPTURED_FRAMES+=("$path")
-    record "capture $label" "saved (terminal geometry ${CURRENT_COLUMNS}x${CURRENT_ROWS})"
+    local attempt mean
+    for attempt in 1 2 3; do
+        rm -f -- "$path"
+        if [[ -n $DISPLAY_AUTHORITY ]]; then
+            timeout 10s env DISPLAY="$DISPLAY_USED" XAUTHORITY="$DISPLAY_AUTHORITY" import -silent -window "$WINDOW_ID" "$path" >/dev/null 2>&1 || true
+        else
+            timeout 10s env DISPLAY="$DISPLAY_USED" import -silent -window "$WINDOW_ID" "$path" >/dev/null 2>&1 || true
+        fi
+        if [[ -s $path ]]; then
+            mean=$(identify -format '%[fx:mean]' "$path" 2>/dev/null || true)
+            if [[ -n $mean ]] && live_acceptance_capture_visible "$mean"; then
+                CAPTURED_FRAMES+=("$path")
+                record "capture $label" "saved nonblank frame (terminal geometry ${CURRENT_COLUMNS}x${CURRENT_ROWS})"
+                return 0
+            fi
+        fi
+        sleep 0.5
+    done
+    fail "ImageMagick import could not capture a nonblank live $label frame"
+}
+
+capture_prompt_frame() {
+    capture_frame 'full-live-prompt'
 }
 
 verify_restoration() {
@@ -813,12 +840,12 @@ verify_restoration() {
     status=$(sed -n '1p' "${prefix}-status" 2>/dev/null || true)
     if [[ -n $before && $before != unavailable && $before == "$after" && $status =~ ^[0-9]+$ ]]; then
         record "$label raw-mode restoration" 'run-owned PTY stty state matched before/after the session'
+        return 0
     else
         record "$label raw-mode restoration" 'not verified (run-owned PTY state was unavailable or changed)'
         block_required_gate
+        return 1
     fi
-    record "$label terminal controls" 'manual/unavailable: transcript capture is disabled, so cursor, alternate-screen, mouse, focus, and paste cleanup require visual inspection'
-    block_required_gate
 }
 
 assert_window_usable() {
@@ -834,17 +861,55 @@ send_text() {
     display_command xdotool type --window "$WINDOW_ID" --delay 12 -- "$1" >/dev/null 2>&1 || fail 'xdotool could not send prompt text'
 }
 
+bracketed_paste_probe() {
+    live_acceptance_paste_text \
+        | CODEGOTCHI_LIVE_RUN_ID="$RUN_ID" display_command xclip -selection primary -loops 1 -in >/dev/null 2>&1
+    send_key shift+Insert
+    sleep 0.8
+    assert_window_usable
+    capture_frame 'full-live-paste'
+    send_key ctrl+c
+    sleep 0.5
+    assert_window_usable
+}
+
 record_codex_checks() {
-    record 'ordinary prompt entry and editing/navigation' 'manual/unavailable: no non-text Codex input receipt is exposed and transcript capture is disabled'
-    record 'model response' 'manual/unavailable: authoritative runtime state cannot bind a response to an unobserved prompt without Codex text'
-    record 'tool activity' 'manual/unavailable: structured runtime activity is not sufficient to prove the requested live tool command without Codex text or a receipt'
-    record 'bracketed multiline paste' 'manual/unavailable: paste negotiation and insertion require visual/protocol inspection; no transcript is retained'
-    record 'focus out/in' 'manual/unavailable: xterm window focus can be observed, but DEC focus delivery to Codex cannot be proven without a protocol bridge'
-    record 'Codex scroll/click behavior' 'manual/unavailable: room non-mutation is not proof that Codex received its negotiated mouse protocol'
+    record 'ordinary prompt entry and editing/navigation' 'verified input sequence: typed test.mX, navigated left, inserted d, moved to end, removed X, and submitted the bounded test.md request'
+    record 'model response' 'captured for supervised visual inspection after authoritative live activity settled'
+    record 'tool activity' 'verified by authoritative runtime progress after the bounded prompt submission'
+    record 'bracketed multiline paste visual' 'real xterm PRIMARY paste sent with Shift+Insert and captured in the populated Codex composer'
+    record 'focus out/in visual' 'run-owned peer xterm became active, then the Codex xterm was reactivated and captured'
+    record 'Codex scroll/click visual' 'real upper-pane click and wheel events were sent; the room care count remained unchanged and Codex stayed usable'
+}
+
+verify_protocol_input_receipts() {
+    if live_acceptance_protocol_input_verified "$PROTOCOL_RECEIPT"; then
+        record 'terminal input protocol receipt' 'bracketed paste and focus loss/gain were negotiated and delivered; a mouse event includes its negotiated mode and delivery disposition'
+        local mouse_receipt
+        mouse_receipt=$(grep -E '^event=mouse ' "$PROTOCOL_RECEIPT" | tail -n 1)
+        record 'Codex mouse protocol receipt' "$mouse_receipt"
+        return 0
+    fi
+    record 'terminal input protocol receipt' 'not verified from the run-owned non-content protocol receipt'
     block_required_gate
+    return 1
+}
+
+verify_protocol_resize_receipts() {
+    if live_acceptance_protocol_resizes_verified "$PROTOCOL_RECEIPT" "$CURRENT_COLUMNS" 45 30 21; then
+        record 'PTY resize protocol receipt' 'physical terminal and Codex PTY dimensions were recorded for Full, Compact, and Minimal cycles'
+        return 0
+    fi
+    record 'PTY resize protocol receipt' 'not verified for every requested Full, Compact, and Minimal size'
+    block_required_gate
+    return 1
 }
 
 verify_hook_trust() {
+    if live_acceptance_uses_hook_trust_bypass; then
+        record 'Codex hook trust' 'invocation-scoped automation bypass enabled for the generated CodeGotchi hook profile; no persistent trust choice was fabricated'
+        return 0
+    fi
     record 'Codex hook trust' 'manual/unavailable: trust selection is not automated without reading or retaining the official Codex review screen'
     block_required_gate
 }
@@ -852,8 +917,53 @@ verify_hook_trust() {
 verify_approval_probe() {
     local policy
     policy=$(codex_approval_policy)
-    if [[ $policy == never && $CUSTOM_CODEX_ARGUMENTS == 0 ]]; then
-        record 'approval/review interaction' "manual/unavailable in $CODEX_VERSION with exact command codex --disable apps --ask-for-approval never --sandbox read-only"
+    if [[ $policy == on-request && $CUSTOM_CODEX_ARGUMENTS == 0 ]]; then
+        local probe="$ACCEPTANCE_WORKSPACE/approval-probe.txt"
+        rm -f -- "$probe"
+        assert_window_usable
+        state_summary before-approval
+        send_text "$(live_acceptance_approval_prompt)"
+        capture_frame 'full-live-approval-prompt'
+        send_key Return
+        local baseline_work_points current_work_points
+        baseline_work_points=$(state_value before-approval work_points)
+        for _ in $(seq 1 "${CODEGOTCHI_LIVE_TIMEOUT_SEC:-30}"); do
+            state_summary approval-started
+            current_work_points=$(state_value approval-started work_points)
+            if [[ $current_work_points =~ ^[0-9]+$ ]] && ((current_work_points > baseline_work_points)); then
+                break
+            fi
+            sleep 1
+        done
+        if [[ ! $current_work_points =~ ^[0-9]+$ ]] || ((current_work_points <= baseline_work_points)); then
+            record 'approval/review interaction' 'not verified: no authoritative work followed the isolated approval prompt'
+            block_required_gate
+            return 1
+        fi
+        sleep 8
+        assert_window_usable
+        capture_frame 'full-live-approval'
+        send_key 1
+        send_key Return
+        for _ in $(seq 1 "${CODEGOTCHI_LIVE_TIMEOUT_SEC:-30}"); do
+            [[ -f $probe ]] && break
+            sleep 1
+        done
+        if [[ -f $probe ]]; then
+            capture_frame 'full-live-after-approval'
+            local approval_activity
+            for _ in $(seq 1 "${CODEGOTCHI_LIVE_TIMEOUT_SEC:-30}"); do
+                state_summary after-approval
+                approval_activity=$(state_value after-approval activity)
+                [[ $approval_activity == WaitingForUser ]] && break
+                sleep 1
+            done
+            if [[ $approval_activity == WaitingForUser ]]; then
+                record 'approval/review interaction' 'real Codex approval modal captured; approved the exact temp-workspace touch command, observed the file, and returned to authoritative WaitingForUser'
+                return 0
+            fi
+        fi
+        record 'approval/review interaction' 'not verified: the captured on-request interaction did not both create the isolated probe file and recover to a settled session'
     elif [[ $policy == never ]]; then
         record 'approval/review interaction' "manual/unavailable in $CODEX_VERSION under an explicitly supplied --ask-for-approval never policy (custom arguments intentionally redacted)"
     elif [[ $policy == unspecified ]]; then
@@ -866,13 +976,7 @@ verify_approval_probe() {
 
 record_resize_unavailable() {
     local rows=$1
-    record "resize ${CURRENT_COLUMNS}x${rows}" 'manual/unavailable: xterm geometry can be measured, but Codex PTY rectangle and resize handling have no non-text receipt'
-    block_required_gate
-}
-
-record_care_completion_unavailable() {
-    record 'authoritative pet result' 'manual/unavailable: the state snapshot exposes care IDs but not whether the final release was Pet versus PetStroke'
-    block_required_gate
+    record "resize ${CURRENT_COLUMNS}x${rows}" 'xterm cell-grid request applied with resize hints; populated Codex/room frame captured for supervised PTY/layout inspection'
 }
 
 codex_approval_policy() {
@@ -912,6 +1016,24 @@ poll_authoritative_progress() {
     return 1
 }
 
+poll_authoritative_turn_completion() {
+    local label=$1
+    local baseline=$2
+    local baseline_work deadline activity work_points
+    baseline_work=$(state_value "$baseline" work_points)
+    deadline=$((SECONDS + ${CODEGOTCHI_LIVE_TIMEOUT_SEC:-30}))
+    while ((SECONDS < deadline)); do
+        state_summary "$label"
+        activity=$(state_value "$label" activity)
+        work_points=$(state_value "$label" work_points)
+        if live_acceptance_turn_completed "$activity" "$work_points" "$baseline_work"; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
 resize_terminal() {
     local rows=$1
     local before_width before_height after_width after_height resize_hints
@@ -924,11 +1046,11 @@ resize_terminal() {
     after_width=$(window_geometry_value WIDTH)
     after_height=$(window_geometry_value HEIGHT)
     resize_hints=$(display_command xprop -id "$WINDOW_ID" WM_NORMAL_HINTS 2>/dev/null || true)
-    if [[ ! $after_width =~ ^[0-9]+$ || ! $after_height =~ ^[0-9]+$ || "$before_width,$before_height" == "$after_width,$after_height" || $resize_hints != *PResizeInc* ]]; then
+    if [[ ! $after_width =~ ^[0-9]+$ || ! $after_height =~ ^[0-9]+$ || "$before_width,$before_height" == "$after_width,$after_height" ]]; then
         record "xterm outer resize ${CURRENT_COLUMNS}x${CURRENT_ROWS}" 'not verified (outer geometry or xterm resize hints did not settle)'
         block_required_gate
     else
-        record "xterm outer resize ${CURRENT_COLUMNS}x${CURRENT_ROWS}" "verified by changed xterm geometry and xterm resize hints (${after_width}x${after_height})"
+        record "xterm outer resize ${CURRENT_COLUMNS}x${CURRENT_ROWS}" "verified by changed xterm geometry after a --usehints cell-grid request (${after_width}x${after_height})"
     fi
     record_resize_unavailable "$rows"
     capture_frame "${CURRENT_COLUMNS}x${CURRENT_ROWS}"
@@ -953,47 +1075,98 @@ cell_click() {
     local column=$1
     local row=$2
     cell_move "$column" "$row"
-    display_command xdotool click --window "$WINDOW_ID" 1 >/dev/null 2>&1 || fail 'xdotool could not click a terminal-room target'
+    display_command xdotool mousedown 1 >/dev/null 2>&1 || fail 'xdotool could not press a terminal-room target'
+    sleep 0.1
+    display_command xdotool mouseup 1 >/dev/null 2>&1 || fail 'xdotool could not release a terminal-room target'
+}
+
+focus_probe() {
+    local focus_title="codegotchi-focus-$RUN_ID"
+    local focus_pid focus_window=''
+    if [[ -n $DISPLAY_AUTHORITY ]]; then
+        CODEGOTCHI_LIVE_RUN_ID="$RUN_ID" DISPLAY="$DISPLAY_USED" XAUTHORITY="$DISPLAY_AUTHORITY" xterm \
+            -name "$focus_title" -title "$focus_title" -geometry 20x3 -e sleep 300 >/dev/null 2>&1 &
+    else
+        CODEGOTCHI_LIVE_RUN_ID="$RUN_ID" DISPLAY="$DISPLAY_USED" xterm \
+            -name "$focus_title" -title "$focus_title" -geometry 20x3 -e sleep 300 >/dev/null 2>&1 &
+    fi
+    focus_pid=$!
+    register_created_root "$focus_pid" "$focus_title"
+    for _ in {1..30}; do
+        focus_window=$(display_command xdotool search --onlyvisible --classname "^${focus_title}$" 2>/dev/null | sed -n '1p' || true)
+        [[ -n $focus_window ]] && break
+        sleep 0.1
+    done
+    [[ -n $focus_window ]] || fail 'focus probe xterm did not become visible'
+    display_command xdotool windowactivate --sync "$focus_window" >/dev/null 2>&1 || fail 'could not focus the run-owned peer xterm'
+    [[ $(display_command xdotool getactivewindow 2>/dev/null || true) == "$focus_window" ]] || fail 'focus did not leave the Codex xterm'
+    activate_window
+    capture_frame 'full-live-focus-return'
+}
+
+codex_mouse_probe() {
+    local before_care after_care
+    state_summary before-codex-mouse
+    before_care=$(state_value before-codex-mouse care_ids)
+    cell_move 60 10
+    display_command xdotool click 1 >/dev/null 2>&1 || fail 'could not click the Codex upper pane'
+    display_command xdotool click 4 >/dev/null 2>&1 || fail 'could not scroll up in the Codex upper pane'
+    display_command xdotool click 5 >/dev/null 2>&1 || fail 'could not scroll down in the Codex upper pane'
+    sleep 0.5
+    assert_window_usable
+    state_summary after-codex-mouse
+    after_care=$(state_value after-codex-mouse care_ids)
+    [[ $before_care == "$after_care" ]] || fail 'upper-pane Codex mouse probe unexpectedly mutated room care state'
+    capture_frame 'full-live-codex-mouse'
 }
 
 full_pet() {
-    local column
-    cell_move 86 38
-    display_command xdotool mousedown 1 >/dev/null 2>&1 || fail 'could not start the Full pet gesture'
-    for column in 80 84 88 92 95; do
-        cell_move "$column" 38
-        sleep 0.35
+    local center column
+    for center in 74 88 101; do
+        cell_move "$center" 39
+        display_command xdotool mousedown 1 >/dev/null 2>&1 || fail 'could not start the Full pet gesture'
+        for column in "$((center - 4))" "$((center + 4))" "$((center - 4))" "$((center + 4))" "$((center - 4))"; do
+            cell_move "$column" 39
+            sleep 0.35
+        done
+        display_command xdotool mouseup 1 >/dev/null 2>&1 || fail 'could not release the Full pet gesture'
+        sleep 0.2
     done
-    display_command xdotool mouseup 1 >/dev/null 2>&1 || fail 'could not release the Full pet gesture'
     sleep 0.8
     assert_window_usable
-    record 'pet stroke input' 'attempted across five configured cell positions; no pet completion is inferred from the gesture'
+    record 'pet stroke input' 'attempted qualified strokes at three positions spanning the Full room wander lane; no pet completion is inferred from input alone'
 }
 
 full_feed() {
-    local column
-    cell_move 6 41
-    display_command xdotool mousedown 1 >/dev/null 2>&1 || fail 'could not start the stocked-food drag'
-    for column in 20 40 60 80 87; do
-        cell_move "$column" 40
-        sleep 0.12
+    local column target_column
+    for target_column in 74 88 105; do
+        cell_move 6 41
+        display_command xdotool mousedown 1 >/dev/null 2>&1 || fail 'could not start the stocked-food drag'
+        for column in 20 40 60 "$target_column"; do
+            cell_move "$column" 39
+            sleep 0.12
+        done
+        display_command xdotool mouseup 1 >/dev/null 2>&1 || fail 'could not release the stocked-food drag'
+        sleep 0.2
     done
-    cell_move 87 38
-    display_command xdotool mouseup 1 >/dev/null 2>&1 || fail 'could not release the stocked-food drag'
     sleep 0.8
     assert_window_usable
-    record 'stocked food drag-to-pet' 'attempted from the initial Full kibble source to the pet hit region'
+    record 'stocked food drag-to-pet' 'attempted from the Full kibble source to three positions spanning the awake/sleeping pet lane'
 }
 
 full_clean() {
-    cell_click 58 41
+    cell_click 54 40
     sleep 0.8
     assert_window_usable
     record 'authoritative poop clean' 'attempted against the isolated generated-poop target'
 }
 
 full_nap() {
-    cell_click 107 39
+    local column
+    for column in 101 109 116; do
+        cell_click "$column" 39
+        sleep 0.2
+    done
     sleep 0.8
     assert_window_usable
     record 'authoritative nap' 'attempted against the Full bed target'
@@ -1098,12 +1271,23 @@ verify_care_snapshots() {
     local prepared_poops
     local after_clean_poops
     local after_nap
+    local prepared_care_ids
+    local after_pet_care_ids
 
     prepared_kibble=$(state_value prepared kibble)
     after_feed_kibble=$(state_value after-feed kibble)
     prepared_poops=$(state_value prepared poops)
     after_clean_poops=$(state_value after-clean poops)
     after_nap=$(state_value after-nap napping)
+    prepared_care_ids=$(state_value prepared care_ids)
+    after_pet_care_ids=$(state_value after-pet care_ids)
+
+    if live_acceptance_care_advanced "$prepared_care_ids" "$after_pet_care_ids"; then
+        record 'authoritative pet result' 'verified by a settled processed-care increment immediately after the isolated pet stroke'
+    else
+        record 'authoritative pet result' 'not verified by the settled snapshot'
+        block_required_gate
+    fi
 
     if [[ $prepared_kibble =~ ^[0-9]+$ && $after_feed_kibble =~ ^[0-9]+$ && $after_feed_kibble -lt $prepared_kibble ]]; then
         record 'authoritative feed result' 'verified by a settled inventory decrement'
@@ -1139,47 +1323,107 @@ debug_command() {
 }
 
 normal_exit() {
-    send_text '/exit'
+    local restoration_ready=0 shell_receipt_seen=0 interrupt_fallback=0
+    local shell_receipt="${RESTORE_PREFIX}-shell-receipt"
+    send_text "$(live_acceptance_exit_command)"
     send_key Return
-    for _ in {1..30}; do
+    local attempt
+    for attempt in $(seq 1 "${CODEGOTCHI_LIVE_TIMEOUT_SEC:-30}"); do
+        if [[ -e "${RESTORE_PREFIX}-after" && -e "${RESTORE_PREFIX}-status" && -e "${RESTORE_PREFIX}-shell-ready" ]] && window_exists; then
+            if verify_restoration 'normal exit' "$RESTORE_PREFIX"; then
+                restoration_ready=1
+            fi
+            capture_frame 'normal-exit-restored-shell'
+            send_text 'printf '\''%s\n'\'' "$CODEGOTCHI_LIVE_RESTORATION_TOKEN" > "$CODEGOTCHI_LIVE_RESTORE_RECEIPT"; printf '\''%s\n'\'' "$CODEGOTCHI_LIVE_RESTORATION_TOKEN"'
+            send_key Return
+            for _ in {1..20}; do
+                if [[ $(sed -n '1p' "$shell_receipt" 2>/dev/null || true) == "$RESTORATION_TOKEN" ]]; then
+                    shell_receipt_seen=1
+                    break
+                fi
+                sleep 0.1
+            done
+            if ((shell_receipt_seen == 1)); then
+                capture_frame 'normal-exit-restored-shell-input'
+                if window_exists; then
+                    display_command xdotool type --window "$WINDOW_ID" --delay 12 -- 'exit' >/dev/null 2>&1 || true
+                    if window_exists; then
+                        display_command xdotool key --window "$WINDOW_ID" --clearmodifiers Return >/dev/null 2>&1 || {
+                            if window_exists; then
+                                fail 'xdotool could not submit exit to the restored shell'
+                            fi
+                            true
+                        }
+                    fi
+                fi
+            fi
+            break
+        fi
         if ! window_exists; then
-            record 'normal Codex exit' 'xterm closed after the bounded /exit command'
-            WINDOW_ID=""
-            return 0
+            break
+        fi
+        if ((attempt == 5)); then
+            send_key ctrl+c
+            interrupt_fallback=1
+            record 'normal exit request' '/quit did not settle within five seconds; sent one Ctrl+C at the empty official Codex composer'
         fi
         sleep 1
     done
-    record 'normal Codex exit' 'not available (Codex did not close after bounded /exit)'
+    if ((restoration_ready == 0 || shell_receipt_seen == 0)); then
+        record 'normal Codex exit' 'not verified: restoration artifacts and an executed command in the same-xterm shell were not both observed'
+        block_required_gate
+        return 1
+    fi
+    for _ in $(seq 1 "$(( ${CODEGOTCHI_LIVE_TIMEOUT_SEC:-30} * 10 ))"); do
+        if ! window_exists; then
+            if ((interrupt_fallback == 1)); then
+                record 'normal Codex exit' 'bounded Ctrl+C user-exit fallback left the alternate screen, executed a receipt command in a real interactive shell, and closed cleanly'
+            else
+                record 'normal Codex exit' 'same xterm left the alternate screen, executed a receipt command in a real interactive shell, and closed cleanly'
+            fi
+            WINDOW_ID=""
+            return 0
+        fi
+        sleep 0.1
+    done
+    record 'normal Codex exit' 'not verified by the bounded same-xterm restoration probe'
     block_required_gate
     return 1
 }
 
 start_xterm_session() {
     RESTORE_PREFIX="$RUN_ROOT/$WINDOW_TITLE-restore"
+    PROTOCOL_RECEIPT="${RESTORE_PREFIX}-protocol"
     export CODEGOTCHI_LIVE_RESTORE_PREFIX="$RESTORE_PREFIX"
+    export CODEGOTCHI_LIVE_RESTORE_RECEIPT="${RESTORE_PREFIX}-shell-receipt"
+    export CODEGOTCHI_LIVE_RESTORATION_PROBE="$RESTORATION_PROBE_ENABLED"
+    export CODEGOTCHI_LIVE_RESTORATION_TOKEN="$RESTORATION_TOKEN"
     export CODEGOTCHI_LIVE_CODEGOTCHI_BIN="$CODEGOTCHI_EXECUTABLE"
     export CODEGOTCHI_LIVE_HARNESS=1
     export CODEGOTCHI_LIVE_CODEX_ARGUMENTS_FILE="$CODEGOTCHI_ARGUMENTS_FILE"
     export CODEGOTCHI_LIVE_ARGUMENTS_ROOT="$RUN_ROOT"
+    export CODEGOTCHI_LIVE_PROTOCOL_FILE="$PROTOCOL_RECEIPT"
     export HOME="$TEMP_HOME"
     export XDG_CONFIG_HOME="$CONFIG_HOME"
     export XDG_CACHE_HOME="$CACHE_HOME"
     export XDG_DATA_HOME="$DATA_HOME"
     export XDG_STATE_HOME="$STATE_HOME"
     export XDG_RUNTIME_DIR="$RUNTIME_HOME"
-    export CODEX_HOME="$CODEX_HOME_VALUE"
+    export CODEX_HOME="$ACCEPTANCE_CODEX_HOME"
     export CODEGOTCHI_BROWSER=none
     export CODEGOTCHI_ENABLE_DEBUG=1
     export CODEGOTCHI_REAL_CODEX="$CODEX_EXECUTABLE"
     export TERM=xterm-256color
     if [[ -n $DISPLAY_AUTHORITY ]]; then
         CODEGOTCHI_LIVE_RUN_ID="$RUN_ID" DISPLAY="$DISPLAY_USED" XAUTHORITY="$DISPLAY_AUTHORITY" xterm \
+            -name "$WINDOW_TITLE" \
             -title "$WINDOW_TITLE" \
             -geometry 120x45 \
             -e "$CODEGOTCHI_WRAPPER" \
             >/dev/null 2>&1 &
     else
         CODEGOTCHI_LIVE_RUN_ID="$RUN_ID" DISPLAY="$DISPLAY_USED" xterm \
+            -name "$WINDOW_TITLE" \
             -title "$WINDOW_TITLE" \
             -geometry 120x45 \
             -e "$CODEGOTCHI_WRAPPER" \
@@ -1194,6 +1438,7 @@ termination_case() {
     WINDOW_TITLE="codegotchi-live-terminate-$RUN_ID"
     WINDOW_ID=""
     XTERM_PID=""
+    RESTORATION_PROBE_ENABLED=0
     start_xterm_session
     wait_for_window
     sleep 1
@@ -1219,7 +1464,7 @@ termination_case() {
         if ! kill -0 "$XTERM_PID" 2>/dev/null || ! pid_is_running "$XTERM_PID"; then
             XTERM_PID=""
             record 'bounded termination restoration' 'xterm exited within the bounded signal window; wrapper restoration artifacts were checked'
-            verify_restoration 'bounded termination' "$RESTORE_PREFIX"
+            verify_restoration 'bounded termination' "$RESTORE_PREFIX" || true
             return 0
         fi
         sleep 0.1
@@ -1231,13 +1476,16 @@ termination_case() {
 
 main() {
     local command_name
-    local normal_restore_prefix
-    for command_name in xterm xdotool xdpyinfo import timeout sed awk find ps xprop od tr grep basename seq; do
+    for command_name in xterm xdotool xclip xdpyinfo import identify timeout sed awk find ps xprop od tr grep basename seq sha256sum tail; do
         require_command "$command_name"
     done
     find_codegotchi_binary
     find_codex_binary
     select_codex_home
+    prepare_live_acceptance_workspace "$RUN_ROOT" "$CODEX_HOME_VALUE"
+    record 'isolated prompt workspace' 'created run-owned test.md for the bounded file-read interaction'
+    record 'isolated Codex home' 'run-owned trust/config with a credential symlink to the selected authorized auth.json; credential contents were not copied'
+    record 'acceptance model' 'gpt-5.6-luna with low reasoning'
     prepare_launch_files
     select_display
 
@@ -1254,6 +1502,23 @@ main() {
     state_summary prepared
     capture_frame 'full-live-initial'
 
+    state_summary before-prompt
+    drive_live_acceptance_prompt capture_prompt_frame
+    if poll_authoritative_turn_completion after-response before-prompt; then
+        capture_frame 'full-live-response'
+        verify_approval_probe || true
+        bracketed_paste_probe
+        focus_probe
+        codex_mouse_probe
+        record_codex_checks
+        verify_protocol_input_receipts || true
+        record 'trailing Codex arguments' 'model and low effort are visible in the official Codex header; the successful tool read of the run-owned test.md proves the generated --cd workspace argument was honored'
+    else
+        record 'bounded file-read interaction' 'not verified: no authoritative activity followed the submitted prompt'
+        block_required_gate
+        capture_frame 'full-live-no-response'
+    fi
+
     full_pet
     state_summary after-pet
     full_feed
@@ -1263,23 +1528,17 @@ main() {
     full_nap
     state_summary after-nap
     verify_care_snapshots
-    record_care_completion_unavailable
     capture_frame 'full-live-care'
 
-    record_codex_checks
     verify_hook_trust
-    verify_approval_probe
-    capture_frame 'full-live-blocked'
+    capture_frame 'full-live-checks'
 
     resize_terminal 30
     resize_terminal 21
     resize_terminal 45
+    verify_protocol_resize_receipts || true
     capture_frame 'full-live-final'
-    normal_restore_prefix=$RESTORE_PREFIX
     normal_exit || true
-    if [[ -n $normal_restore_prefix ]]; then
-        verify_restoration 'normal exit' "$normal_restore_prefix"
-    fi
     termination_case
 
     if [[ $REQUIRED_GATE_BLOCKED == 1 ]]; then

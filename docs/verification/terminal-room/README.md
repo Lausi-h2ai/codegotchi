@@ -1,9 +1,10 @@
 # Terminal Room Visual Acceptance Evidence
 
-Status: **PASS — lower-pane visual adjudication is clean; populated live-Codex
-acceptance remains a separate blocked release gate.** These eight approved
-PNG candidates were captured on 2026-08-24 from an uncommitted working tree.
-They are deterministic native-resolution lower-pane evidence only.
+Status: **PASS — lower-pane visual adjudication and populated live-Codex
+acceptance are clean.** These eight approved PNG candidates were captured on
+2026-08-24 from an uncommitted working tree. They remain deterministic native-
+resolution lower-pane evidence; the separate real-session frames are linked
+below.
 
 ## Approved final captures
 
@@ -113,11 +114,15 @@ were neither promoted nor deleted.
 
 ## Real-Codex release gate
 
+The real-session gate is **PASS**. The durable checklist is
+[`live-codex/20260824T150816Z-2359630-verification.txt`](live-codex/20260824T150816Z-2359630-verification.txt).
+Its populated Full frame
+[`live-codex/20260824T150816Z-2359630-full-live-final.png`](live-codex/20260824T150816Z-2359630-full-live-final.png)
+shows official Codex `0.149.1`, `gpt-5.6-luna low`, the isolated `test.md`
+prompt and answer, and the authoritative sleeping room after pet/feed/clean/
+nap. The run also retains the real approval modal, Full/Compact/Minimal resize,
+paste, focus/mouse, and same-xterm interactive-shell restoration frames, paired
+with content-free input/PTY receipts; no credential or bearer token is visible.
+
 [`live-codex/task-7-round1-blocked.txt`](live-codex/task-7-round1-blocked.txt)
-remains the durable live-session record. It correctly fails fast when private
-Xvfb has no supported lightweight window manager and does not claim prompt,
-model/tool, approval, paste, focus/mouse, resize, final-pet, or restoration
-receipts. The fixture has no real Codex process and leaves the upper host pane
-blank. These deterministic lower-pane captures do not prove the populated
-live-Codex release gate; it remains **BLOCKED** until an authorized session
-supplies the required non-text receipts and a populated Full frame.
+is retained only as historical evidence of the pre-openbox blocked preflight.

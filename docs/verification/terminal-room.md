@@ -6,10 +6,10 @@ Ledger refreshed: **2026-08-24**.
 Current release source SHA: `8843ce94d464009319f54ab970f59882e8b6e3fe`.
 
 This SHA contains the August 24 renderer refresh, the approved PNG set, and
-the matching visual-evidence READMEs. The lower-pane visual gate and the fresh
-local matrix are green. Final release status remains FAIL/BLOCKED because the
-required populated live official-Codex session is still unavailable and the
-hosted workflow for this exact SHA completed with failures.
+the matching visual-evidence READMEs. The lower-pane visual gate, populated
+live official-Codex gate, and fresh local matrix are green. Final release
+status remains FAIL/BLOCKED only because the hosted workflow for this exact
+SHA completed with failures.
 
 ## Fresh local matrix
 
@@ -73,15 +73,36 @@ acceptance evidence.
 
 ## Live official-Codex acceptance
 
+Status: **PASS**.
+
 The durable record is
-[`terminal-room/live-codex/task-7-round1-blocked.txt`](terminal-room/live-codex/task-7-round1-blocked.txt).
-The harness correctly fails fast when private Xvfb has no supported
-lightweight window manager and does not claim prompt/editing, bracketed paste,
-focus or mouse reporting, model/tool activity, approval/review, Full → Compact
-→ Minimal → Full Codex resize handling, final pet completion, or
-terminal-control restoration receipts. The retained fixture/live attempts do
-not contain a populated accepted Codex interaction frame. This gate remains
-**BLOCKED**; no bearer token or auth contents are included in the evidence.
+[`terminal-room/live-codex/20260824T150816Z-2359630-verification.txt`](terminal-room/live-codex/20260824T150816Z-2359630-verification.txt).
+It records an exit-status-zero run against official `codex-cli 0.149.1` using
+`gpt-5.6-luna` with low reasoning in an isolated workspace and Codex home.
+The real TUI edited and submitted `Read this file called test.md and tell me
+what it says.`, read the run-owned file with live tool activity, and answered
+`My grandma is a wonderful woman.`
+
+The same session captured the official approval modal and approved one exact
+temp-workspace command, a real multiline xterm paste, focus out/in, upper-pane
+click/scroll routing, authoritative pet/feed/clean/nap results, and the Full →
+Compact → Minimal → Full cycle. Content-free receipts verify negotiated paste
+and focus delivery plus the actual physical-terminal/Codex-PTY resize pairs.
+Normal exit restored the same xterm to a real interactive shell with matching
+PTY state and an executed command receipt; a separate bounded termination case
+also restored its PTY state, and the controller terminal survived with matching
+`stty` state. The populated final frame is
+[`20260824T150816Z-2359630-full-live-final.png`](terminal-room/live-codex/20260824T150816Z-2359630-full-live-final.png),
+and the restored-shell receipt is
+[`20260824T150816Z-2359630-normal-exit-restored-shell-input.png`](terminal-room/live-codex/20260824T150816Z-2359630-normal-exit-restored-shell-input.png).
+
+The invocation used `--ask-for-approval on-request --sandbox read-only`.
+Approval is proven by the retained official modal, the exact isolated
+`touch approval-probe.txt` request, the run-owned file receipt, and the return
+to authoritative `WaitingForUser`. Direct inspection found no bearer token or
+authentication content in any retained PNG. The older
+[`task-7-round1-blocked.txt`](terminal-room/live-codex/task-7-round1-blocked.txt)
+remains historical preflight evidence only.
 
 ## Hosted CI
 
@@ -98,8 +119,7 @@ completed on 2026-08-24 with overall result **FAILURE**:
 Hosted Ubuntu is green, but the hosted macOS workspace tests and production
 browser gate are not green, and the skipped macOS production-shared PTY smoke
 has not been established as green. The final release status cannot be promoted
-while those failures and the populated live-Codex acceptance gate remain
-unresolved.
+while those hosted failures remain unresolved.
 
 Historical Task 5/7/8 records remain in
 [`terminal-room-codex-pty.md`](terminal-room-codex-pty.md) and Git history.

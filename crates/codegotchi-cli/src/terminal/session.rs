@@ -8,8 +8,10 @@
 
 use std::{
     fmt,
+    fs::{File, OpenOptions},
     future::Future,
     io::{self, Read, Write},
+    path::PathBuf,
     pin::Pin,
     sync::{
         Arc,
@@ -37,11 +39,11 @@ use crate::runtime::{AuthoritativeRuntime, RuntimeError};
 use super::behavior::{PresentationFrame, PresentationState};
 use super::pty::PtyWriter;
 use super::{
-    CareGateway, CodexScreen, CrosstermTerminal, PtyCodexChild, PtyCodexError, RoomAmbience,
-    RoomCareRequest, RoomInputSession, RoomRenderOptions, TerminalBackend, TerminalEntryError,
-    TerminalGuard, TerminalLayout, TerminalRestoreError, TerminalThemePreset, choose_layout,
-    encode_focus_event, encode_key_event, encode_mouse_event, encode_paste, render_codex,
-    render_room_with_options,
+    CareGateway, CodexInputModes, CodexScreen, CrosstermTerminal, PtyCodexChild, PtyCodexError,
+    RoomAmbience, RoomCareRequest, RoomInputSession, RoomRenderOptions, TerminalBackend,
+    TerminalEntryError, TerminalGuard, TerminalLayout, TerminalRestoreError, TerminalThemePreset,
+    choose_layout, encode_focus_event, encode_key_event, encode_mouse_event, encode_paste,
+    render_codex, render_room_with_options,
 };
 
 impl CareGateway for AuthoritativeRuntime {
@@ -551,6 +553,93 @@ const BEHAVIOR_TICK_INTERVAL: Duration = Duration::from_millis(250);
 const DEFAULT_BEHAVIOR_SEED: u64 = 0x436f_6465_476f_7474; // "CodeGott"
 const READER_JOIN_GRACE: Duration = Duration::from_millis(100);
 const READER_JOIN_POLL_INTERVAL: Duration = Duration::from_millis(5);
+const LIVE_HARNESS_ENV: &str = "CODEGOTCHI_LIVE_HARNESS";
+const LIVE_ARGUMENTS_ROOT_ENV: &str = "CODEGOTCHI_LIVE_ARGUMENTS_ROOT";
+const LIVE_PROTOCOL_FILE_ENV: &str = "CODEGOTCHI_LIVE_PROTOCOL_FILE";
+
+/// Run-owned, opt-in protocol evidence for the live acceptance harness.
+///
+/// This deliberately records only terminal mode enums, event kinds, and
+/// dimensions. It never records PTY output, pasted content, paths, or auth.
+struct LiveProtocolReceipt {
+    file: File,
+    last_layout: Option<TerminalLayout>,
+}
+
+impl LiveProtocolReceipt {
+    fn from_environment() -> Option<Self> {
+        if std::env::var_os(LIVE_HARNESS_ENV).as_deref() != Some(std::ffi::OsStr::new("1")) {
+            return None;
+        }
+        let root = PathBuf::from(std::env::var_os(LIVE_ARGUMENTS_ROOT_ENV)?);
+        let path = PathBuf::from(std::env::var_os(LIVE_PROTOCOL_FILE_ENV)?);
+        let canonical_root = root.canonicalize().ok()?;
+        let canonical_parent = path.parent()?.canonicalize().ok()?;
+        if canonical_parent != canonical_root || path.file_name().is_none() {
+            return None;
+        }
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .ok()?;
+        Some(Self {
+            file,
+            last_layout: None,
+        })
+    }
+
+    fn line(&mut self, line: &str) {
+        let _ = writeln!(self.file, "{line}");
+        let _ = self.file.flush();
+    }
+
+    fn resize(&mut self, layout: TerminalLayout) {
+        if self.last_layout == Some(layout) {
+            return;
+        }
+        self.line(&protocol_resize_receipt(layout));
+        self.last_layout = Some(layout);
+    }
+}
+
+fn protocol_event_receipt(
+    event: &Event,
+    modes: CodexInputModes,
+    delivered: bool,
+) -> Option<String> {
+    match event {
+        Event::Paste(_) => Some(format!(
+            "event=paste bracketed={} delivered={delivered}",
+            modes.bracketed_paste
+        )),
+        Event::FocusGained => Some(format!(
+            "event=focus-gained reporting={} delivered={delivered}",
+            modes.focus_reporting
+        )),
+        Event::FocusLost => Some(format!(
+            "event=focus-lost reporting={} delivered={delivered}",
+            modes.focus_reporting
+        )),
+        Event::Mouse(_) => Some(format!(
+            "event=mouse tracking={:?} encoding={:?} delivered={delivered}",
+            modes.mouse_tracking, modes.mouse_encoding
+        )),
+        Event::Key(_) | Event::Resize(_, _) => None,
+    }
+}
+
+fn protocol_resize_receipt(layout: TerminalLayout) -> String {
+    let physical_rows = layout.codex.height.saturating_add(layout.room.height);
+    format!(
+        "resize physical={}x{} codex-pty={}x{} room={:?}",
+        layout.codex.width,
+        physical_rows,
+        layout.codex.width,
+        layout.codex.height,
+        layout.room_mode
+    )
+}
 
 enum ReaderMessage {
     Data(Vec<u8>),
@@ -701,6 +790,10 @@ where
             "terminal is too small for a Codex pane plus the CodeGotchi room",
         )));
     }
+    let mut protocol_receipt = LiveProtocolReceipt::from_environment();
+    if let Some(receipt) = protocol_receipt.as_mut() {
+        receipt.resize(core.layout());
+    }
     let mut snapshot_receiver = None;
     if let Some(runtime) = runtime.as_ref() {
         let (snapshot, receiver) = runtime.subscribe().map_err(TerminalSessionError::Runtime)?;
@@ -822,6 +915,16 @@ where
             },
             SessionWork::Event(event) => match event {
                 Some(Ok(event)) => {
+                    let modes = core.screen().input_modes();
+                    let routed_to_room = match &event {
+                        Event::Mouse(mouse) => {
+                            let point = Position::new(mouse.column, mouse.row);
+                            room_input.has_active_capture() || core.layout().room.contains(point)
+                        }
+                        _ => false,
+                    };
+                    let delivered = !routed_to_room && !core.encode_event(&event).is_empty();
+                    let event_receipt = protocol_event_receipt(&event, modes, delivered);
                     if let Err(error) = handle_event(
                         compositor
                             .as_mut()
@@ -836,6 +939,11 @@ where
                     ) {
                         body_error = Some(error);
                     } else {
+                        if let (Some(receipt), Some(line)) =
+                            (protocol_receipt.as_mut(), event_receipt)
+                        {
+                            receipt.line(&line);
+                        }
                         // Mouse/key events can change the room (drag ghost,
                         // eating/petted reactions), so redraw after each one.
                         event_redraw = true;
@@ -910,6 +1018,9 @@ where
             },
         }
         if body_error.is_none() {
+            if let Some(receipt) = protocol_receipt.as_mut() {
+                receipt.resize(core.layout());
+            }
             let mut redraw = event_redraw;
             // Autonomous presentation tick: advance at a bounded rate and
             // redraw only when the pose or wander offset changed.
@@ -1471,9 +1582,13 @@ mod tests {
     use super::{
         ReaderMessage, ReaderThreadGuard, RoomInputSession, SessionResources, TerminalSessionCore,
         TerminalSessionError, draw_frame, finish_guard, finish_signal_delivery, handle_event,
-        resize_compositor, session_work_order, spawn_reader, write_input,
+        protocol_event_receipt, protocol_resize_receipt, resize_compositor, session_work_order,
+        spawn_reader, write_input,
     };
-    use crate::terminal::{TerminalBackend, TerminalGuard, TerminalStep};
+    use crate::terminal::{
+        CodexInputModes, MouseEncoding, MouseTrackingMode, TerminalBackend, TerminalGuard,
+        TerminalStep,
+    };
     use uuid::Uuid;
 
     fn test_snapshot() -> SimulationSnapshot {
@@ -1486,6 +1601,50 @@ mod tests {
             FoodInventory::starter(),
         );
         PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot()
+    }
+
+    #[test]
+    fn live_protocol_receipts_report_negotiated_input_modes_and_encoded_delivery() {
+        let modes = CodexInputModes {
+            bracketed_paste: true,
+            focus_reporting: true,
+            mouse_tracking: MouseTrackingMode::PressRelease,
+            mouse_encoding: MouseEncoding::Sgr,
+            ..CodexInputModes::default()
+        };
+
+        assert_eq!(
+            protocol_event_receipt(&Event::Paste("one\ntwo".to_owned()), modes, true),
+            Some("event=paste bracketed=true delivered=true".to_owned())
+        );
+        assert_eq!(
+            protocol_event_receipt(&Event::FocusLost, modes, true),
+            Some("event=focus-lost reporting=true delivered=true".to_owned())
+        );
+        assert_eq!(
+            protocol_event_receipt(
+                &Event::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: 4,
+                    row: 3,
+                    modifiers: KeyModifiers::NONE,
+                }),
+                modes,
+                true,
+            ),
+            Some("event=mouse tracking=PressRelease encoding=Sgr delivered=true".to_owned())
+        );
+    }
+
+    #[test]
+    fn live_protocol_resize_receipt_reports_physical_and_codex_pty_dimensions() {
+        let mut core = TerminalSessionCore::new(45, 120);
+        core.resize(30, 120);
+
+        assert_eq!(
+            protocol_resize_receipt(core.layout()),
+            "resize physical=120x30 codex-pty=120x23 room=Compact"
+        );
     }
 
     struct ScriptedReader {

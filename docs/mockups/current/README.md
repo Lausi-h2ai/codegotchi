@@ -1,8 +1,8 @@
 # Current terminal-room visual evidence
 
-Status: **PASS — lower-pane visual adjudication is clean; the populated
-live-Codex release gate remains separate and blocked.** These six approved
-PNG candidates were captured on 2026-08-24 from an uncommitted working tree.
+Status: **PASS — lower-pane visual adjudication is clean; the separate
+populated live-Codex release gate now also passes.** These six approved PNG
+candidates were captured on 2026-08-24 from an uncommitted working tree.
 They are the current named-state mockups; the matching eight verification
 captures are documented in
 [`docs/verification/terminal-room/README.md`](../../verification/terminal-room/README.md).
@@ -38,11 +38,10 @@ All thirteen individual pose candidates were inspected at 1324×904. Their
 candidate-only hashes are recorded in the verification README; those pose
 PNGs are not promoted as tracked evidence files.
 
-The fixture deliberately leaves the upper pane without a real Codex process.
-These deterministic lower-pane captures therefore do not prove the separate
-populated live-Codex release gate, which remains **BLOCKED** until an
-authorized session supplies the required non-text receipts and a populated
-Full frame.
+The fixture deliberately leaves the upper pane without a real Codex process,
+so these deterministic lower-pane captures are not themselves live evidence.
+The separate authorized live session is now **PASS** and is recorded in
+[`docs/verification/terminal-room/live-codex/20260824T150816Z-2359630-verification.txt`](../../verification/terminal-room/live-codex/20260824T150816Z-2359630-verification.txt).
 
 ## Capture provenance
 
