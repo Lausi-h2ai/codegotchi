@@ -158,9 +158,8 @@ pub fn pet_sprite(pose: PetPose) -> &'static [&'static str] {
     }
 }
 
-/// The Compact pet sprite for a pose: 9 logical columns x 10 logical rows,
-/// packed into 5 terminal rows. Minimal reuses this packed silhouette and
-/// clips it to the three-row care strip.
+/// The Compact pet sprite for a pose: 12 logical columns x 10 logical rows,
+/// packed into a complete five-terminal-row mascot.
 #[must_use]
 pub fn pet_sprite_compact(pose: PetPose) -> &'static [&'static str] {
     match pose {
@@ -183,433 +182,451 @@ pub fn pet_sprite_compact(pose: PetPose) -> &'static [&'static str] {
 // Full sprites: 14 logical rows (7 terminal rows) x 18 logical columns.
 
 const PET_IDLE: [&str; 14] = [
-    "      ##    ##    ",
-    "     ####  ####   ",
-    "    ##oooooooo##  ",
-    "  ##oooooooooooo##",
-    " ##oooooooooooo## ",
-    "##ooo..oooo..ooo##",
-    "##ooo..o..o..ooo##",
-    "##ooo...oo...ooo##",
-    " ##ooo..oooo..##o ",
-    "  ##ooo..ooooo##  ",
-    "  ##oooooooooo##  ",
-    "   ###  ##  ###   ",
-    "  ####      ####  ",
-    "  ###  ###        ",
+    "   #        #     ",
+    "  ###     #####   ",
+    "  #####  ###### # ",
+    "   ###############",
+    "  ############# ##",
+    "  ###  ##  #######",
+    "  ###  ##  #### ##",
+    "  #####   ##### ##",
+    "   ############ ##",
+    "   ####oooo####   ",
+    "   ####oooo####   ",
+    "    ##########    ",
+    "   ####    ####   ",
+    "   ####    ####   ",
 ];
 
 const PET_BLINK: [&str; 14] = [
-    "      ##    ##    ",
-    "     ####  ####   ",
-    "    ##oooooooo##  ",
-    "  ##oooooooooooo##",
-    " ##oo..oo..oo##   ",
-    "##oo--oo--oo--oo##",
-    "##oo..oo##oo..oo##",
-    "##ooo..oooo..ooo##",
-    " ##ooo..oooo..##o ",
-    "  ##ooo..ooooo##  ",
-    "  ##oooooooooo##  ",
-    "   ###  ##  ###   ",
-    "  ####      ####  ",
-    "                  ",
+    "   #        #     ",
+    "  ###     #####   ",
+    "  #####  ###### # ",
+    "   ###############",
+    "  ############# ##",
+    "  ####  ##  ######",
+    "  ############# ##",
+    "  #####   ##### ##",
+    "   ############ ##",
+    "   ####oooo####   ",
+    "   ####oooo####   ",
+    "    ##########    ",
+    "   ####    ####   ",
+    "   ####    ####   ",
 ];
 
 const PET_WALK_A: [&str; 14] = [
-    "      ##    ##    ",
-    "     ####  ####   ",
-    "    ##oooooooo##  ",
-    "  ##oooooooooooo##",
-    " ##oo..oo..oo##   ",
-    "##oo..oo..oo..oo##",
-    "##oo..oo##oo..oo##",
-    "##ooo..oooo..ooo##",
-    " ##ooo..oooo..##o ",
-    "  ##ooo..ooooo##  ",
-    "  ##oooooooooo##  ",
-    "   ####    ####   ",
-    "    ##      ##    ",
-    "                  ",
+    "   #        #     ",
+    "  ###     #####   ",
+    "  #####  ###### # ",
+    "   ###############",
+    "  ############# ##",
+    "  ###  ##  #######",
+    "  ###  ##  #### ##",
+    "  #####   ##### ##",
+    "   ############ ##",
+    "   ####oooo####   ",
+    "   ####oooo####   ",
+    "    ##########    ",
+    "  ####     ####   ",
+    "   ####     ####  ",
 ];
 
 const PET_WALK_B: [&str; 14] = [
-    "      ##    ##    ",
-    "     ####  ####   ",
-    "    ##oooooooo##  ",
-    "  ##oooooooooooo##",
-    " ##oo..oo..oo##   ",
-    "##oo..oo..oo..oo##",
-    "##oo..oo##oo..oo##",
-    "##ooo..oooo..ooo##",
-    " ##ooo..oooo..##o ",
-    "  ##ooo..ooooo##  ",
-    "  ##oooooooooo##  ",
-    "   ####    ####   ",
-    "      ##      ##  ",
-    "                  ",
+    "   #        #     ",
+    "  ###     #####   ",
+    "  #####  #########",
+    "   ############## ",
+    "  ################",
+    "  ###  ##  ###### ",
+    "  ###  ##  ###### ",
+    "  #####   ####### ",
+    "   ############## ",
+    "   ####oooo####   ",
+    "   ####oooo####   ",
+    "    ##########    ",
+    "   ####     ####  ",
+    "  ####     ####   ",
 ];
 
 const PET_SIT: [&str; 14] = [
-    "      ##    ##    ",
-    "     ####  ####   ",
-    "    ##oooooooo##  ",
-    "  ##oooooooooooo##",
-    " ##oo..oo..oo##   ",
-    "##oo..oo..oo..oo##",
-    "##oo..oo##oo..oo##",
-    "##ooo..oooo..ooo##",
-    " ##ooo..oooo..##o ",
-    "  ##ooo..ooooo##  ",
-    "  ##oooooooooo##  ",
-    "  ##oooooooooo##  ",
-    "  ###  ####  ###  ",
-    "                  ",
+    "   #        #     ",
+    "  ###     #####   ",
+    "  #####  ######   ",
+    "   ############   ",
+    "  #############   ",
+    "  ###  ##  ####   ",
+    "  ###  ##  ####   ",
+    " ### ##########   ",
+    "  ### #########   ",
+    "  #####oooo###    ",
+    "  ######  #####   ",
+    "    ##########    ",
+    "    ####  ####    ",
+    "    ####  ####    ",
 ];
 
 const PET_DOZE: [&str; 14] = [
     "                  ",
     "                  ",
-    "       ##         ",
-    "     ######       ",
-    "   ##..oo..###    ",
-    "  ##..oo..oo####  ",
-    " ##oo..##..oo###  ",
-    "##ooo..oooo..oo## ",
-    " ##oooooooooooo## ",
-    "  ##ooo..oooo##   ",
-    "   ##oooooooo##   ",
-    "     ###  ###     ",
-    "        ##        ",
+    "                  ",
+    "              ### ",
+    "            ##### ",
+    "   ########### ## ",
+    " ################ ",
+    "################# ",
+    "##################",
+    "##  #####  #######",
+    " ######oooo###### ",
+    "  #### ####### #  ",
+    "   ############   ",
     "                  ",
 ];
 
 const PET_SLEEP: [&str; 14] = [
     "                  ",
-    "      ##    ##    ",
-    "    ##oooooooo##  ",
-    "   ##oooooooooo## ",
-    "  ##..oo..oo..##  ",
-    " ##oo..oo..oo..## ",
-    "##ooo..oooo..ooo##",
-    "##oooooooooooooo##",
-    " ##ooo..oooo..##  ",
-    "  ##oooooooooo##  ",
-    "   ###  ####  ### ",
+    "                  ",
+    "       ####       ",
+    "     ########     ",
+    "    ##########    ",
+    "    ##  ##  ##    ",
+    "    ##########    ",
+    "     ###  ####    ",
+    "      ##ooo##     ",
+    "      ##ooo##     ",
+    "       #####      ",
     "                  ",
     "                  ",
     "                  ",
 ];
 
 const PET_YAWN: [&str; 14] = [
-    "      ##    ##    ",
-    "     ####  ####   ",
-    "    ##oooooooo##  ",
-    "  ##oooooooooooo##",
-    " ##oo..oo..oo##   ",
-    "##oo..oo..oo..oo##",
-    "##oo..oo##oo..oo##",
-    "##ooo..oo..o..oo##",
-    " ##ooo..oooo..##o ",
-    "  ##ooo..ooooo##  ",
-    "  ##oooooooooo##  ",
-    "   ###  ##  ###   ",
-    "  ####      ####  ",
-    "                  ",
+    "   #        #     ",
+    "  ###     #####   ",
+    "  #####  ###### # ",
+    "   ###############",
+    "  ############# ##",
+    "  ###  ##  #######",
+    "  ############# ##",
+    "  ####      ### ##",
+    "   ####    #### ##",
+    "   ####oooo####   ",
+    "   ####oooo####   ",
+    "    ##########    ",
+    "   ####    ####   ",
+    "   ####    ####   ",
 ];
 
 const PET_CURIOUS: [&str; 14] = [
-    "      ##    ##    ",
-    "     ####  ####   ",
-    "    ##oooooooo##  ",
-    "  ##oooooooooooo##",
-    " ##oo..oo..oo##   ",
-    "##oo..oo..oo..oo##",
-    "##oo..oo##oo..oo##",
-    "##ooo..oooo..ooo##",
-    " ##ooo..oooo..##o ",
-    "  ##ooo..ooooo##  ",
-    "  ##oooooooooo##  ",
-    "   ###  ##  ###   ",
-    "  ####      ####  ",
-    "                  ",
+    " #          #     ",
+    " ####     #####   ",
+    " ######  ###### ##",
+    "   ###############",
+    "  ############# ##",
+    "  ###  ##  #######",
+    "  ###  ##  #######",
+    "  #####   ##### ##",
+    "   ############ ##",
+    "   ####oooo####   ",
+    "   ####oooo####   ",
+    "    ##########    ",
+    "   ####    ####   ",
+    "   ####    ####   ",
 ];
 
 const PET_HAPPY: [&str; 14] = [
-    "      ##    ##    ",
-    "     ####  ####   ",
-    "    ##oooooooo##  ",
-    "  ##oooooooooooo##",
-    " ##oo..oo..oo##   ",
-    "##oo..oo..oo..oo##",
-    "##oo..oo##oo..oo##",
-    "##ooo..oo..oo.oo##",
-    " ##ooo..oooo..##o ",
-    "  ##ooo..ooooo##  ",
-    "  ##oooooooooo##  ",
-    "   ###  ##  ###   ",
-    "  ####      ####  ",
-    "                  ",
+    "   #        #     ",
+    "  ###     #####  #",
+    "  #####  ###### ##",
+    "   ###############",
+    "  ############# ##",
+    "  ###  ##  #######",
+    "  #### ## ##### ##",
+    "  ####      ### ##",
+    "   ############ ##",
+    "   ####oooo####   ",
+    "   ####oooo####   ",
+    "    ##########    ",
+    "   ####    ####   ",
+    "   ####    ####   ",
 ];
 
 const PET_UPSET: [&str; 14] = [
-    "      ##    ##    ",
-    "     ####  ####   ",
-    "    ##oooooooo##  ",
-    "  ##oooooooooooo##",
-    " ##oo..oo..oo##   ",
-    "##oo..oo--oo..oo##",
-    "##oo..oo##oo..oo##",
-    "##ooo..oo..oo.oo##",
-    " ##ooo..oooo..##o ",
-    "  ##ooo..ooooo##  ",
-    "  ##oooooooooo##  ",
-    "   ###  ##  ###   ",
-    "  ####      ####  ",
     "                  ",
+    "   ####    ####   ",
+    "  ##############  ",
+    "  ##############  ",
+    " ###############  ",
+    " ####  ##  #####  ",
+    " ##### ## ######  ",
+    " #######  ######  ",
+    " ######    ####   ",
+    "   ####oooo####   ",
+    "   ####oooo####   ",
+    "    ##########    ",
+    "    ####  ####    ",
+    "    ####  ####    ",
 ];
 
 const PET_EATING: [&str; 14] = [
-    "      ##    ##    ",
-    "     ####  ####   ",
-    "    ##oooooooo##  ",
-    "  ##oooooooooooo##",
-    " ##oo..oo..oo##   ",
-    "##oo..oo..oo..oo##",
-    "##oo..oo##oo..oo##",
-    "##ooo..oo..oo.oo##",
-    " ##ooo..oo..##o o ",
-    "  ##ooo..ooooo##  ",
-    "  ##oooo..oooo##  ",
-    "   ###  ##  ###   ",
-    "  ####      ####  ",
-    "                  ",
+    "      #           ",
+    "     ###       #  ",
+    "    #####     ### ",
+    "   ############## ",
+    "  ############## #",
+    "  ####  ##########",
+    "  ####  ####### ##",
+    "  ############# ##",
+    "   ####   ##### # ",
+    "   ####oooo####   ",
+    "   ####oooo####   ",
+    "    ##########    ",
+    "   ####    ####   ",
+    "   ####    ####   ",
 ];
 
 const PET_PETTED: [&str; 14] = [
-    "        ..        ",
-    "      ##    ##    ",
-    "     ####  ####   ",
-    "    ##oooooooo##  ",
-    "  ##oooooooooooo##",
-    " ##oo..oo..oo##   ",
-    "##oo..oo..oo..oo##",
-    "##oo..oo##oo..oo##",
-    "##ooo..oo..oo.oo##",
-    " ##ooo..oooo..##o ",
-    "  ##ooo..ooooo##  ",
-    "  ##oooooooooo##  ",
-    "   ###  ##  ###   ",
-    "  ####      ####  ",
+    "   #        #     ",
+    "  ###     #####   ",
+    "  #####  ###### # ",
+    "    ############# ",
+    "   ############ ##",
+    "   ##  ###  ######",
+    "   ############## ",
+    "   ###      ##### ",
+    "   ############## ",
+    "   ####oooo####   ",
+    "   ####oooo####   ",
+    "    ##########    ",
+    "   ####    ####   ",
+    "   ####    ####   ",
 ];
 
 // Compact sprites: 10 logical rows (5 terminal rows) x 12 logical columns.
 
 const PET_IDLE_C: [&str; 10] = [
-    "   ##  ##   ",
-    "  #### #### ",
-    " ##oooooooo ",
-    "##oo..oo..##",
-    "#oo..oo..o# ",
-    "#oo...oo..# ",
-    "##ooo..oo## ",
-    " ##ooo..o#  ",
-    "  ##  ##    ",
-    "  ###  ###  ",
+    "  #    #    ",
+    " ###  ###   ",
+    " ########## ",
+    "############",
+    "##  #  #  ##",
+    "##  ##   ###",
+    "##  oooo  ##",
+    "## oooooo ##",
+    "##  #### ###",
+    "##  #### ###",
 ];
 
 const PET_BLINK_C: [&str; 10] = [
-    "   ##  ##   ",
-    "  #### #### ",
-    " ##oooooooo ",
-    "##oo--oo--##",
-    "#oo..oo..o# ",
-    "#oo..oo..o# ",
-    "##ooo..oo## ",
-    " ##ooo..o#  ",
-    "  ##  ##    ",
-    "  ###  ###  ",
+    "  #    #    ",
+    " ###  ###   ",
+    " ########## ",
+    "############",
+    "##  ##  ##  ",
+    "##  ##   ###",
+    "##  oooo  ##",
+    "## oooooo ##",
+    "##  #### ###",
+    "##  #### ###",
 ];
 
 const PET_WALK_A_C: [&str; 10] = [
-    "   ##  ##   ",
-    "  #### #### ",
-    " ##oooooooo ",
-    "##oo..oo..##",
-    "#oo..oo..o# ",
-    "#oo..oo..o# ",
-    "##ooo..oo## ",
-    " ##ooo..o#  ",
-    " ###    ##  ",
-    "   ##  ###  ",
+    "   #    #   ",
+    "  ###  ###  ",
+    " ########## ",
+    "### #### ###",
+    "##  #  #  ##",
+    "##  ##    ##",
+    "##  oooo  ##",
+    "## oooooo ##",
+    "##  ####  ##",
+    "###  ### ###",
 ];
 
 const PET_WALK_B_C: [&str; 10] = [
-    "   ##  ##   ",
-    "  #### #### ",
-    " ##oooooooo ",
-    "##oo..oo..##",
-    "#oo..oo..o# ",
-    "#oo..oo..o# ",
-    "##ooo..oo## ",
-    " ##ooo..o#  ",
-    "  ###    ## ",
-    " ##  ###    ",
+    "   #    #   ",
+    "  ###  ###  ",
+    " ########## ",
+    "############",
+    "## #  #   ##",
+    "##    #   ##",
+    "##  oooo  ##",
+    "## oooooo ##",
+    "## ####  ###",
+    "##  ### ####",
 ];
 
 const PET_SIT_C: [&str; 10] = [
-    "   ##  ##   ",
-    "  #### #### ",
-    " ##oooooooo ",
-    "##oo..oo..##",
-    "#oo..oo..o# ",
-    "#oo..oo..o# ",
-    "##ooo..oo## ",
-    " ##oooooooo ",
-    " ##  ##     ",
-    " ###  ###   ",
+    "   #    #   ",
+    "  ###  ###  ",
+    " ########## ",
+    "### #### ###",
+    "##  #  #  ##",
+    "##    #   ##",
+    "## oooooo ##",
+    "## oooooo ##",
+    "###  ##### #",
+    "###  #######",
 ];
 
 const PET_DOZE_C: [&str; 10] = [
     "            ",
-    "   ##       ",
-    "  ####      ",
-    "##..oo..### ",
-    "#oo..oo..## ",
-    "##oooooooo# ",
-    " ##ooo..##  ",
-    "  ##oooo##  ",
-    "    ###     ",
-    "            ",
+    "     ###    ",
+    "   #######  ",
+    " ##  ##  ###",
+    "############",
+    "##  ####  ##",
+    "############",
+    "##  oooo  ##",
+    " ## oooo ###",
+    "   #######  ",
 ];
 
 const PET_SLEEP_C: [&str; 10] = [
     "            ",
-    " ## ##      ",
-    "##oooooooo# ",
-    "#oo..oo..## ",
-    "##ooo..oo#  ",
-    " ##oooooo#  ",
-    "  ##  ##    ",
     "    ###     ",
-    "            ",
-    "            ",
+    "  #######   ",
+    " ##  ##  ## ",
+    "############",
+    "##  ##  ####",
+    "############",
+    " ## ooo  ###",
+    "  ## oooo###",
+    "    ######  ",
 ];
 
 const PET_YAWN_C: [&str; 10] = [
-    "   ##  ##   ",
-    "  #### #### ",
-    " ##oooooooo ",
-    "##oo..oo..##",
-    "#oo..oo..o# ",
-    "#oo..oo..o# ",
-    "##ooo..oo## ",
-    " ##ooo..o#  ",
-    " ###    ##  ",
-    "   ##  ###  ",
+    "   #    #   ",
+    "  ###  ###  ",
+    " ########## ",
+    "### #### ###",
+    "##  #  #  ##",
+    "##     #####",
+    "##  oooo  ##",
+    "## oooooo ##",
+    "### #### ###",
+    "###  ### ###",
 ];
 
 const PET_CURIOUS_C: [&str; 10] = [
-    "   ##  ##   ",
-    "  #### #### ",
-    " ##oooooooo ",
-    "##oo..oo..##",
-    "#oo..oo..o# ",
-    "#oo..oo..o# ",
-    "##ooo..oo## ",
-    " ##ooo..o#  ",
-    " ###  ##    ",
-    "  ###  ###  ",
+    "  #     ### ",
+    " ###   #### ",
+    " ########## ",
+    "### #### ###",
+    "##  #  # ###",
+    "##    #   ##",
+    "##  oooo  ##",
+    "## oooooo ##",
+    "##  ####  ##",
+    "  ###  #####",
 ];
 
 const PET_HAPPY_C: [&str; 10] = [
-    "   ##  ##   ",
-    "  #### #### ",
-    " ##oooooooo ",
-    "##oo..oo..##",
-    "#oo..oo..o# ",
-    "#oo..oo..o# ",
-    "##ooo..oo## ",
-    " ##ooo..o#  ",
-    "  ##  ##    ",
+    "   #    #   ",
     "  ###  ###  ",
+    " ########## ",
+    "### #### ###",
+    "##  # #   ##",
+    "##    #   ##",
+    "## oooooo ##",
+    "## oooooo ##",
+    "###  ### ###",
+    "### #### ###",
 ];
 
 const PET_UPSET_C: [&str; 10] = [
-    "   ##  ##   ",
-    "  #### #### ",
-    " ##oooooooo ",
-    "##oo..oo..##",
-    "#oo..oo..o# ",
-    "#oo..oo..o# ",
-    "##ooo..oo## ",
-    " ##ooo..o#  ",
-    " ##oooooo   ",
-    "  ##  ##    ",
+    "  ##    ##  ",
+    " ####  #### ",
+    " ########## ",
+    "############",
+    "##  ##  ##  ",
+    "## ##   # ##",
+    "##  ####  ##",
+    "##  ####  ##",
+    "##  ####  ##",
+    "###  #######",
 ];
 
 const PET_EATING_C: [&str; 10] = [
-    "   ##  ##   ",
-    "  #### #### ",
-    " ##oooooooo ",
-    "##oo..oo..##",
-    "#oo..oo..o# ",
-    "#oo..oo..o# ",
-    "##ooo..oo## ",
-    " ##oo..o#   ",
-    "##  ####  # ",
-    " ##  ##     ",
+    "   #    #   ",
+    "  ###  ###  ",
+    " ########## ",
+    "############",
+    "##  #  #### ",
+    "##  ####  ##",
+    "##  oooo  ##",
+    "## oooooo ##",
+    "##  ####  ##",
+    "##  #### ###",
 ];
 
 const PET_PETTED_C: [&str; 10] = [
-    "   ##  ##   ",
-    "  #### #### ",
-    " ##oooooooo ",
-    "##oo..oo..##",
-    "#oo..oo..o# ",
-    "#oo..oo..o# ",
-    "##ooo..oo## ",
-    " ##ooo..o#  ",
-    "  ##  ##    ",
+    "   #    #   ",
     "  ###  ###  ",
+    " ########## ",
+    "### #### ###",
+    "##  # #  ###",
+    "##   #    ##",
+    "## oooooo ##",
+    "## oooooo ##",
+    "##  ##  ####",
+    "##  #### ###",
 ];
 
 // Minimal sprites: 6 logical rows (3 terminal rows) x 9 logical columns.
 
-const PET_IDLE_M: [&str; 6] = [
-    "  #  #   ",
-    " ####### ",
-    "#o..o..##",
-    "#oooooo# ",
-    " ##oo##  ",
-    "  ###    ",
+const PET_NEUTRAL_M: [&str; 6] = [
+    " #   #   ",
+    "#########",
+    "## # # ##",
+    "## ##  ##",
+    "## ooo ##",
+    "###   ###",
 ];
 
-const PET_BLINK_M: [&str; 6] = [
-    "  #  #   ",
-    " ####### ",
-    "#o--o--##",
-    "#oooooo# ",
-    " ##oo##  ",
-    "  ###    ",
+const PET_CLOSED_EYES_M: [&str; 6] = [
+    " #   #   ",
+    "#########",
+    "# ## ## #",
+    "## ##  ##",
+    "## ooo ##",
+    "###   ###",
 ];
 
-const PET_DOZE_M: [&str; 6] = [
-    "         ",
-    "  ##     ",
-    "##o..o## ",
-    "#oooooo# ",
-    " ##oo##  ",
-    "  ###    ",
+const PET_POSITIVE_M: [&str; 6] = [
+    " #   #   ",
+    "#########",
+    "## # # ##",
+    "## ### ##",
+    "##  o  ##",
+    "###   ###",
 ];
 
-const PET_SLEEP_M: [&str; 6] = [
-    "         ",
-    " ## ##   ",
-    "##ooooo##",
-    "#o..o..# ",
-    " ##ooo#  ",
-    "  ###    ",
+const PET_NEGATIVE_M: [&str; 6] = [
+    " #   #   ",
+    "#########",
+    "## # # ##",
+    "## # # ##",
+    "## ### ##",
+    "###   ###",
+];
+
+const PET_YAWN_M: [&str; 6] = [
+    " #   #   ",
+    "#########",
+    "## # # ##",
+    "## ### ##",
+    "## ooo ##",
+    "###   ###",
+];
+
+const PET_EATING_M: [&str; 6] = [
+    " #    #  ",
+    "#########",
+    "## #  ###",
+    "## ### ##",
+    "## ooo ##",
+    "###   ###",
 ];
 
 /// The Minimal pet sprite keeps a complete silhouette in the three-row care
@@ -617,10 +634,14 @@ const PET_SLEEP_M: [&str; 6] = [
 #[must_use]
 pub fn pet_sprite_minimal(pose: PetPose) -> &'static [&'static str; 6] {
     match pose {
-        PetPose::Blink => &PET_BLINK_M,
-        PetPose::Doze => &PET_DOZE_M,
-        PetPose::Sleep => &PET_SLEEP_M,
-        _ => &PET_IDLE_M,
+        PetPose::Blink | PetPose::Doze | PetPose::Sleep => &PET_CLOSED_EYES_M,
+        PetPose::Happy | PetPose::Petted => &PET_POSITIVE_M,
+        PetPose::Upset => &PET_NEGATIVE_M,
+        PetPose::Yawn => &PET_YAWN_M,
+        PetPose::Eating => &PET_EATING_M,
+        PetPose::Idle | PetPose::WalkA | PetPose::WalkB | PetPose::Sit | PetPose::Curious => {
+            &PET_NEUTRAL_M
+        }
     }
 }
 
@@ -644,146 +665,572 @@ mod tests {
         PetPose::Sleep,
     ];
 
+    fn assert_sprite_shape(label: &str, sprite: &[&str], width: usize, height: usize) {
+        assert_eq!(
+            sprite.len(),
+            height,
+            "{label} must have {height} logical rows"
+        );
+        assert_eq!(height % 2, 0, "{label} must pack into whole terminal rows");
+
+        let mut occupied = 0;
+        let mut tone2 = 0;
+        for (row_index, row) in sprite.iter().enumerate() {
+            assert_eq!(
+                row.chars().count(),
+                width,
+                "{label} row {row_index} must have {width} logical columns"
+            );
+            for character in row.chars() {
+                assert!(
+                    matches!(character, ' ' | 'o' | '#'),
+                    "{label} contains undeclared tone {character:?}"
+                );
+                if character != ' ' {
+                    occupied += 1;
+                }
+                if character == 'o' {
+                    tone2 += 1;
+                }
+            }
+        }
+        assert!(occupied > 0, "{label} must contain an occupied mascot");
+        assert!(
+            tone2 * 5 <= occupied,
+            "{label} must keep Tone2 below one fifth of occupied cells"
+        );
+    }
+
+    fn occupied_bounds(sprite: &[&str]) -> (usize, usize, usize, usize) {
+        let mut bounds: Option<(usize, usize, usize, usize)> = None;
+        for (y, row) in sprite.iter().enumerate() {
+            for (x, character) in row.chars().enumerate() {
+                if character != ' ' {
+                    bounds = Some(match bounds {
+                        Some((min_x, min_y, max_x, max_y)) => {
+                            (min_x.min(x), min_y.min(y), max_x.max(x), max_y.max(y))
+                        }
+                        None => (x, y, x, y),
+                    });
+                }
+            }
+        }
+        bounds.expect("sprite must contain an occupied pixel")
+    }
+
+    fn occupied_row_bounds(sprite: &[&str]) -> Vec<Option<(usize, usize)>> {
+        sprite
+            .iter()
+            .map(|row| {
+                let mut bounds: Option<(usize, usize)> = None;
+                for (x, character) in row.chars().enumerate() {
+                    if character != ' ' {
+                        bounds = Some(match bounds {
+                            Some((min_x, max_x)) => (min_x.min(x), max_x.max(x)),
+                            None => (x, x),
+                        });
+                    }
+                }
+                bounds
+            })
+            .collect()
+    }
+
+    fn occupied_runs(row: &str) -> Vec<(usize, usize)> {
+        let mut runs = Vec::new();
+        let mut start = None;
+        for (x, character) in row.chars().enumerate() {
+            if character != ' ' {
+                start.get_or_insert(x);
+            } else if let Some(run_start) = start.take() {
+                runs.push((run_start, x - 1));
+            }
+        }
+        if let Some(run_start) = start {
+            runs.push((run_start, row.chars().count() - 1));
+        }
+        runs
+    }
+
+    fn interior_space_runs(row: &str) -> Vec<(usize, usize)> {
+        let occupied = occupied_runs(row);
+        let Some((min_x, _)) = occupied.first().copied() else {
+            return Vec::new();
+        };
+        let Some((_, max_x)) = occupied.last().copied() else {
+            return Vec::new();
+        };
+        let mut runs = Vec::new();
+        let mut start = None;
+        for (x, character) in row.chars().enumerate().skip(min_x).take(max_x - min_x + 1) {
+            if character == ' ' {
+                start.get_or_insert(x);
+            } else if let Some(run_start) = start.take() {
+                runs.push((run_start, x - run_start));
+            }
+        }
+        if let Some(run_start) = start {
+            runs.push((run_start, max_x + 1 - run_start));
+        }
+        runs
+    }
+
+    fn face_space_runs(sprite: &[&str]) -> Vec<Vec<(usize, usize)>> {
+        let (_, min_y, _, max_y) = occupied_bounds(sprite);
+        let first_face_row = min_y.saturating_add(2);
+        let last_face_row = max_y.saturating_sub(3);
+        if first_face_row > last_face_row {
+            return Vec::new();
+        }
+        (first_face_row..=last_face_row)
+            .map(|y| interior_space_runs(sprite[y]))
+            .collect()
+    }
+
+    fn has_two_wide_eye_gaps(sprite: &[&str]) -> bool {
+        face_space_runs(sprite)
+            .iter()
+            .any(|runs| runs.iter().filter(|(_, width)| *width >= 2).count() >= 2)
+    }
+
+    fn has_mouth_gap(sprite: &[&str], minimum_width: usize) -> bool {
+        face_space_runs(sprite)
+            .iter()
+            .any(|runs| runs.iter().any(|(_, width)| *width >= minimum_width))
+    }
+
+    fn has_two_pointed_ear_peaks(sprite: &[&str]) -> bool {
+        let rows = occupied_row_bounds(sprite);
+        let Some(top_y) = rows.iter().position(Option::is_some) else {
+            return false;
+        };
+        let peaks = occupied_runs(sprite[top_y]);
+        peaks.len() == 2
+            && peaks.iter().all(|(start, end)| {
+                end - start < 2
+                    && (top_y + 1..=(top_y + 2).min(sprite.len() - 1)).all(|y| {
+                        occupied_runs(sprite[y])
+                            .iter()
+                            .any(|(next_start, next_end)| {
+                                *next_end >= start.saturating_sub(1)
+                                    && *next_start <= end.saturating_add(1)
+                            })
+                    })
+            })
+    }
+
+    fn has_high_raised_tail(sprite: &[&str]) -> bool {
+        let (_, min_y, max_x, _) = occupied_bounds(sprite);
+        occupied_row_bounds(sprite)
+            .get(min_y.saturating_add(1))
+            .and_then(|bounds| *bounds)
+            .is_some_and(|(_, row_max)| row_max == max_x)
+    }
+
+    fn has_crescent_eyes(sprite: &[&str]) -> bool {
+        face_space_runs(sprite)
+            .iter()
+            .take(5)
+            .any(|runs| runs.iter().filter(|(_, width)| *width == 1).count() >= 2)
+    }
+
+    fn has_broad_smile(sprite: &[&str]) -> bool {
+        face_space_runs(sprite)
+            .iter()
+            .skip(2)
+            .any(|runs| runs.iter().any(|(_, width)| *width >= 4))
+    }
+
+    fn has_relaxed_shoulders(sprite: &[&str]) -> bool {
+        let (_, min_y, _, _) = occupied_bounds(sprite);
+        let rows = occupied_row_bounds(sprite);
+        let Some(first) = rows.get(min_y.saturating_add(3)).and_then(|bounds| *bounds) else {
+            return false;
+        };
+        let Some(second) = rows.get(min_y.saturating_add(4)).and_then(|bounds| *bounds) else {
+            return false;
+        };
+        second.1 - second.0 >= first.1 - first.0 + 2
+    }
+
+    fn has_lowered_ears(sprite: &[&str]) -> bool {
+        let rows = occupied_row_bounds(sprite);
+        let Some(top_y) = rows.iter().position(Option::is_some) else {
+            return false;
+        };
+        top_y > 0
+            && occupied_runs(sprite[top_y])
+                .iter()
+                .all(|(start, end)| end - start + 1 >= 3)
+    }
+
+    fn has_downturned_mouth(sprite: &[&str]) -> bool {
+        face_space_runs(sprite)
+            .iter()
+            .enumerate()
+            .skip(5)
+            .any(|(_, runs)| runs.iter().any(|(_, width)| *width == 4))
+    }
+
+    fn has_tucked_tail(sprite: &[&str]) -> bool {
+        let (min_x, _, max_x, _) = occupied_bounds(sprite);
+        max_x <= sprite[0].chars().count().saturating_sub(3) && min_x > 0
+    }
+
+    fn has_food_facing_asymmetry(sprite: &[&str]) -> bool {
+        let rows = occupied_row_bounds(sprite);
+        let Some(top_y) = rows.iter().position(Option::is_some) else {
+            return false;
+        };
+        occupied_runs(sprite[top_y]).len() == 1
+            && face_space_runs(sprite)
+                .iter()
+                .any(|runs| runs.len() == 1 && runs[0].1 >= 2)
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct ExpressionSignature {
+        high_raised_tail: bool,
+        crescent_eyes: bool,
+        broad_smile: bool,
+        relaxed_shoulders: bool,
+        lowered_ears: bool,
+        downturned_mouth: bool,
+        tucked_tail: bool,
+        food_facing_asymmetry: bool,
+    }
+
+    fn expression_signature(sprite: &[&str]) -> ExpressionSignature {
+        ExpressionSignature {
+            high_raised_tail: has_high_raised_tail(sprite),
+            crescent_eyes: has_crescent_eyes(sprite),
+            broad_smile: has_broad_smile(sprite),
+            relaxed_shoulders: has_relaxed_shoulders(sprite),
+            lowered_ears: has_lowered_ears(sprite),
+            downturned_mouth: has_downturned_mouth(sprite),
+            tucked_tail: has_tucked_tail(sprite),
+            food_facing_asymmetry: has_food_facing_asymmetry(sprite),
+        }
+    }
+
+    fn occupied_component_count(sprite: &[&str]) -> usize {
+        let rows: Vec<Vec<char>> = sprite.iter().map(|row| row.chars().collect()).collect();
+        let height = rows.len();
+        let width = rows.first().map_or(0, Vec::len);
+        let mut visited = vec![vec![false; width]; height];
+        let mut components = 0;
+
+        for y in 0..height {
+            for x in 0..width {
+                if rows[y][x] == ' ' || visited[y][x] {
+                    continue;
+                }
+                components += 1;
+                let mut pending = vec![(x, y)];
+                visited[y][x] = true;
+                while let Some((x, y)) = pending.pop() {
+                    for (next_x, next_y) in [
+                        (x.checked_sub(1), Some(y)),
+                        (x.checked_add(1).filter(|next| *next < width), Some(y)),
+                        (Some(x), y.checked_sub(1)),
+                        (Some(x), y.checked_add(1).filter(|next| *next < height)),
+                    ] {
+                        let (Some(next_x), Some(next_y)) = (next_x, next_y) else {
+                            continue;
+                        };
+                        if rows[next_y][next_x] != ' ' && !visited[next_y][next_x] {
+                            visited[next_y][next_x] = true;
+                            pending.push((next_x, next_y));
+                        }
+                    }
+                }
+            }
+        }
+
+        components
+    }
+
     #[test]
-    fn every_pose_sprite_has_consistent_row_widths() {
+    fn full_pose_grids_are_18_by_14_and_use_declared_tones() {
         for pose in ALL_POSES {
             let sprite = pet_sprite(pose);
-            let width = sprite[0].chars().count();
-            for (index, row) in sprite.iter().enumerate() {
-                assert_eq!(
-                    row.chars().count(),
-                    width,
-                    "{pose:?} sprite row {index} has a different width"
-                );
-            }
-            assert_eq!(sprite.len() % 2, 0, "{pose:?} must pack into whole rows");
+            assert_sprite_shape(&format!("Full {pose:?}"), sprite, 18, 14);
+            let (min_x, min_y, max_x, max_y) = occupied_bounds(sprite);
+            assert!(max_x < 18 && max_y < 14 && min_x <= max_x && min_y <= max_y);
         }
     }
 
     #[test]
-    fn every_compact_pose_sprite_is_consistent_and_smaller_than_full() {
+    fn full_pose_occupied_cells_are_one_four_way_component() {
         for pose in ALL_POSES {
-            let sprite = pet_sprite_compact(pose);
-            let width = sprite[0].chars().count();
-            for (index, row) in sprite.iter().enumerate() {
-                assert_eq!(
-                    row.chars().count(),
-                    width,
-                    "compact {pose:?} sprite row {index} has a different width"
-                );
-            }
+            let sprite = pet_sprite(pose);
+            assert_sprite_shape(&format!("Full {pose:?}"), sprite, 18, 14);
             assert_eq!(
-                sprite.len() % 2,
-                0,
-                "compact {pose:?} must pack into whole rows"
+                occupied_component_count(sprite),
+                1,
+                "{pose:?} must have one connected occupied component"
             );
+        }
+    }
+
+    #[test]
+    fn pose_specific_full_geometry_matches_the_room_contract() {
+        assert_eq!(
+            occupied_bounds(pet_sprite(PetPose::Idle)),
+            occupied_bounds(pet_sprite(PetPose::Blink)),
+            "idle and blink must share one occupied hitbox"
+        );
+
+        let (_, doze_min_y, doze_max_x, doze_max_y) = occupied_bounds(pet_sprite(PetPose::Doze));
+        let (doze_min_x, _, _, _) = occupied_bounds(pet_sprite(PetPose::Doze));
+        let doze_width = doze_max_x - doze_min_x + 1;
+        let doze_packed_height = doze_max_y / 2 - doze_min_y / 2 + 1;
+        assert!(
+            doze_width > doze_packed_height,
+            "floor doze should be wider than tall after half-block packing"
+        );
+
+        let (sleep_min_x, sleep_min_y, sleep_max_x, sleep_max_y) =
+            occupied_bounds(pet_sprite(PetPose::Sleep));
+        assert!(
+            sleep_min_x <= sleep_max_x && sleep_max_x < 18,
+            "bed sleep must fit the 18-column canvas"
+        );
+        assert!(
+            sleep_min_y <= sleep_max_y && sleep_max_y < 14,
+            "bed sleep must fit the 14-row canvas"
+        );
+    }
+
+    #[test]
+    fn responsive_pose_grids_have_declared_complete_canvases() {
+        for pose in ALL_POSES {
+            let compact = pet_sprite_compact(pose);
+            assert_sprite_shape(&format!("Compact {pose:?}"), compact, 12, 10);
             assert!(
-                width < pet_sprite(pose)[0].chars().count(),
+                compact[0].chars().count() < pet_sprite(pose)[0].chars().count(),
                 "compact {pose:?} should be narrower than the Full sprite"
             );
-        }
-    }
-
-    /// Full art uses a shared, tall canvas so every pose keeps the same
-    /// hitbox and focal scale while its face/body details change in place.
-    #[test]
-    fn every_full_pose_uses_the_shared_tall_canvas() {
-        let width = pet_sprite(PetPose::Idle)[0].chars().count();
-        assert!(width >= 16, "Full mascot needs a round focal width");
-        for pose in ALL_POSES {
-            let sprite = pet_sprite(pose);
+            let minimal = pet_sprite_minimal(pose);
+            assert_sprite_shape(&format!("Minimal {pose:?}"), &minimal[..], 9, 6);
             assert_eq!(
-                sprite.len(),
-                14,
-                "{pose:?} should occupy seven terminal rows"
+                occupied_component_count(compact),
+                1,
+                "Compact {pose:?} must be one complete mascot component"
             );
             assert_eq!(
-                sprite[0].chars().count(),
-                width,
-                "{pose:?} should share the Full canvas width"
+                occupied_component_count(&minimal[..]),
+                1,
+                "Minimal {pose:?} must be one complete mascot component"
             );
         }
     }
 
     #[test]
-    fn full_poses_change_their_load_bearing_face_or_body_details() {
-        for (index, first) in ALL_POSES.iter().enumerate() {
-            for second in ALL_POSES.iter().skip(index + 1) {
-                assert_ne!(
-                    pet_sprite(*first),
-                    pet_sprite(*second),
-                    "{first:?} and {second:?} must not share one Full pose"
-                );
+    fn compact_idle_has_ears_face_gap_grounded_feet_and_attached_tail() {
+        let sprite = pet_sprite_compact(PetPose::Idle);
+        assert_sprite_shape("Compact Idle", sprite, 12, 10);
+        assert!(
+            has_two_pointed_ear_peaks(sprite),
+            "compact idle needs two deep ear peaks"
+        );
+        assert!(
+            has_two_wide_eye_gaps(sprite),
+            "compact idle needs two wide negative-space eyes"
+        );
+        assert!(
+            has_mouth_gap(sprite, 3),
+            "compact idle needs a lower mouth gap"
+        );
+        let rows = occupied_row_bounds(sprite);
+        let max_x = rows
+            .iter()
+            .flatten()
+            .map(|(_, max_x)| *max_x)
+            .max()
+            .unwrap();
+        let tail_rows = rows
+            .iter()
+            .rev()
+            .take(2)
+            .filter(|bounds| bounds.is_some_and(|(_, row_max)| row_max == max_x))
+            .count();
+        assert!(
+            tail_rows == 2,
+            "compact idle needs a grounded, attached tail contour"
+        );
+    }
+
+    #[test]
+    fn minimal_pose_families_have_distinct_complete_grids() {
+        let neutral = pet_sprite_minimal(PetPose::Idle);
+        for pose in [
+            PetPose::WalkA,
+            PetPose::WalkB,
+            PetPose::Sit,
+            PetPose::Curious,
+        ] {
+            assert_eq!(
+                pet_sprite_minimal(pose),
+                neutral,
+                "{pose:?} should be neutral"
+            );
+        }
+
+        let closed_eyes = pet_sprite_minimal(PetPose::Blink);
+        for pose in [PetPose::Doze, PetPose::Sleep] {
+            assert_eq!(
+                pet_sprite_minimal(pose),
+                closed_eyes,
+                "{pose:?} should use the closed-eyes family"
+            );
+        }
+
+        let positive = pet_sprite_minimal(PetPose::Happy);
+        assert_eq!(pet_sprite_minimal(PetPose::Petted), positive);
+
+        let families = [
+            neutral,
+            closed_eyes,
+            positive,
+            pet_sprite_minimal(PetPose::Upset),
+            pet_sprite_minimal(PetPose::Yawn),
+            pet_sprite_minimal(PetPose::Eating),
+        ];
+        for (index, first) in families.iter().enumerate() {
+            for second in families.iter().skip(index + 1) {
+                assert_ne!(first, second, "Minimal expression families must differ");
             }
         }
     }
 
     #[test]
-    fn compact_yawn_and_curious_poses_are_not_idle_copies() {
-        assert_ne!(
-            pet_sprite_compact(PetPose::Yawn),
-            pet_sprite_compact(PetPose::Idle)
+    fn upright_poses_have_two_pointed_ear_peaks() {
+        for pose in [
+            PetPose::Idle,
+            PetPose::Blink,
+            PetPose::WalkA,
+            PetPose::WalkB,
+            PetPose::Sit,
+            PetPose::Yawn,
+            PetPose::Curious,
+            PetPose::Happy,
+            PetPose::Petted,
+        ] {
+            assert!(
+                has_two_pointed_ear_peaks(pet_sprite(pose)),
+                "{pose:?} needs two ear peaks with at least two rows of depth"
+            );
+        }
+    }
+
+    #[test]
+    fn idle_face_has_wide_negative_space_features() {
+        let idle = pet_sprite(PetPose::Idle);
+        assert!(
+            has_two_wide_eye_gaps(idle),
+            "Idle needs two separated eye gaps at least two cells wide"
         );
-        assert_ne!(
-            pet_sprite_compact(PetPose::Curious),
-            pet_sprite_compact(PetPose::Idle)
+        assert!(
+            has_mouth_gap(idle, 3),
+            "Idle needs a lower crooked mouth gap at least three cells wide"
         );
     }
 
     #[test]
-    fn full_idle_packs_with_a_round_body_and_face_details() {
-        let area = Rect::new(0, 0, 18, 7);
-        let mut buffer = Buffer::filled(area, ratatui::buffer::Cell::new(" "));
-        draw_sprite(area, &mut buffer, pet_sprite(PetPose::Idle), 0, 0);
-        let packed: Vec<String> = (0..7)
-            .map(|row| {
-                (0..18)
-                    .map(|col| buffer.cell((col, row)).expect("cell").symbol().to_owned())
-                    .collect()
-            })
-            .collect();
+    fn idle_and_blink_preserve_the_outer_silhouette() {
+        let idle = pet_sprite(PetPose::Idle);
+        let blink = pet_sprite(PetPose::Blink);
         assert_eq!(
-            packed,
-            vec![
-                "     ▄██▄  ▄██▄   ".to_owned(),
-                "  ▄▄▀█▀█▀▄▀█▀▄▀█▄▄".to_owned(),
-                "▄█▀▄▀█▀▄▀█▀ ▀█▀██▄".to_owned(),
-                "██▀█▀ ▀▀▀▄▀ ▀▄▀███".to_owned(),
-                " ▀█▄▀█▀ ▀█▀▄▀▄██▀ ".to_owned(),
-                "  ▀██▄▀▀█▄▀▀█▄█▀  ".to_owned(),
-                "  ███▀ ▄▄▄  ▀▀▀▀  ".to_owned(),
-            ],
-            "Full idle packed output changed without updating the visual contract"
+            occupied_row_bounds(idle),
+            occupied_row_bounds(blink),
+            "Blink must preserve Idle ears, body sides, feet, and tail"
+        );
+        assert_ne!(
+            face_space_runs(idle),
+            face_space_runs(blink),
+            "Blink must change eye gaps while preserving the outer contour"
         );
     }
 
     #[test]
-    fn full_idle_has_lower_face_expression_and_body_shading() {
-        let sprite = pet_sprite(PetPose::Idle);
-        assert!(sprite[7].contains("oo"), "idle needs a readable mouth cue");
-        assert!(
-            sprite[10].contains("oo"),
-            "idle needs lower-body shading instead of an outline-only belly"
-        );
-        assert!(
-            sprite[12].contains("##") && sprite[13].contains("##"),
-            "idle needs distinct feet/tail silhouette pixels"
-        );
-    }
+    fn key_expression_signatures_are_named_and_distinct() {
+        let happy = expression_signature(pet_sprite(PetPose::Happy));
+        let petted = expression_signature(pet_sprite(PetPose::Petted));
+        let upset = expression_signature(pet_sprite(PetPose::Upset));
+        let eating = expression_signature(pet_sprite(PetPose::Eating));
 
-    #[test]
-    fn minimal_pose_sprites_keep_a_packed_nine_column_canvas() {
-        for pose in [PetPose::Idle, PetPose::Blink, PetPose::Doze, PetPose::Sleep] {
-            let sprite = pet_sprite_minimal(pose);
-            assert_eq!(sprite.len(), 6, "{pose:?} should pack into three rows");
-            for (index, row) in sprite.iter().enumerate() {
-                assert_eq!(
-                    row.chars().count(),
-                    9,
-                    "{pose:?} minimal row {index} must cover its hitbox"
-                );
+        assert!(
+            happy.high_raised_tail && happy.crescent_eyes && happy.broad_smile,
+            "Happy needs crescent eyes, a broad smile, and a high raised tail: {happy:?}"
+        );
+        assert!(
+            petted.broad_smile && petted.relaxed_shoulders,
+            "Petted needs a broad smile and relaxed shoulder contour"
+        );
+        assert!(
+            upset.lowered_ears && upset.downturned_mouth && upset.tucked_tail,
+            "Upset needs lowered ears, a downturned mouth, and a tucked tail"
+        );
+        assert!(
+            eating.food_facing_asymmetry,
+            "Eating needs a food-facing asymmetric face and attached body"
+        );
+
+        for (first_name, first) in [
+            ("Happy", happy),
+            ("Petted", petted),
+            ("Upset", upset),
+            ("Eating", eating),
+        ] {
+            for (second_name, second) in [
+                ("Happy", happy),
+                ("Petted", petted),
+                ("Upset", upset),
+                ("Eating", eating),
+            ] {
+                if first_name != second_name {
+                    assert_ne!(
+                        first, second,
+                        "{first_name} and {second_name} need distinct semantic contours"
+                    );
+                }
             }
         }
+    }
+
+    #[test]
+    fn compact_yawn_and_curious_keep_named_face_contours() {
+        let idle = pet_sprite_compact(PetPose::Idle);
+        let yawn = pet_sprite_compact(PetPose::Yawn);
+        let curious = pet_sprite_compact(PetPose::Curious);
+        assert!(
+            has_mouth_gap(yawn, 4),
+            "Compact Yawn needs a visibly larger open-mouth gap"
+        );
+        assert!(
+            occupied_row_bounds(curious)
+                .iter()
+                .find_map(|bounds| *bounds)
+                .is_some_and(|(_, max_x)| {
+                    let idle_top_max = occupied_row_bounds(idle)
+                        .iter()
+                        .find_map(|bounds| *bounds)
+                        .map_or(0, |(_, max_x)| max_x);
+                    max_x > idle_top_max
+                }),
+            "Compact Curious needs an asymmetric raised ear contour"
+        );
+        assert_ne!(
+            occupied_row_bounds(yawn),
+            occupied_row_bounds(idle),
+            "Compact Yawn must change the mouth/body contour"
+        );
+        assert_ne!(
+            occupied_row_bounds(curious),
+            occupied_row_bounds(idle),
+            "Compact Curious must change the ear/tail contour"
+        );
     }
 
     #[test]
@@ -892,25 +1339,23 @@ mod tests {
 
     #[test]
     fn floor_doze_uses_a_horizontal_curl_pose() {
-        assert_eq!(
-            pet_sprite(PetPose::Doze),
-            &[
-                "                  ",
-                "                  ",
-                "       ##         ",
-                "     ######       ",
-                "   ##..oo..###    ",
-                "  ##..oo..oo####  ",
-                " ##oo..##..oo###  ",
-                "##ooo..oooo..oo## ",
-                " ##oooooooooooo## ",
-                "  ##ooo..oooo##   ",
-                "   ##oooooooo##   ",
-                "     ###  ###     ",
-                "        ##        ",
-                "                  ",
-            ],
-            "floor doze should be a horizontal curled pose"
+        let sprite = pet_sprite(PetPose::Doze);
+        let (min_x, _, max_x, max_y) = occupied_bounds(sprite);
+        assert!(max_x - min_x + 1 >= 16);
+        let min_y = occupied_bounds(sprite).1;
+        assert!(max_y - min_y < 10);
+        let rows = occupied_row_bounds(sprite);
+        assert!(
+            rows.iter().any(|bounds| {
+                bounds.is_some_and(|(row_min, row_max)| row_max - row_min + 1 >= 4)
+            }),
+            "doze needs a curled lower body"
+        );
+        assert!(
+            rows.iter().skip(min_y).take(3).any(|bounds| {
+                bounds.is_some_and(|(row_min, row_max)| row_max - row_min + 1 >= 3)
+            }),
+            "doze needs a wrapped upper tail cue"
         );
     }
 
@@ -922,19 +1367,10 @@ mod tests {
             doze.contains('o'),
             "floor doze should retain a mid-tone curled-face detail"
         );
+        assert!(sleep.contains('o'), "bed sleep should retain belly detail");
         assert!(
-            sleep.contains('.'),
-            "bed sleep should retain a dark-tone blanket/face detail"
-        );
-    }
-
-    #[test]
-    fn idle_sprite_keeps_ears_eyes_and_feet_details() {
-        let idle = pet_sprite(PetPose::Idle).concat();
-        assert!(idle.contains('o'), "idle face should contain mid-tone eyes");
-        assert!(
-            idle.contains('.'),
-            "idle silhouette should contain dark details"
+            sleep.contains(' '),
+            "bed sleep needs negative-space face detail"
         );
     }
 }

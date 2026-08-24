@@ -1,65 +1,99 @@
 # Current terminal-room visual evidence
 
-Status: **PASS — lower-pane visual adjudication is clean; the fixture upper
-pane is intentionally Codex-free.** These six PNGs are fresh production
-compositor captures at source SHA `c8371251de26db2cf9d5795873ee95c33ccd4800`
-(`HEAD`, 2026-08-22). They supersede the audited pre-hardening baseline while
-Git history retains the older screenshots and review notes.
-
-## Capture set
-
-| Screenshot | Fixture state / host | Dimensions / SHA-256 | Direct inspection |
-|---|---|---:|---|
-| [`full-light.png`](full-light.png) | Full, SoftGreen/day, awake; xterm default light host | 1324×904 / `7bc9b05cf8af684e5f9fda35d669755ac1e6e0c2e9be3ea2079931a0cbb86d99` | Clean layered room, large mascot, stocked care targets, demands, and status strip; no visible seam or clipping. |
-| [`full-dark.png`](full-dark.png) | Full, Night/night, awake; xterm `-bg black -fg white` | 1324×904 / `83adc8d59e2a50ff4c72dc088cdbadf2f3ccaa0555957aafdc624c969003e55f` | Blue night palette and empty bars remain readable against the dark host; no capture artifact. |
-| [`compact-light.png`](compact-light.png) | Compact, SoftGreen/day, awake; xterm default light host | 1324×604 / `180625c741eac200b20b2c76d3defe1f13b9592e6e64169bcd4908d6986578ba` | Mascot-led vignette retains needs, stocked food, poop, bed, and care cues within seven rows. |
-| [`minimal-light.png`](minimal-light.png) | Minimal, SoftGreen/day, awake; xterm default light host | 1324×424 / `f87796b01124a3744783a8ea6512fe5ed8100cc76e00f6b35d98a49d59557305` | Three-row packed mascot plus needs, food, bed, poop, affection, and snack controls remain visible and aligned. |
-| [`full-bed-sleep.png`](full-bed-sleep.png) | Full, SoftGreen/night, future authoritative bed nap | 1324×904 / `50d5ecd24b940e8e3a7b8f852b158afd9540412cab0438afdda4dabdb2f2a216` | Pet is visibly on the bed with `z z z`; floor care objects remain separate and the bed label is singular. |
-| [`full-floor-doze.png`](full-floor-doze.png) | Full, SoftGreen/day, generic sleeping without deadline | 1324×904 / `84780797a151d412db4fb4925079fe6263636e9ba5370c3fe38d9d0cb8d6aaaf` | Horizontal floor doze is visibly distinct from bed sleep; the bed remains empty. |
-
-## Lower-pane adjudication
-
-All six files were opened directly on 2026-08-22 and compared against the
-canonical references in `docs/mockups/terminal-room/`. The lower pane is
-visually clean at every required size: Full reads as a layered room with a
-large focal mascot, Compact retains a coherent pet vignette, and Minimal
-retains the mascot and every core care target. No half-block seam, xterm
-capture artifact, or visible care-target clipping was found. The authoritative
-bed-sleep pose and generic floor-doze pose remain unmistakably different.
-
-The fixture deliberately leaves the upper pane blank, so these six images do
-not claim populated real-Codex acceptance. That is a separate live-session
-gate; it is not a lower-pane visual defect. Auto light/dark evidence is stored
-with the final verification set in
+Status: **PASS — lower-pane visual adjudication is clean; the populated
+live-Codex release gate remains separate and blocked.** These six approved
+PNG candidates were captured on 2026-08-24 from an uncommitted working tree.
+They are the current named-state mockups; the matching eight verification
+captures are documented in
 [`docs/verification/terminal-room/README.md`](../../verification/terminal-room/README.md).
 
-## Exact capture provenance
+## Approved current captures
 
-Environment: Ubuntu 24.04 under WSL2 (`Linux 6.6.87.2-microsoft-standard-WSL2`),
-fresh TCP-only Xvfb display `:127` with a `1600x1200x24` screen, `xterm 390`,
-Noto Sans Mono 10 pt, ImageMagick `6.9.12-98`, `xdotool 3.20160805.1`, and
-Rust `cargo 1.97.1`. The fixture was rebuilt from the source SHA above:
+| Screenshot | Native fixture state / host | Native cells / pixels / SHA-256 | Direct inspection |
+|---|---|---:|---|
+| [`full-light.png`](full-light.png) | Full, `soft-green`/day, awake; xterm light host | 120×45 / 1324×904 / `c7b6c4fc83d493ffaca0a73a07e2616f6b85bbc31c1f80c627a3facd7b623a41` | Cat-like mascot leads a calm layered room; named care targets, demands, and status remain readable with no seam or clipping. |
+| [`full-dark.png`](full-dark.png) | Full, `night`/night, awake; xterm `-bg black -fg white` | 120×45 / 1324×904 / `174bfe2298a7e44efbbeb0353023b8b581606a002a55554f5a3eacba668832c3` | Night palette and empty bars remain readable against the dark host; no capture artifact. |
+| [`compact-light.png`](compact-light.png) | Compact, `soft-green`/day, awake; xterm light host | 120×30 / 1324×604 / `67088478db2ecaadd38be8efb3f95c78149adee3086d1ae45526447efc6994ba` | Complete mascot, needs, stocked food, poop, bed, and care cues fit the compact vignette. |
+| [`minimal-light.png`](minimal-light.png) | Minimal, `soft-green`/day, awake; xterm light host | 120×21 / 1324×424 / `e4a74cbedc2b23ce6240b3e064560e62e6b09392103324fc9bd28e435cfaeed3` | Complete mascot and core needs, food, bed, poop, affection, and snack controls stay visible and aligned. |
+| [`full-bed-sleep.png`](full-bed-sleep.png) | Full, `soft-green`/night, bed sleep; xterm light host | 120×45 / 1324×904 / `7eeea49fc12cbd5ad00fa4ee69d99a48b18cc1c6e2422f8584c341b038aa1774` | Pet is visibly on the bed with `z z z`; floor care objects remain separate and the bed label is singular. |
+| [`full-floor-doze.png`](full-floor-doze.png) | Full, `soft-green`/day, floor doze; xterm light host | 120×45 / 1324×904 / `ad48af24ca0c302ac5d5c34c4b5e2b92c0e53694dd37f3644be0be97cb95bfbe` | Horizontal floor Doze is visibly distinct from compact bed Sleep; the bed remains empty. |
+
+## Recognizability adjudication
+
+The 2026-08-24 native-resolution gate passed after direct controller
+inspection and a 3–1 Luna panel with an exact-requirements tiebreak. The
+result is adjudicated as follows:
+
+- The mascot has a cat-like silhouette at one glance.
+- Idle reads as mischievous, endearing, and playful.
+- Named and Auto faces remain readable on both host polarities.
+- Happy, Upset, Eating, Petted, and Yawn have distinct readable expressions.
+- Horizontal floor Doze and compact bed Sleep are distinct without relying on labels.
+- The mascot leads a calm visual hierarchy and furniture remains subordinate.
+- Care targets are separate, distinct, and discoverable.
+- Compact and Minimal retain complete, uncropped compositions.
+- No seam, clipping, collision, or capture artifact is visible.
+
+All thirteen individual pose candidates were inspected at 1324×904. Their
+candidate-only hashes are recorded in the verification README; those pose
+PNGs are not promoted as tracked evidence files.
+
+The fixture deliberately leaves the upper pane without a real Codex process.
+These deterministic lower-pane captures therefore do not prove the separate
+populated live-Codex release gate, which remains **BLOCKED** until an
+authorized session supplies the required non-text receipts and a populated
+Full frame.
+
+## Capture provenance
+
+The final correction recapture source was an **uncommitted working tree**, based on base
+commit `1f0f8db0aca15bc172a12e508bad2ceee3665575`. Its exact product-source
+working-tree binary diff was measured with this source-only command:
+
+```text
+git diff --binary -- crates/codegotchi-cli/examples/terminal_room_fixture.rs crates/codegotchi-cli/src/terminal/behavior.rs crates/codegotchi-cli/src/terminal/room.rs crates/codegotchi-cli/src/terminal/sprites.rs crates/codegotchi-cli/tests/terminal_room.rs | sha256sum
+```
+
+The command output was
+`4645edebe436968a9baa55b786893bcc5151de6e9c74060b0b6ed6aad42391aa`.
+This records the exact source-only scope used for the final recapture; `HEAD`
+alone is not asserted as the exact capture source.
+
+Environment: Ubuntu 24.04 under WSL2, Linux
+`6.6.87.2-microsoft-standard-WSL2`, xterm `390`, ImageMagick `6.9.12-98`,
+xdotool `3.20160805.1`, and Rust cargo `1.97.1`. The display used a fresh,
+TCP-only, dynamically allocated Xvfb transport with `-nolisten unix
+-listen tcp -displayfd`, an X screen of `1600x1200x24`, and Noto Sans Mono
+10 pt.
+
+The fixture was built with:
 
 ```text
 cargo build -p codegotchi-cli --example terminal_room_fixture
-Xvfb :127 -screen 0 1600x1200x24 -ac -nolisten unix -listen tcp
 ```
 
-Each frame used a fresh xterm with `-geometry` set to `120x45`, `120x30`, or
-`120x21`, `-fa "Noto Sans Mono" -fs 10`, `TERM=xterm-256color`, `NO_COLOR=`,
-`CG_FIXTURE_BOTTOM=1`, `CG_FIXTURE_PAUSE_MS=5000`, and
-`CODEGOTCHI_BROWSER=none`. The fixture used the following substitutions:
+Each capture used a fresh xterm with `-geometry 120x45`, `120x30`, or
+`120x21`, `-fa "Noto Sans Mono" -fs 10`, and a display published as
+`127.0.0.1:<displayfd>`. Xvfb was started with the equivalent of:
 
 ```text
-full-light       full    soft-green day   awake  default light host
-full-dark        full    night      night awake  -bg black -fg white
-compact-light    compact soft-green day   awake  default light host
-minimal-light    minimal soft-green day   awake  default light host
-full-bed-sleep   full    soft-green night bed    default light host
-full-floor-doze full    soft-green day   doze   default light host
+Xvfb -displayfd 3 -screen 0 1600x1200x24 -ac -nolisten unix -listen tcp -terminate 1
 ```
 
-After the fixture settled, ImageMagick `import -silent -window` captured the
-visible xterm. The six current-state PNGs and their matching final-evidence
-copies were captured in the same pass; all are non-empty RGB PNGs and the
-hashes above were computed immediately afterward.
+Common fixture variables were `TERM=xterm-256color`, `NO_COLOR=`,
+`CODEGOTCHI_BROWSER=none`, `CG_FIXTURE_BOTTOM=1`, and
+`CG_FIXTURE_PAUSE_MS=5000`. The exact per-frame substitutions were:
+
+| Capture | `CG_FIXTURE_LAYOUT` | `CG_FIXTURE_THEME` | `CG_FIXTURE_TIME_OF_DAY` | `CG_FIXTURE_SLEEP` | `CG_FIXTURE_POSE` | Host |
+|---|---|---|---|---|---|---|
+| `full-light` | `full` | `soft-green` | `day` | `awake` | `idle` | `-bg white -fg black` |
+| `full-dark` | `full` | `night` | `night` | `awake` | `idle` | `-bg black -fg white` |
+| `compact-light` | `compact` | `soft-green` | `day` | `awake` | `idle` | `-bg white -fg black` |
+| `minimal-light` | `minimal` | `soft-green` | `day` | `awake` | `idle` | `-bg white -fg black` |
+| `full-bed-sleep` | `full` | `soft-green` | `night` | `bed` | `sleep` | `-bg white -fg black` |
+| `full-floor-doze` | `full` | `soft-green` | `day` | `doze` | `doze` | `-bg white -fg black` |
+
+After each fixture settled, ImageMagick `import -silent -window` captured the
+visible xterm. The six mockup PNGs and matching verification copies were
+promoted byte-for-byte from the approved candidate set; all are non-empty RGB
+PNGs and the hashes above were computed from the promoted files.

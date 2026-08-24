@@ -252,7 +252,7 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
             23,
             7,
         );
-        let pet_x = bed_x.saturating_sub(18);
+        let pet_x = bed_x.saturating_sub(20);
         let pet = if has_authoritative_nap(snapshot) {
             packed_sprite_rect(
                 area,
@@ -288,12 +288,11 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
         let food_right = food_sources
             .last()
             .map_or(food_x, |source| source.rect.right().saturating_sub(area.x));
-        let poop_x = if area.width >= 100 {
-            pet_x.saturating_sub(24).max(food_right.saturating_add(2))
-        } else {
-            food_right.saturating_add(2)
-        };
-        let poop_limit = if area.width >= 100 { 3 } else { 1 };
+        let poop_x = pet_x.saturating_sub(24).max(food_right.saturating_add(2));
+        let poop_limit = snapshot
+            .pending_poops
+            .len()
+            .min(wide_poop_capacity(poop_x, pet_x));
         let poops = wide_poop_slots(area, snapshot, poop_x, 8, poop_limit, 7);
         return RoomGeometry {
             pet,
@@ -729,7 +728,7 @@ fn wide_food_sources(
                         generic_first,
                         abbreviate_count,
                     ),
-                    food_target_height(compact),
+                    food_target_height(),
                 ),
                 food_id: food.id(),
                 count,
@@ -767,11 +766,7 @@ fn food_target_width(
         generic_first,
         abbreviate_count,
     );
-    let sprite = if compact {
-        &FOOD_BOWL_COMPACT_WIDE
-    } else {
-        &FOOD_BOWL_WIDE
-    };
+    let sprite = food_sprite(food);
     [sprite_width(sprite), label_width(&label)]
         .into_iter()
         .max()
@@ -830,11 +825,16 @@ fn compact_food_count(count: u32) -> String {
     }
 }
 
-const fn food_target_height(compact: bool) -> u16 {
-    if compact {
-        FOOD_BOWL_COMPACT_WIDE.len() as u16
-    } else {
-        FOOD_BOWL_WIDE.len() as u16
+const fn food_target_height() -> u16 {
+    4
+}
+
+fn food_sprite(food: FoodKind) -> &'static [&'static str] {
+    match food {
+        FoodKind::Kibble => &FOOD_KIBBLE,
+        FoodKind::Treat => &FOOD_TREAT,
+        FoodKind::Fruit => &FOOD_FRUIT,
+        FoodKind::EnergyDrink => &FOOD_ENERGY,
     }
 }
 
@@ -907,7 +907,20 @@ fn wide_poop_target_width() -> u16 {
 }
 
 fn wide_poop_target_height() -> u16 {
-    POOP_OBJECT_WIDE.len().max(POOP_OBJECT_COMPACT.len()).max(1) as u16
+    POOP_OBJECT_WIDE
+        .len()
+        .max(POOP_OBJECT_COMPACT.len())
+        .saturating_add(1)
+        .max(1) as u16
+}
+
+fn wide_poop_capacity(poop_x: u16, pet_x: u16) -> usize {
+    let poop_width = wide_poop_target_width();
+    let latest_poop_start = pet_x.saturating_sub(2).saturating_sub(poop_width);
+    if poop_x > latest_poop_start {
+        return 0;
+    }
+    usize::from(latest_poop_start.saturating_sub(poop_x) / 7) + 1
 }
 
 /// Applies a presentation wander offset to a hit rectangle, clamping it inside
@@ -1358,14 +1371,11 @@ fn render_compact_wide(
         palette.cell_style(SemanticTone::Tone2),
     );
 
-    // The tiny window and plant preserve the room's identity without taking
-    // the pet's left-side priority in the compact hierarchy.
-    let (window_x, plant_x) = compact_decoration_slots(area, geometry);
+    // The tiny window preserves the room's identity without taking the pet's
+    // left-side priority in the compact hierarchy.
+    let (window_x, _) = compact_decoration_slots(area, geometry);
     if let Some(window_x) = window_x {
         put_sprite(area, buffer, &WINDOW_COMPACT, window_x, 2, palette);
-    }
-    if let Some(plant_x) = plant_x {
-        put_sprite(area, buffer, &PLANTS_COMPACT, plant_x, 4, palette);
     }
 
     let pet_x = geometry.pet.x.saturating_sub(area.x);
@@ -1635,16 +1645,13 @@ fn compact_decoration_slots(area: Rect, geometry: &RoomGeometry) -> (Option<u16>
         .map(|rect| rect.x.saturating_sub(area.x))
         .unwrap_or(area.width);
     let window_width = sprite_width(&WINDOW_COMPACT);
-    let plant_width = sprite_width(&PLANTS_COMPACT);
     let window_limit = bed_start.saturating_sub(window_width.saturating_add(2));
     let window_start = care_end.saturating_add(2);
     if window_start > window_limit {
         return (None, None);
     }
     let window_x = window_start;
-    let plant_x = window_x.saturating_add(window_width).saturating_add(2);
-    let plant = (plant_x.saturating_add(plant_width) <= bed_start).then_some(plant_x);
-    (Some(window_x), plant)
+    (Some(window_x), None)
 }
 
 /// Short terminal labels for the authoritative food kinds.
@@ -1732,13 +1739,9 @@ fn render_food_sources_wide(
     for (index, source) in geometry.food_sources.iter().enumerate() {
         let x = source.rect.x.saturating_sub(area.x);
         let y = source.rect.y.saturating_sub(area.y);
-        let bowl = if compact {
-            &FOOD_BOWL_COMPACT_WIDE
-        } else {
-            &FOOD_BOWL_WIDE
-        };
-        put_sprite(area, buffer, bowl, x, y, palette);
         let food = FoodKind::from_id(source.food_id).expect("rendered food id is known");
+        let bowl = food_sprite(food);
+        put_sprite(area, buffer, bowl, x, y, palette);
         let label = food_source_label(
             food,
             source.count,
@@ -1754,7 +1757,7 @@ fn render_food_sources_wide(
             x,
             y.saturating_add(bowl.len().saturating_sub(1) as u16),
             &label,
-            palette.cell_style(SemanticTone::Tone3),
+            palette.cell_style(SemanticTone::Tone2),
         );
     }
 }
@@ -1765,20 +1768,18 @@ fn render_poops_wide(
     geometry: &RoomGeometry,
     palette: ResolvedPalette,
 ) {
-    for (index, (_, rect)) in geometry.poops.iter().enumerate() {
+    for (_, rect) in &geometry.poops {
         let x = rect.x.saturating_sub(area.x);
         let y = rect.y.saturating_sub(area.y);
         put_sprite(area, buffer, &POOP_OBJECT_WIDE, x, y, palette);
-        if index == 0 {
-            put_text(
-                area,
-                buffer,
-                x,
-                y.saturating_add(POOP_OBJECT_WIDE.len().saturating_sub(1) as u16),
-                "POOP",
-                palette.cell_style(SemanticTone::Tone3),
-            );
-        }
+        put_text(
+            area,
+            buffer,
+            x,
+            y.saturating_add(POOP_OBJECT_WIDE.len() as u16),
+            "POOP",
+            palette.cell_style(SemanticTone::Tone2),
+        );
     }
 }
 
@@ -1793,8 +1794,8 @@ fn render_food_sources_compact_wide(
     for (index, source) in geometry.food_sources.iter().enumerate() {
         let x = source.rect.x.saturating_sub(area.x);
         let y = source.rect.y.saturating_sub(area.y);
-        put_sprite(area, buffer, &FOOD_BOWL_COMPACT, x, y, palette);
         let food = FoodKind::from_id(source.food_id).expect("rendered food id is known");
+        put_sprite(area, buffer, food_sprite(food), x, y, palette);
         let label = food_source_label(
             food,
             source.count,
@@ -1810,11 +1811,7 @@ fn render_food_sources_compact_wide(
             x,
             y.saturating_add(if index == 0 { 3 } else { 2 }),
             &label,
-            palette.cell_style(if index == 0 {
-                SemanticTone::Tone3
-            } else {
-                SemanticTone::Tone2
-            }),
+            palette.cell_style(SemanticTone::Tone2),
         );
     }
 }
@@ -1825,7 +1822,7 @@ fn render_poops_compact_wide(
     geometry: &RoomGeometry,
     palette: ResolvedPalette,
 ) {
-    for (index, (_, rect)) in geometry.poops.iter().enumerate() {
+    for (_, rect) in &geometry.poops {
         let x = rect.x.saturating_sub(area.x);
         let y = rect.y.saturating_sub(area.y);
         put_sprite(area, buffer, &POOP_OBJECT_COMPACT, x, y, palette);
@@ -1835,11 +1832,7 @@ fn render_poops_compact_wide(
             x,
             y.saturating_add(3),
             "POOP",
-            palette.cell_style(if index == 0 {
-                SemanticTone::Tone3
-            } else {
-                SemanticTone::Tone2
-            }),
+            palette.cell_style(SemanticTone::Tone2),
         );
     }
 }
@@ -1948,9 +1941,10 @@ fn put_sprite(
         let row = u16::try_from(row).unwrap_or(u16::MAX);
         for (offset, ch) in line.chars().enumerate() {
             let tone = match ch {
+                ' ' => SemanticTone::Tone0,
                 '█' | '▀' | '▄' => SemanticTone::Tone1,
                 '┌' | '┐' | '└' | '┘' | '─' | '│' => SemanticTone::Tone2,
-                _ => SemanticTone::Tone3,
+                _ => SemanticTone::Tone2,
             };
             let logical_x = area
                 .x
@@ -2001,126 +1995,24 @@ struct FullFurnitureSprite {
 }
 
 fn full_wide_furniture_layout(
-    area: Rect,
+    _area: Rect,
     window: &'static [&'static str],
 ) -> Vec<FullFurnitureSprite> {
-    let mut furniture = Vec::new();
-    if area.width >= 120 {
-        furniture.extend([
-            FullFurnitureSprite {
-                sprite: &DESK_FULL,
-                x: 1,
-                y: 1,
-            },
-            FullFurnitureSprite {
-                sprite: window,
-                x: 27,
-                y: 1,
-            },
-            FullFurnitureSprite {
-                sprite: &SHELF_FULL,
-                x: 47,
-                y: 1,
-            },
-            FullFurnitureSprite {
-                sprite: &WARDROBE_FULL,
-                x: 66,
-                y: 1,
-            },
-            FullFurnitureSprite {
-                sprite: &RUG_FULL,
-                x: 36,
-                y: 7,
-            },
-            FullFurnitureSprite {
-                sprite: &PLANTS_FULL,
-                x: 38,
-                y: 8,
-            },
-        ]);
-    } else {
-        furniture.extend([
-            FullFurnitureSprite {
-                sprite: &DESK_COMPACT_FULL,
-                x: 1,
-                y: 1,
-            },
-            FullFurnitureSprite {
-                sprite: window,
-                x: 18,
-                y: 1,
-            },
-        ]);
-        if area.width >= 90 {
-            furniture.extend([
-                FullFurnitureSprite {
-                    sprite: &SHELF_COMPACT_FULL,
-                    x: 38,
-                    y: 1,
-                },
-                FullFurnitureSprite {
-                    sprite: &WARDROBE_COMPACT_FULL,
-                    x: 38,
-                    y: 4,
-                },
-            ]);
-        } else {
-            furniture.push(FullFurnitureSprite {
-                sprite: &SHELF_COMPACT_FULL,
-                x: 1,
-                y: 5,
-            });
-        }
-        if area.width >= 100 {
-            let pet_x = area.width.saturating_sub(42);
-            furniture.push(FullFurnitureSprite {
-                sprite: &PLANTS_COMPACT_FULL,
-                x: pet_x.saturating_sub(12),
-                y: 4,
-            });
-        }
-    }
-    furniture
+    vec![
+        FullFurnitureSprite {
+            sprite: window,
+            x: 1,
+            y: 1,
+        },
+        FullFurnitureSprite {
+            sprite: &SHELF_FULL,
+            x: 20,
+            y: 1,
+        },
+    ]
 }
 
 fn render_room_backdrop(area: Rect, buffer: &mut Buffer, palette: ResolvedPalette) {
-    for y in 1..area.height.saturating_sub(3) {
-        let tone = if y % 2 == 0 {
-            SemanticTone::Tone1
-        } else {
-            SemanticTone::Tone0
-        };
-        for x in (1..area.width.saturating_sub(1)).step_by(6) {
-            put(area, buffer, x, y, "·", palette.cell_style(tone));
-        }
-    }
-    for y in 7..area.height.saturating_sub(3).min(11) {
-        for x in 0..area.width {
-            if (y == 10 && x % 4 == 0)
-                || (y == 9 && (x + 3) % 14 == 0)
-                || (y == 7 && x % 17 == 2)
-                || (x + y) % 8 == 0
-            {
-                put(
-                    area,
-                    buffer,
-                    x,
-                    y,
-                    "█",
-                    palette.cell_style(SemanticTone::Tone1),
-                );
-            } else if (x + y * 2) % 11 == 0 {
-                put(
-                    area,
-                    buffer,
-                    x,
-                    y,
-                    "·",
-                    palette.cell_style(SemanticTone::Tone2),
-                );
-            }
-        }
-    }
     for x in 0..area.width {
         put(
             area,
@@ -2130,42 +2022,30 @@ fn render_room_backdrop(area: Rect, buffer: &mut Buffer, palette: ResolvedPalett
             "┈",
             palette.cell_style(SemanticTone::Tone1),
         );
-        put(
-            area,
-            buffer,
-            x,
-            11,
-            "─",
-            palette.cell_style(SemanticTone::Tone1),
-        );
     }
 }
 
-/// Decorative bedroom furniture for the Full layout. Deterministic simple
-/// silhouettes. Placement deliberately avoids the
-/// status bars, pet home, bed, food tray, and poop slots.
+/// Sparse furniture for the narrow Full layout.
 fn render_furniture_full(
     area: Rect,
     buffer: &mut Buffer,
     palette: ResolvedPalette,
     ambience: RoomAmbience,
 ) {
+    if area.width < 80 {
+        return;
+    }
     let window = match ambience {
         RoomAmbience::Day => &WINDOW_FULL_DAY,
         RoomAmbience::Night => &WINDOW_FULL_NIGHT,
     };
-    put_sprite(area, buffer, window, 22, 1, palette);
-    put_sprite(area, buffer, &SHELF_FULL, 40, 2, palette);
-    put_sprite(area, buffer, &WARDROBE_FULL, 62, 3, palette);
-    put_sprite(area, buffer, &DESK_FULL, 42, 7, palette);
-    put_sprite(area, buffer, &PLANTS_FULL, 22, 7, palette);
+    put_sprite(area, buffer, window, 1, 1, palette);
+    put_sprite(area, buffer, &SHELF_FULL, 20, 1, palette);
 }
 
-/// Minimal decoration for the Compact layout: decoration disappears before
-/// care functionality.
+/// Compact keeps only one subdued window cue.
 fn render_furniture_compact(area: Rect, buffer: &mut Buffer, palette: ResolvedPalette) {
     put_sprite(area, buffer, &WINDOW_COMPACT, 22, 0, palette);
-    put_sprite(area, buffer, &PLANTS_COMPACT, 34, 4, palette);
 }
 
 fn need_bar(value: f32) -> String {
@@ -2180,58 +2060,28 @@ fn need_percent(value: f32) -> u8 {
     value.clamp(0.0, 100.0).round() as u8
 }
 
-const WINDOW_FULL_DAY: [&str; 5] = [
-    "╭────────────────╮",
-    "│  ║  ☀  ║  ·  · │",
-    "│  ███  ▄██  ██  │",
-    "│  ███  ▄██  ██  │",
-    "╰────────────────╯",
+const WINDOW_FULL_DAY: [&str; 4] = [
+    "╭──────┬──────────╮",
+    "│  ☀   │          │",
+    "│      └──────────┤",
+    "╰───────┴─────────╯",
 ];
 
-const WINDOW_FULL_NIGHT: [&str; 5] = [
-    "╭────────────────╮",
-    "│  ║  ·  ☾  ║  · │",
-    "│  ██  ▄██  ███  │",
-    "│  ██  ▄██  ███  │",
-    "╰────────────────╯",
+const WINDOW_FULL_NIGHT: [&str; 4] = [
+    "╭──────┬──────────╮",
+    "│      │   ☾      │",
+    "│      └──────────┤",
+    "╰───────┴─────────╯",
 ];
 
 const SHELF_FULL: [&str; 4] = [
-    "╭─┬─────┬─────┬──╮",
-    "│▌▐▌██▌▐▌  ▣██▌▐ │",
-    "│▌▐▌  ─┴███──┴── │",
-    "╰─┴──────────────╯",
-];
-
-const WARDROBE_FULL: [&str; 7] = [
-    "╭──────────╮",
-    "│┌██┐  ┌██┐│",
-    "││·██  ██·││",
-    "││██│  │██││",
-    "│└██┘  └██┘│",
-    "│╲╱╲█╱╲╱╲█╲│",
-    "╰──────────╯",
-];
-
-const DESK_FULL: [&str; 5] = [
-    "╭──────────────────────╮",
-    "│   ╭────────╮   ╱╲    │",
-    "│   │▣▣▣▣▣▣▣│  ╱██╲    │",
-    "│   ╰────────╯   ║█    │",
-    "╰──────────────────────╯",
-];
-
-const PLANTS_FULL: [&str; 5] = [
-    "  ╱█╲   ╱█╲  ",
-    " ╱███╲ ╱███╲ ",
-    "   ██   ██   ",
-    "  ╭██╮ ╭██╮  ",
-    "  ╰──╯ ╰──╯  ",
+    "╭───────────╮",
+    "│    ╱╲     │",
+    "│    ╰╯     │",
+    "╰───────────╯",
 ];
 
 const WINDOW_COMPACT: [&str; 3] = ["┌──────────┐", "│▀▀▀▀▀▀▀▀▀▀│", "└──────────┘"];
-
-const PLANTS_COMPACT: [&str; 3] = ["  ▀  ", " ▀▀▀ ", "┌───┐"];
 
 const BED_FULL: [&str; 4] = [
     "┌──────────────────┐",
@@ -2242,44 +2092,31 @@ const BED_FULL: [&str; 4] = [
 
 const BED_COMPACT: [&str; 2] = ["┌────────┐", "└────────┘"];
 
-/// Wide bed vignette: headboard, pillow, star blanket, and footboard all fit
+/// Wide bed vignette: outline, pillow, blanket, and label all fit
 /// inside the 23-column hit region used by the Full production layout.
 const BED_WIDE: [&str; 7] = [
-    "┌─┐                 ┌─┐",
-    "│ │  ┌───────────┐  │ │",
-    "│ └──┤  pillow   ├──┘ │",
-    "│    └───────────┘    │",
-    "│  * █ * █ * █ * █    │",
+    "┌─────────────────────┐",
+    "│  ┌───────────┐      │",
+    "│  │  pillow   │      │",
+    "│  └───────────┘      │",
+    "│  ────────────────   │",
     "└─────────────────────┘",
-    "  └────── BED ──────┘  ",
+    "       BED             ",
 ];
 
 const BED_COMPACT_WIDE: [&str; 4] = [
-    "┌─┐              ┌─┐",
-    "│ └──────────────┘ │",
-    "│   *  *  *  *     │",
-    "└─────── BED ──────┘",
+    "┌─────────────────────┐",
+    "│  ┌───────────┐      │",
+    "│  ────────────────   │",
+    "│       BED           │",
 ];
 
-const FOOD_BOWL_COMPACT: [&str; 4] = [" ○  ", "◒◒  ", "└─┘ ", "    "];
-const FOOD_BOWL_WIDE: [&str; 4] = ["  ╭──╮ ", " ╱██╲  ", "│█◒█│  ", "╰────╯ "];
-const FOOD_BOWL_COMPACT_WIDE: [&str; 4] = [" ╭─╮ ", "╱◒╲  ", "│◒│  ", "╰─╯  "];
-const POOP_OBJECT_WIDE: [&str; 4] = ["  ╱╲   ", " ╱██╲  ", " ╲██╱  ", "  ╰╯   "];
-const POOP_OBJECT_COMPACT: [&str; 4] = [" ~ ", "(●)", "╰─ ", "   "];
-const SHELF_COMPACT_FULL: [&str; 3] = ["╭───────╮", "│▌▐▌ ▣  │", "╰───────╯"];
-const WARDROBE_COMPACT_FULL: [&str; 3] = ["╭──────╮", "││· · ││", "╰──────╯"];
-const DESK_COMPACT_FULL: [&str; 4] = [
-    "╭──────────────╮",
-    "│ ╭──╮  ╱╲     │",
-    "│ ╰──╯  ║      │",
-    "╰──────────────╯",
-];
-const PLANTS_COMPACT_FULL: [&str; 4] = ["  ╱╲  ╱╲ ", " ╱██╲╱██╲", " ╭─╮ ╭─╮ ", " ╰─╯ ╰─╯ "];
-const RUG_FULL: [&str; 3] = [
-    "╭────────────────╮",
-    "│· · · · · · · · │",
-    "╰────────────────╯",
-];
+const FOOD_KIBBLE: [&str; 4] = ["  ╭─╮", " ╱·╲ ", "│···│", "╰───╯"];
+const FOOD_TREAT: [&str; 4] = ["  ╭─╮", " │≋│ ", " │ │ ", " ╰─╯ "];
+const FOOD_FRUIT: [&str; 4] = ["  ╭╮ ", " ╱●╲ ", " │●│ ", " ╰─╯ "];
+const FOOD_ENERGY: [&str; 4] = ["  ╭─╮", " │+│ ", " │=│ ", " ╰─╯ "];
+const POOP_OBJECT_WIDE: [&str; 3] = [" ╭─╮ ", "╰──╯ ", "  ~  "];
+const POOP_OBJECT_COMPACT: [&str; 3] = [" ╭╮ ", "╰╯  ", " ~  "];
 
 #[cfg(test)]
 mod tests {
@@ -2304,21 +2141,13 @@ mod tests {
             ("WINDOW_FULL_DAY", &WINDOW_FULL_DAY),
             ("WINDOW_FULL_NIGHT", &WINDOW_FULL_NIGHT),
             ("SHELF_FULL", &SHELF_FULL),
-            ("SHELF_COMPACT_FULL", &SHELF_COMPACT_FULL),
-            ("WARDROBE_FULL", &WARDROBE_FULL),
-            ("WARDROBE_COMPACT_FULL", &WARDROBE_COMPACT_FULL),
-            ("DESK_FULL", &DESK_FULL),
-            ("DESK_COMPACT_FULL", &DESK_COMPACT_FULL),
-            ("PLANTS_FULL", &PLANTS_FULL),
-            ("PLANTS_COMPACT_FULL", &PLANTS_COMPACT_FULL),
             ("WINDOW_COMPACT", &WINDOW_COMPACT),
-            ("PLANTS_COMPACT", &PLANTS_COMPACT),
-            ("FOOD_BOWL_COMPACT", &FOOD_BOWL_COMPACT),
-            ("FOOD_BOWL_WIDE", &FOOD_BOWL_WIDE),
-            ("FOOD_BOWL_COMPACT_WIDE", &FOOD_BOWL_COMPACT_WIDE),
+            ("FOOD_KIBBLE", &FOOD_KIBBLE),
+            ("FOOD_TREAT", &FOOD_TREAT),
+            ("FOOD_FRUIT", &FOOD_FRUIT),
+            ("FOOD_ENERGY", &FOOD_ENERGY),
             ("POOP_OBJECT_WIDE", &POOP_OBJECT_WIDE),
             ("POOP_OBJECT_COMPACT", &POOP_OBJECT_COMPACT),
-            ("RUG_FULL", &RUG_FULL),
         ];
         for (name, sprite) in sprites {
             let width = sprite[0].chars().count();
@@ -2424,15 +2253,8 @@ mod tests {
     #[test]
     fn minimal_idle_sprite_keeps_the_complete_mascot_silhouette() {
         assert_eq!(
-            minimal_pet_sprite(PetPose::Idle),
-            [
-                "  #  #   ",
-                " ####### ",
-                "#o..o..##",
-                "#oooooo# ",
-                " ##oo##  ",
-                "  ###    ",
-            ],
+            &minimal_pet_sprite(PetPose::Idle)[..],
+            &pet_sprite_minimal(PetPose::Idle)[..],
             "Minimal should show ears, face, body, and feet in three packed rows"
         );
     }

@@ -465,7 +465,8 @@ fn home_for(area: Rect) -> Position {
         } else {
             area.width.saturating_sub(28).max(4)
         };
-        Position::new(bed_x.saturating_sub(18), 4)
+        let pet_offset = if area.width >= 80 { 20 } else { 18 };
+        Position::new(bed_x.saturating_sub(pet_offset), 4)
     } else if area.height >= 7 {
         let pet_x = if area.width >= 80 {
             2
@@ -513,8 +514,9 @@ mod tests {
 
     #[test]
     fn home_positions_match_room_geometry_anchors() {
-        assert_eq!(home_for(Rect::new(0, 0, 120, 14)), Position::new(78, 4));
-        assert_eq!(home_for(Rect::new(0, 0, 80, 14)), Position::new(38, 4));
+        assert_eq!(home_for(Rect::new(0, 0, 120, 14)), Position::new(76, 4));
+        assert_eq!(home_for(Rect::new(0, 0, 100, 14)), Position::new(56, 4));
+        assert_eq!(home_for(Rect::new(0, 0, 80, 14)), Position::new(36, 4));
         assert_eq!(home_for(Rect::new(0, 0, 70, 14)), Position::new(24, 4));
         assert_eq!(home_for(Rect::new(0, 0, 120, 7)), Position::new(2, 2));
         assert_eq!(home_for(Rect::new(0, 0, 70, 7)), Position::new(18, 2));

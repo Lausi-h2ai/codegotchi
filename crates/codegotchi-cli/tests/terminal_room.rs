@@ -1,8 +1,8 @@
 use chrono::{Duration, Utc};
 use codegotchi_cli::terminal::{
-    PresentationActivity, PresentationFrame, RoomAmbience, RoomRenderOptions, SemanticTone,
-    TerminalThemePreset, auto_style, has_authoritative_nap, presentation_activity, render_room,
-    render_room_with_options, room_geometry,
+    PetPose, PresentationActivity, PresentationFrame, RoomAmbience, RoomRenderOptions,
+    SemanticTone, TerminalThemePreset, auto_style, has_authoritative_nap, presentation_activity,
+    render_room, render_room_with_options, room_geometry,
 };
 use codegotchi_domain::{
     ActivityKind, AgentActivityState, DefaultNeedProgressionStrategy, FoodInventory, FoodKind, Pet,
@@ -58,6 +58,218 @@ fn find_row_text(buffer: &Buffer, width: u16, y: u16, needle: &str) -> Option<u1
             .collect::<String>()
             == needle
     })
+}
+
+fn soft_green_room(area: Rect, snapshot: &SimulationSnapshot) -> Buffer {
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room_with_options(
+        area,
+        &mut buffer,
+        snapshot,
+        &default_frame(),
+        RoomRenderOptions::for_theme(TerminalThemePreset::SoftGreen, RoomAmbience::Day),
+        None,
+    );
+    buffer
+}
+
+fn is_tone3(cell: &Cell) -> bool {
+    cell.style().fg == Some(Color::Rgb(166, 220, 177))
+}
+
+fn random_backdrop_fill_count(buffer: &Buffer, area: Rect) -> usize {
+    (area.y.saturating_add(1)..area.bottom().saturating_sub(2))
+        .flat_map(|y| (area.x..area.right()).map(move |x| (x, y)))
+        .filter(|(x, y)| {
+            buffer.cell((*x, *y)).is_some_and(|cell| {
+                matches!(cell.symbol(), "█" | "▀" | "▄")
+                    && cell.style().fg == Some(Color::Rgb(24, 74, 45))
+            })
+        })
+        .count()
+}
+
+fn largest_tone3_component_is_inside(buffer: &Buffer, pet: Rect) -> bool {
+    let area = buffer.area;
+    let mut tone3 = std::collections::HashSet::new();
+    for y in area.y.saturating_add(1)..area.bottom().saturating_sub(1) {
+        for x in area.x..area.right() {
+            if buffer.cell((x, y)).is_some_and(is_tone3) {
+                tone3.insert((x, y));
+            }
+        }
+    }
+
+    let mut largest = Vec::new();
+    while let Some(start) = tone3.iter().next().copied() {
+        let mut pending = vec![start];
+        let mut component = Vec::new();
+        tone3.remove(&start);
+        while let Some((x, y)) = pending.pop() {
+            component.push((x, y));
+            for neighbor in [
+                (x.saturating_sub(1), y),
+                (x.saturating_add(1), y),
+                (x, y.saturating_sub(1)),
+                (x, y.saturating_add(1)),
+            ] {
+                if tone3.remove(&neighbor) {
+                    pending.push(neighbor);
+                }
+            }
+        }
+        if component.len() > largest.len() {
+            largest = component;
+        }
+    }
+
+    !largest.is_empty()
+        && largest
+            .into_iter()
+            .all(|(x, y)| pet.contains(Position::new(x, y)))
+}
+
+fn tone3_count_outside_targets(
+    buffer: &Buffer,
+    geometry: &codegotchi_cli::terminal::RoomGeometry,
+) -> usize {
+    let area = buffer.area;
+    (area.y.saturating_add(1)..area.bottom().saturating_sub(1))
+        .flat_map(|y| (area.x..area.right()).map(move |x| (x, y)))
+        .filter(|(x, y)| {
+            let point = Position::new(*x, *y);
+            let care_target = geometry.pet.contains(point)
+                || geometry.bed.is_some_and(|bed| bed.contains(point))
+                || geometry
+                    .food_sources
+                    .iter()
+                    .any(|source| source.rect.contains(point))
+                || geometry.poops.iter().any(|(_, rect)| rect.contains(point));
+            !care_target && buffer.cell(point).is_some_and(is_tone3)
+        })
+        .count()
+}
+
+fn has_two_column_clearance_around_pet(buffer: &Buffer, pet: Rect) -> bool {
+    let area = buffer.area;
+    let clear = |x: u16, y: u16| {
+        if x < area.x || x >= area.right() || y < area.y || y >= area.bottom() {
+            return true;
+        }
+        buffer
+            .cell((x, y))
+            .is_none_or(|cell| matches!(cell.symbol(), " " | "┈" | "─"))
+    };
+    (pet.y..pet.bottom()).all(|y| {
+        [pet.x.saturating_sub(2), pet.x.saturating_sub(1)]
+            .into_iter()
+            .chain([pet.right(), pet.right().saturating_add(1)])
+            .all(|x| clear(x, y))
+    })
+}
+
+fn non_empty_cells(buffer: &Buffer, rect: Rect) -> usize {
+    (rect.y..rect.bottom())
+        .flat_map(|y| (rect.x..rect.right()).map(move |x| (x, y)))
+        .filter(|(x, y)| {
+            buffer
+                .cell((*x, *y))
+                .is_some_and(|cell| cell.symbol() != " ")
+        })
+        .count()
+}
+
+#[test]
+fn responsive_mascots_stay_inside_pet_geometry_at_supported_widths() {
+    let snapshot = base_snapshot(Utc::now());
+    let poses = [
+        PetPose::Idle,
+        PetPose::Blink,
+        PetPose::WalkA,
+        PetPose::WalkB,
+        PetPose::Sit,
+        PetPose::Doze,
+        PetPose::Yawn,
+        PetPose::Curious,
+        PetPose::Happy,
+        PetPose::Upset,
+        PetPose::Eating,
+        PetPose::Petted,
+        PetPose::Sleep,
+    ];
+
+    for pose in poses {
+        let frame = PresentationFrame {
+            pose,
+            offset: (0, 0),
+        };
+
+        for width in [24, 32, 40, 80, 120] {
+            let area = Rect::new(0, 0, width, 7);
+            let geometry = room_geometry(area, &snapshot);
+            assert_eq!(
+                geometry.pet.width, 12,
+                "Compact {pose:?} pet width at {width} columns"
+            );
+            assert_eq!(
+                geometry.pet.height, 5,
+                "Compact {pose:?} pet height at {width} columns"
+            );
+            assert!(geometry.pet.right() <= area.right());
+            assert!(geometry.pet.bottom() <= area.bottom());
+
+            let mut buffer = Buffer::filled(area, Cell::new(" "));
+            render_room_with_options(
+                area,
+                &mut buffer,
+                &snapshot,
+                &frame,
+                RoomRenderOptions::for_theme(TerminalThemePreset::SoftGreen, RoomAmbience::Day),
+                None,
+            );
+            assert!(
+                non_empty_cells(&buffer, geometry.pet) > 0,
+                "Compact {pose:?} mascot is empty at {width} columns"
+            );
+            assert!(
+                largest_tone3_component_is_inside(&buffer, geometry.pet),
+                "Compact {pose:?} mascot extends outside its hitbox at {width} columns"
+            );
+        }
+
+        for width in [24, 32, 40, 80, 120] {
+            let area = Rect::new(0, 0, width, 3);
+            let geometry = room_geometry(area, &snapshot);
+            assert_eq!(
+                geometry.pet.width, 9,
+                "Minimal {pose:?} pet width at {width} columns"
+            );
+            assert_eq!(
+                geometry.pet.height, 3,
+                "Minimal {pose:?} pet height at {width} columns"
+            );
+            assert!(geometry.pet.right() <= area.right());
+            assert!(geometry.pet.bottom() <= area.bottom());
+
+            let mut buffer = Buffer::filled(area, Cell::new(" "));
+            render_room_with_options(
+                area,
+                &mut buffer,
+                &snapshot,
+                &frame,
+                RoomRenderOptions::for_theme(TerminalThemePreset::SoftGreen, RoomAmbience::Day),
+                None,
+            );
+            assert!(
+                non_empty_cells(&buffer, geometry.pet) > 0,
+                "Minimal {pose:?} mascot is empty at {width} columns"
+            );
+            assert!(
+                largest_tone3_component_is_inside(&buffer, geometry.pet),
+                "Minimal {pose:?} mascot extends outside its hitbox at {width} columns"
+            );
+        }
+    }
 }
 
 /// The presentation mapping must be exact and exhaustive: current aggregate
@@ -214,10 +426,17 @@ fn sleeping_without_active_nap_never_uses_the_recovery_bed() {
         nap_text.contains("z z z"),
         "authoritative nap must render the recovery-sleep indicator"
     );
-    assert_eq!(
-        nap_buffer[(25, 9)].symbol(),
-        "█",
-        "authoritative nap places the pet body on the bed mattress"
+    let nap_pet = room_geometry(area, &bed_nap).pet;
+    let nap_region_differences = (nap_pet.y..nap_pet.bottom())
+        .flat_map(|y| (nap_pet.x..nap_pet.right()).map(move |x| (x, y)))
+        .filter(|(x, y)| {
+            nap_buffer.cell((*x, *y)).map(Cell::symbol)
+                != doze_buffer.cell((*x, *y)).map(Cell::symbol)
+        })
+        .count();
+    assert!(
+        nap_region_differences > 0,
+        "authoritative nap must draw a distinct sleep mascot in its bed pet region"
     );
 }
 
@@ -313,10 +532,9 @@ fn need_display_uses_domain_scale_gradually() {
     }
 }
 
-/// The Full bedroom renders the decorative furniture specified by the design
-/// (window, shelf, wardrobe, desk, plants) without replacing care objects.
+/// Full keeps a quiet room frame around the mascot and care targets.
 #[test]
-fn full_room_renders_decorative_furniture() {
+fn full_room_renders_quiet_hierarchy_furniture() {
     let snapshot = base_snapshot(Utc::now());
     let full = Rect::new(0, 0, 120, 14);
     let mut buffer = Buffer::filled(full, Cell::new(" "));
@@ -326,27 +544,18 @@ fn full_room_renders_decorative_furniture() {
         buffer.cell((0, 6)).expect("wall-floor divider").symbol(),
         "┈"
     );
-    assert_eq!(buffer.cell((0, 11)).expect("floor baseline").symbol(), "─");
-    assert_eq!(buffer.cell((27, 1)).expect("window frame").symbol(), "╭");
+    assert_eq!(buffer.cell((0, 11)).expect("open floor").symbol(), " ");
+    assert_eq!(
+        buffer.cell((1, 1)).expect("window-desk frame").symbol(),
+        "╭"
+    );
     assert!(text.contains("☀"), "day window needs a sun marker: {text}");
-    assert_eq!(buffer.cell((48, 2)).expect("shelf book").symbol(), "▌");
+    assert!(text.contains("╱╲"), "shelf needs one plant cue: {text}");
     assert!(
-        text.contains("▣"),
-        "shelf or desk needs readable objects: {text}"
+        !text.contains("▣"),
+        "decorative furniture must stay sparse: {text}"
     );
-    assert_eq!(buffer.cell((68, 3)).expect("wardrobe handle").symbol(), "·");
-    assert!(
-        text.contains("╲╱"),
-        "wardrobe needs hanging-clothing detail: {text}"
-    );
-    assert!(text.contains("╱╲"), "desk needs a lamp silhouette: {text}");
-    assert!(
-        text.contains("▣▣▣"),
-        "desk needs a laptop silhouette: {text}"
-    );
-    assert_eq!(buffer.cell((40, 9)).expect("plant leaf").symbol(), "█");
-    assert_eq!(buffer.cell((40, 11)).expect("plant pot").symbol(), "╭");
-    assert_eq!(buffer.cell((36, 7)).expect("rug frame").symbol(), "╭");
+    assert!(!text.contains("╲╱╲╱"), "wardrobe must be removed: {text}");
     assert_eq!(buffer.cell((96, 5)).expect("bed headboard").symbol(), "┌");
     assert!(text.contains("pillow"), "bed needs a pillow marker: {text}");
     assert!(
@@ -396,26 +605,16 @@ fn full_mascot_and_care_targets_have_release_geometry() {
 }
 
 #[test]
-fn full_room_has_layered_object_density_beyond_outline_boxes() {
+fn full_room_has_a_quiet_visual_hierarchy() {
     let snapshot = base_snapshot(Utc::now());
     let area = Rect::new(0, 0, 120, 14);
     let geometry = room_geometry(area, &snapshot);
-    let mut buffer = Buffer::filled(area, Cell::new(" "));
-    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let buffer = soft_green_room(area, &snapshot);
 
-    let room_pixels = (0..area.width)
-        .flat_map(|x| (0..area.height.saturating_sub(1)).map(move |y| (x, y)))
-        .filter(|&(x, y)| {
-            !geometry.pet.contains(Position::new(x, y))
-                && buffer
-                    .cell((x, y))
-                    .is_some_and(|cell| matches!(cell.symbol(), "█" | "▀" | "▄"))
-        })
-        .count();
-    assert!(
-        room_pixels >= 110,
-        "layered furniture and floor objects need filled pixels, got {room_pixels}"
-    );
+    assert_eq!(random_backdrop_fill_count(&buffer, area), 0);
+    assert!(largest_tone3_component_is_inside(&buffer, geometry.pet));
+    assert!(tone3_count_outside_targets(&buffer, &geometry) < 48);
+    assert!(has_two_column_clearance_around_pet(&buffer, geometry.pet));
 }
 
 #[test]
@@ -430,13 +629,13 @@ fn full_bed_sprite_fits_its_23_column_hitbox() {
     let mut buffer = Buffer::filled(area, Cell::new(" "));
     render_room(area, &mut buffer, &snapshot, &default_frame(), None);
     let expected_rows = [
-        "┌─┐                 ┌─┐",
-        "│ │  ┌───────────┐  │ │",
-        "│ └──┤  pillow   ├──┘ │",
-        "│    └───────────┘    │",
-        "│  * █ * █ * █ * █    │",
+        "┌─────────────────────┐",
+        "│  ┌───────────┐      │",
+        "│  │  pillow   │      │",
+        "│  └───────────┘      │",
+        "│  ────────────────   │",
         "└─────────────────────┘",
-        "  └────── BED ──────┘  ",
+        "       BED             ",
     ];
     for (row, expected) in expected_rows.iter().enumerate() {
         let rendered: String = (bed.x..bed.right())
@@ -466,7 +665,7 @@ fn full_eighty_column_geometry_keeps_care_objects_between_furniture() {
     let bed = geometry.bed.expect("Full always has a bed");
     assert_eq!(bed.x, 56);
     assert!(geometry.pet.right() <= bed.x);
-    assert_eq!(geometry.poops.len(), 1);
+    assert_eq!(geometry.poops.len(), 0);
     for source in &geometry.food_sources {
         assert!(!rects_overlap(geometry.pet, source.rect));
         assert!(
@@ -485,13 +684,144 @@ fn full_eighty_column_geometry_keeps_care_objects_between_furniture() {
     render_room(area, &mut buffer, &snapshot, &default_frame(), None);
     let text = buffer_text(&buffer, area.width, area.height);
     assert!(
-        text.contains("▣"),
-        "compact furniture must retain shelf detail"
+        text.contains("☀") || text.contains("☾"),
+        "compact furniture must retain a sparse window cue"
     );
-    assert!(
-        text.contains("╱╲"),
-        "compact furniture must retain a lamp cue"
+}
+
+#[test]
+fn wide_full_poops_fit_the_actual_pantry_to_pet_interval() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    let poop_ids = [
+        Uuid::from_u128(101),
+        Uuid::from_u128(102),
+        Uuid::from_u128(103),
+    ];
+    for id in poop_ids {
+        snapshot.pending_poops.push(Poop::new(id, now));
+    }
+
+    let width120 = Rect::new(0, 0, 120, 14);
+    let width120_geometry = room_geometry(width120, &snapshot);
+    assert_eq!(
+        width120_geometry
+            .poops
+            .iter()
+            .map(|(_, rect)| rect.x)
+            .collect::<Vec<_>>(),
+        [52, 59, 66]
     );
+
+    let widths = std::iter::once(100_u16).chain(80..=99).chain(101..=121);
+    for width in widths {
+        let area = Rect::new(0, 0, width, 14);
+        let geometry = room_geometry(area, &snapshot);
+        let bed = geometry.bed.expect("Full always has a bed");
+        let food_right = geometry
+            .food_sources
+            .last()
+            .expect("starter inventory has food")
+            .rect
+            .right();
+        let poop_start = food_right.saturating_add(2);
+        let poop_width = 5;
+        let poop_spacing = 7;
+        let available_poops =
+            if poop_start.saturating_add(poop_width) > geometry.pet.x.saturating_sub(2) {
+                0
+            } else {
+                usize::from(
+                    geometry
+                        .pet
+                        .x
+                        .saturating_sub(2)
+                        .saturating_sub(poop_start.saturating_add(poop_width))
+                        / poop_spacing,
+                ) + 1
+            };
+        let expected_poops = available_poops.min(poop_ids.len());
+
+        assert_eq!(
+            geometry.poops.len(),
+            expected_poops,
+            "wide Full should use the available interval at width {width}"
+        );
+        assert_eq!(
+            geometry.poops.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            poop_ids[..expected_poops],
+            "wide Full must preserve poop target order at width {width}"
+        );
+
+        let targets = geometry
+            .food_sources
+            .iter()
+            .map(|source| source.rect)
+            .chain([geometry.pet, bed])
+            .chain(geometry.poops.iter().map(|(_, rect)| *rect))
+            .collect::<Vec<_>>();
+        for (index, first) in targets.iter().enumerate() {
+            for second in targets.iter().skip(index + 1) {
+                assert!(
+                    !rects_overlap(*first, *second),
+                    "wide Full care targets overlap at width {width}: {first:?} and {second:?}"
+                );
+            }
+        }
+        assert!(
+            geometry.poops.iter().all(|(_, poop)| {
+                poop.right() <= area.right() && poop.bottom() <= area.bottom()
+            })
+        );
+        assert!(bed.x >= geometry.pet.right().saturating_add(2));
+
+        if let Some((_, last_poop)) = geometry.poops.last() {
+            assert!(
+                last_poop.right().saturating_add(2) <= geometry.pet.x,
+                "wide Full needs two clear columns before the pet at width {width}: poop={last_poop:?} pet={:?}",
+                geometry.pet
+            );
+            let mut buffer = Buffer::filled(area, Cell::new(" "));
+            render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+            assert!(
+                has_two_column_clearance_around_pet(&buffer, geometry.pet),
+                "wide Full pet clearance is not visible at width {width}"
+            );
+        }
+    }
+
+    let area = Rect::new(0, 0, 100, 14);
+    let geometry = room_geometry(area, &snapshot);
+    assert_eq!(geometry.pet.x, 56);
+    assert_eq!(geometry.poops.len(), 2);
+    let last_poop = geometry
+        .poops
+        .last()
+        .expect("width 100 has a second poop")
+        .1;
+    assert!(last_poop.right().saturating_add(2) <= geometry.pet.x);
+
+    let mut without_poops = base_snapshot(now);
+    without_poops.pending_poops.clear();
+    let mut clear_buffer = Buffer::filled(area, Cell::new(" "));
+    let mut poop_buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(
+        area,
+        &mut clear_buffer,
+        &without_poops,
+        &default_frame(),
+        None,
+    );
+    render_room(area, &mut poop_buffer, &snapshot, &default_frame(), None);
+    for y in geometry.pet.y..geometry.pet.bottom() {
+        for x in geometry.pet.x..geometry.pet.right() {
+            assert_eq!(
+                poop_buffer.cell((x, y)).expect("poop pet cell").symbol(),
+                clear_buffer.cell((x, y)).expect("clear pet cell").symbol(),
+                "width-100 poop rendering must not erase the pet at ({x}, {y})"
+            );
+        }
+    }
 }
 
 fn rects_overlap(first: Rect, second: Rect) -> bool {
@@ -501,7 +831,7 @@ fn rects_overlap(first: Rect, second: Rect) -> bool {
         && second.y < first.bottom()
 }
 
-/// Compact keeps at least a window and a plant; decoration disappears before
+/// Compact keeps one subdued window cue; Full-only furniture disappears before
 /// care functionality.
 #[test]
 fn compact_room_keeps_window_decoration() {
@@ -661,8 +991,12 @@ fn compact_decorations_are_separate_from_care_targets() {
     let window_x =
         find_row_text(&buffer, area.width, 2, "┌──────────┐").expect("Compact window border");
     let window = Rect::new(window_x, 2, 12, 3);
-    let plant_x = find_row_text(&buffer, area.width, 6, "┌───┐").expect("Compact plant pot");
-    let plants = Rect::new(plant_x, 4, 5, 3);
+    let text = buffer_text(&buffer, area.width, area.height);
+    assert!(!text.contains("┌───┐"), "Compact must remove the plant cue");
+    assert!(
+        !text.contains("╭──────────────╮"),
+        "Compact must remove the Full desk"
+    );
     for target in geometry
         .food_sources
         .iter()
@@ -672,10 +1006,6 @@ fn compact_decorations_are_separate_from_care_targets() {
         assert!(
             !rects_overlap(window, target),
             "window overlaps care target {target:?}"
-        );
-        assert!(
-            !rects_overlap(plants, target),
-            "plants overlap care target {target:?}"
         );
     }
 }
@@ -1483,7 +1813,7 @@ fn wide_room_keeps_named_targets_and_minimal_keeps_a_pet_mark() {
             .cell((poop.x + 1, poop.y + 1))
             .expect("poop body")
             .symbol(),
-        "╱"
+        "─"
     );
     assert!(
         full_text.contains("pillow") && full_text.contains("BED"),
@@ -1563,10 +1893,11 @@ fn rendered_care_extents_are_inside_their_hit_regions() {
             } else {
                 format!("FOOD x{}", food.count)
             };
-            let food_rows = if area.height >= 14 {
-                ["  ╭──╮ ", " ╱██╲  ", "│█◒█│  ", label.as_str()]
-            } else {
-                [" ○  ", "◒◒  ", "└─┘ ", label.as_str()]
+            let food_rows = match food_kind {
+                FoodKind::Kibble => ["  ╭─╮", " ╱·╲ ", "│···│"],
+                FoodKind::Treat => ["  ╭─╮", " │≋│ ", " │ │ "],
+                FoodKind::Fruit => ["  ╭╮ ", " ╱●╲ ", " │●│ "],
+                FoodKind::EnergyDrink => ["  ╭─╮", " │+│ ", " │=│ "],
             };
             for (row, symbols) in food_rows.iter().enumerate() {
                 for (offset, symbol) in symbols.chars().enumerate() {
@@ -1589,6 +1920,19 @@ fn rendered_care_extents_are_inside_their_hit_regions() {
                     );
                 }
             }
+            let label_y = food.rect.y.saturating_add(3);
+            for (offset, symbol) in label.chars().enumerate() {
+                let point = Position::new(
+                    food.rect.x.saturating_add(u16::try_from(offset).unwrap()),
+                    label_y,
+                );
+                assert_eq!(
+                    buffer.cell(point).expect("rendered food label").symbol(),
+                    symbol.to_string(),
+                    "food label must be rendered at its geometry anchor"
+                );
+                assert!(food.rect.contains(point));
+            }
         }
     }
 
@@ -1605,9 +1949,9 @@ fn rendered_care_extents_are_inside_their_hit_regions() {
         // fixture describes the final rendered cells rather than the source
         // sprite in isolation.
         let poop_rows = if area.height >= 14 {
-            ["  ╱╲   ", " ╱██╲  ", " ╲██╱  ", "POOP"]
+            [" ╭─╮ ", "╰──╯ ", "  ~  "]
         } else {
-            [" ~ ", "(●)", "╰─ ", "POOP"]
+            [" ╭╮ ", "╰╯  ", " ~  "]
         };
         for (row, symbols) in poop_rows.iter().enumerate() {
             for (offset, symbol) in symbols.chars().enumerate() {
@@ -1628,6 +1972,18 @@ fn rendered_care_extents_are_inside_their_hit_regions() {
                     "poop hit region must contain every rendered sprite cell: rect={poop:?} point={point:?}"
                 );
             }
+        }
+        for (offset, symbol) in "POOP".chars().enumerate() {
+            let point = Position::new(
+                poop.x.saturating_add(u16::try_from(offset).unwrap()),
+                poop.y.saturating_add(3),
+            );
+            assert_eq!(
+                buffer.cell(point).expect("rendered poop label").symbol(),
+                symbol.to_string(),
+                "poop label must be rendered at its geometry anchor"
+            );
+            assert!(poop.contains(point));
         }
     }
 }
