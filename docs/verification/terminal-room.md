@@ -2,21 +2,19 @@
 
 Status: **FAIL / BLOCKED**
 
-Current hardening source SHA: `2557115dfa26ac6a425ae199e9ef32a7fea06d31`.
-Visual-capture source SHA: `c8371251de26db2cf9d5795873ee95c33ccd4800`.
-The PNG hashes below are tied to the visual-capture SHA, not silently promoted
-to fresh captures for the current hardening commit. No push or PR metadata
-change was made.
+Ledger refreshed: **2026-08-24**.
+Current release source SHA: `8843ce94d464009319f54ab970f59882e8b6e3fe`.
 
-The lower-pane visual gate is complete and clean. Final release status remains
-FAIL/BLOCKED only because the required populated live official-Codex session
-has not been accepted and hosted CI has not run on an authorized push.
+This SHA contains the August 24 renderer refresh, the approved PNG set, and
+the matching visual-evidence READMEs. The lower-pane visual gate and the fresh
+local matrix are green. Final release status remains FAIL/BLOCKED because the
+required populated live official-Codex session is still unavailable and the
+hosted workflow for this exact SHA completed with failures.
 
 ## Fresh local matrix
 
-The Rust and web gates below were run against the current hardening tree whose
-code is committed at the exact SHA above. The fixture row retains its explicit
-older visual-capture provenance.
+The following gates were rerun on 2026-08-24 against the exact current release
+source SHA above:
 
 | Gate | Result | Evidence |
 |---|---|---|
@@ -26,32 +24,20 @@ older visual-capture provenance.
 | `cargo test -p codegotchi-cli --test terminal_room authoritative_sleep_hitbox -- --nocapture` | PASS; 2 tests | Full and Compact bed-sleep hitboxes match their rendered sprites. |
 | `cargo test -p codegotchi-cli --lib browser_helper_timeout_terminates_a_stuck_native_wait --no-fail-fast` | PASS | Native browser-helper wait terminates within the injected deadline. |
 | `cargo test -p codegotchi-cli --lib response_read_has_an_outer_deadline_when_peer_dribbles_bytes --no-fail-fast` | PASS | Debug-hook transport rejects a dribbled response at its outer deadline. |
-| `CRATE_CC_NO_DEFAULTS=1 cargo check -p codegotchi-cli --target x86_64-apple-darwin` | PASS | Final-validation artifact `/home/laurent/codegotchi/.superpowers/sdd/2026-08-20-terminal-room-release-hardening/final-validation/final-abfd7ce/macos-cfg.log` reaches and passes Rust cfg/type checking. |
 | `corepack pnpm test` | PASS; 123 tests | Fresh web test run. |
 | `corepack pnpm lint` | PASS | Fresh web lint run. |
 | `corepack pnpm format:check` | PASS | Fresh web format run. |
 | `corepack pnpm build` | PASS | Fresh production web build. |
 | `node web/scripts/embed-web.mjs` | PASS | Embedded production bundle unchanged after the fresh build. |
-| `corepack pnpm playwright:test:production` | PASS; 17 tests | Fresh production Playwright run; no retry classification. |
-| `final idle-travel/roll stress (10 runs)` | PASS; 10/10 | Final-validation artifact `/home/laurent/codegotchi/.superpowers/sdd/2026-08-20-terminal-room-release-hardening/final-validation/final-abfd7ce/idle-stress.log` records `PASS 1` through `PASS 10`. |
-| `cargo build -p codegotchi-cli --example terminal_room_fixture` | PASS | The eight captures were built from visual-capture SHA `c8371251de26db2cf9d5795873ee95c33ccd4800`; no new capture is claimed for `2557115dfa26ac6a425ae199e9ef32a7fea06d31`. |
+| `corepack pnpm playwright:test:production` | PASS; 17 tests | Fresh local production Playwright run. |
 
-The final Apple cfg check passed with `CRATE_CC_NO_DEFAULTS=1`; this proves the
-Rust cfg/type path only and does not execute macOS runtime behavior. The hosted
-Apple runtime/production-shared PTY smoke remains **UNAVAILABLE / NOT CLAIMED**;
-the source uses rustix's `waitid(WNOWAIT)` pre-reap probe and includes a
-macOS-only unit regression, but no hosted macOS execution was available here.
-
-The final-validation artifact also records ten consecutive deterministic
-idle-travel/roll runs, all passing. This is local browser stress evidence only;
-it does not claim live official-Codex acceptance or hosted release gates.
+These local results do not override the failed hosted checks described below.
+In particular, a Linux run cannot establish macOS runtime behavior.
 
 ## Visual evidence
 
-The six current-state PNGs are recorded in
-[`docs/mockups/current/README.md`](../mockups/current/README.md). The final
-verification set is recorded in
-[`terminal-room/README.md`](terminal-room/README.md) and contains:
+The authoritative lower-pane set is the eight-image August 24 capture set in
+[`terminal-room/README.md`](terminal-room/README.md):
 
 - [`full-120x45-light.png`](terminal-room/full-120x45-light.png)
 - [`full-120x45-dark.png`](terminal-room/full-120x45-dark.png)
@@ -62,46 +48,60 @@ verification set is recorded in
 - [`auto-120x45-light.png`](terminal-room/auto-120x45-light.png)
 - [`auto-120x45-dark.png`](terminal-room/auto-120x45-dark.png)
 
-All eight images were recaptured from the production compositor on
-2026-08-22, opened directly, and verified as non-empty RGB PNGs at their
-expected pixel dimensions. The lower-pane adjudication is **PASS**: Full has
-the larger focal mascot and layered furniture, Compact reads as a pet vignette,
-Minimal retains the mascot and core care targets, Auto is readable on both
-host polarities, and bed sleep remains distinct from floor doze. No visible
-half-block seam, capture artifact, or care-target clipping was found.
+The files were captured on 2026-08-24 from an uncommitted working tree based
+on `1f0f8db0aca15bc172a12e508bad2ceee3665575`. The captured product-source
+diff was recorded as
+`4645edebe436968a9baa55b786893bcc5151de6e9c74060b0b6ed6aad42391aa`.
+Recomputing the binary diff from that base to the five product-source files in
+`8843ce94d464009319f54ab970f59882e8b6e3fe` produces the same hash. The
+committed product sources therefore match the recorded capture source; the
+capture is not being inferred from commit time alone.
 
-The fixture intentionally leaves the upper pane blank because it is
-Codex-free. That is not a lower-pane visual defect and is not presented as
-live acceptance evidence.
+All eight promoted files are non-empty native-resolution PNGs, and their
+SHA-256 hashes match the approved table in the linked README. The lower-pane
+adjudication is **PASS**: the refreshed mascot is recognizable and leads the
+visual hierarchy; named and Auto themes remain readable on both host
+polarities; Full, Compact, and Minimal remain complete; bed sleep remains
+distinct from floor doze; and no seam, clipping, collision, or capture
+artifact was found.
 
-Exact source SHA, fixture substitutions, dimensions, hashes, host polarity,
-and capture environment are recorded in the two linked README files rather
-than inferred from older screenshots.
+The six matching named-state files and their hashes are recorded in
+[`docs/mockups/current/README.md`](../mockups/current/README.md). The fixture
+intentionally leaves the upper pane blank because it has no real Codex
+process. That is not a lower-pane defect and is not presented as live-session
+acceptance evidence.
 
 ## Live official-Codex acceptance
 
 The durable record is
 [`terminal-room/live-codex/task-7-round1-blocked.txt`](terminal-room/live-codex/task-7-round1-blocked.txt).
-The harness correctly fails fast when private Xvfb has no supported lightweight
-window manager and does not claim prompt/editing, bracketed paste, focus or
-mouse reporting, model/tool activity, approval/review, Full → Compact →
-Minimal → Full Codex resize handling, final pet completion, or terminal-control
-restoration receipts. The retained fixture/live attempts do not contain a
-populated accepted Codex interaction frame. This gate remains **BLOCKED**; no
-bearer token or auth contents are included in the evidence.
+The harness correctly fails fast when private Xvfb has no supported
+lightweight window manager and does not claim prompt/editing, bracketed paste,
+focus or mouse reporting, model/tool activity, approval/review, Full → Compact
+→ Minimal → Full Codex resize handling, final pet completion, or
+terminal-control restoration receipts. The retained fixture/live attempts do
+not contain a populated accepted Codex interaction frame. This gate remains
+**BLOCKED**; no bearer token or auth contents are included in the evidence.
 
-## Hosted CI and PR boundary
+## Hosted CI
 
-No fresh hosted workflow exists for the exact hardening source SHA because no
-push was authorized in this worker. Hosted Ubuntu Rust, hosted macOS Rust
-(including the production-shared PTY smoke), and hosted web checks are
-**UNAVAILABLE / NOT CLAIMED**. No PR title, body, labels, or other metadata
-were changed.
+Hosted CI did run for the exact current release source SHA. Push workflow
+[`32729444290`](https://github.com/Lausi-h2ai/codegotchi/actions/runs/32729444290)
+completed on 2026-08-24 with overall result **FAILURE**:
 
-The local implementation and lower-pane visual evidence are green. The final
-release status intentionally remains **FAIL / BLOCKED** only for the missing
-populated live official-Codex acceptance and the unavailable hosted-CI gate.
+| Hosted job | Result | Evidence |
+|---|---|---|
+| Rust checks (Ubuntu) | PASS | Formatting, clippy, and Rust workspace tests passed. |
+| Rust checks (macOS) | FAIL | Formatting and clippy passed. Workspace tests failed in `authenticated_loopback_http_is_authoritative_and_replay_safe` with a connection reset and in `production_hook_reaches_authoritative_state_and_parses_the_server_response` because the processed-event assertion was not satisfied. The outer PTY smoke was skipped after the test failure. |
+| Web checks | FAIL | Unit tests, lint, formatting, build, and bundle embedding passed. The production Playwright step failed: the feed flow required a retry and the energy-drink flow did not observe `Eating an energy drink` within its timeout after retry. |
+
+Hosted Ubuntu is green, but the hosted macOS workspace tests and production
+browser gate are not green, and the skipped macOS production-shared PTY smoke
+has not been established as green. The final release status cannot be promoted
+while those failures and the populated live-Codex acceptance gate remain
+unresolved.
 
 Historical Task 5/7/8 records remain in
-[`terminal-room-codex-pty.md`](terminal-room-codex-pty.md) and Git history;
-their older source SHAs and screenshots are not evidence for this source.
+[`terminal-room-codex-pty.md`](terminal-room-codex-pty.md) and Git history.
+Their older source SHAs and screenshots are historical evidence only and are
+not the release evidence for `8843ce94d464009319f54ab970f59882e8b6e3fe`.
