@@ -577,13 +577,7 @@ fn metadata_directory_modes_stale_cleanup_and_unrelated_files_are_safe() {
     let stale = runtime.join(format!("session-{stale_id}.json"));
     write_metadata(
         &stale,
-        &RuntimeMetadataV1::new(
-            stale_id,
-            &cwd,
-            "http://127.0.0.1:1",
-            "stale-token",
-            u32::MAX,
-        ),
+        &RuntimeMetadataV1::new(stale_id, &cwd, "http://127.0.0.1:1", "stale-token", 1),
     )
     .unwrap();
     let unrelated_filename_id = Uuid::new_v4();
@@ -596,7 +590,7 @@ fn metadata_directory_modes_stale_cleanup_and_unrelated_files_are_safe() {
             &cwd,
             "http://127.0.0.1:1",
             "unrelated-token",
-            u32::MAX,
+            1,
         ),
     )
     .unwrap();

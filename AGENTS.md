@@ -32,3 +32,11 @@ When cleaning up stray processes, follow these rules:
    check that the tool returns normally. If the exec is aborted or no result
    comes back, the session may have killed itself — stop cleanup work and
    reassess the harness state before continuing.
+
+## Visual change completion gate
+
+Any change that affects rendered visuals must be exercised through the real
+end-to-end production path and visually inspected at every relevant supported
+layout, size, theme, and state before the work may be called complete. Automated
+rendering or snapshot tests alone are not sufficient. Record the inspected
+artifacts and any remaining coverage gaps in the final verification ledger.

@@ -2,19 +2,26 @@
 
 Status: **FAIL / BLOCKED**
 
-Ledger refreshed: **2026-08-24**.
-Current release source SHA: `8843ce94d464009319f54ab970f59882e8b6e3fe`.
+Ledger refreshed: **2026-08-25**.
+Current corrective working tree: based on
+`2d08945353df262ce0f1710834d7b4da748b1461`; corrective code-and-test binary
+diff SHA-256: `425068360099c8972668aad0025f756b90fd81b3275a2b2437c11e0837900f69`.
+The fingerprint covers the five modified files under `crates/` and excludes
+documentation, so updating this ledger does not invalidate its own provenance.
 
-This SHA contains the August 24 renderer refresh, the approved PNG set, and
-the matching visual-evidence READMEs. The lower-pane visual gate, populated
-live official-Codex gate, and fresh local matrix are green. Final release
-status remains FAIL/BLOCKED only because the hosted workflow for this exact
-SHA completed with failures.
+This corrective wave fixes the Full-room 80/81-column cleaning regression,
+restores the sparse window/desk silhouette, amends the normative bedroom
+specification, and replaces Linux-only runtime-liveness probing with portable
+Unix signal-zero probing. The local matrix and production visual review pass.
+The release remains blocked because hosted Ubuntu/macOS/web checks have not run
+against this corrective tree, the macOS raw-HTTP and PTY integration gates have
+not been rerun, and live Codex acceptance plus final promoted screenshots must
+be captured from the eventual committed SHA.
 
 ## Fresh local matrix
 
-The following gates were rerun on 2026-08-24 against the exact current release
-source SHA above:
+The following gates were rerun on 2026-08-25 against the exact corrective
+working tree identified above:
 
 | Gate | Result | Evidence |
 |---|---|---|
@@ -29,15 +36,16 @@ source SHA above:
 | `corepack pnpm format:check` | PASS | Fresh web format run. |
 | `corepack pnpm build` | PASS | Fresh production web build. |
 | `node web/scripts/embed-web.mjs` | PASS | Embedded production bundle unchanged after the fresh build. |
-| `corepack pnpm playwright:test:production` | PASS; 17 tests | Fresh local production Playwright run. |
+| `corepack pnpm playwright:test:production` | PASS; 17 tests | Fresh embedded-production browser run. |
+| Production visual fixture review | PASS | Real production `terminal_room_fixture` rendered in xterm on Xvfb and was screenshot-inspected at 80 and 120 columns; the desk cue is visible and the 80-column fallback poop is cleanable and unclipped. |
 
-These local results do not override the failed hosted checks described below.
+These local results do not establish hosted release readiness.
 In particular, a Linux run cannot establish macOS runtime behavior.
 
 ## Visual evidence
 
-The authoritative lower-pane set is the eight-image August 24 capture set in
-[`terminal-room/README.md`](terminal-room/README.md):
+The August 24 promoted set in [`terminal-room/README.md`](terminal-room/README.md)
+is now **historical, not authoritative**:
 
 - [`full-120x45-light.png`](terminal-room/full-120x45-light.png)
 - [`full-120x45-dark.png`](terminal-room/full-120x45-dark.png)
@@ -57,13 +65,10 @@ Recomputing the binary diff from that base to the five product-source files in
 committed product sources therefore match the recorded capture source; the
 capture is not being inferred from commit time alone.
 
-All eight promoted files are non-empty native-resolution PNGs, and their
-SHA-256 hashes match the approved table in the linked README. The lower-pane
-adjudication is **PASS**: the refreshed mascot is recognizable and leads the
-visual hierarchy; named and Auto themes remain readable on both host
-polarities; Full, Compact, and Minimal remain complete; bed sleep remains
-distinct from floor doze; and no seam, clipping, collision, or capture
-artifact was found.
+Those files predate the desk restoration and care-first poop reflow. The
+corrective production visual review passed at widths 80 and 120, but the eight
+promoted final frames must be recaptured from the eventual final committed SHA
+and re-adjudicated before release.
 
 The six matching named-state files and their hashes are recorded in
 [`docs/mockups/current/README.md`](../mockups/current/README.md). The fixture
@@ -73,7 +78,12 @@ acceptance evidence.
 
 ## Live official-Codex acceptance
 
-Status: **PASS**.
+Status: **BLOCKED / MUST RERUN**.
+
+The August 24 live acceptance record remains useful historical evidence for the
+prior renderer, but it is not acceptance for the current care geometry, restored
+desk, or runtime-liveness fix. A new live official-Codex session must cover the
+complete release checklist from the final committed SHA.
 
 The durable record is
 [`terminal-room/live-codex/20260824T150816Z-2359630-verification.txt`](terminal-room/live-codex/20260824T150816Z-2359630-verification.txt).
@@ -106,9 +116,10 @@ remains historical preflight evidence only.
 
 ## Hosted CI
 
-Hosted CI did run for the exact current release source SHA. Push workflow
-[`32729444290`](https://github.com/Lausi-h2ai/codegotchi/actions/runs/32729444290)
-completed on 2026-08-24 with overall result **FAILURE**:
+Hosted CI has **not run** for the corrective tree. The prior workflow for
+`8843ce94d464009319f54ab970f59882e8b6e3fe`, run
+[`32729444290`](https://github.com/Lausi-h2ai/codegotchi/actions/runs/32729444290),
+completed on 2026-08-24 with overall result **FAILURE** and is historical only:
 
 | Hosted job | Result | Evidence |
 |---|---|---|
@@ -116,12 +127,14 @@ completed on 2026-08-24 with overall result **FAILURE**:
 | Rust checks (macOS) | FAIL | Formatting and clippy passed. Workspace tests failed in `authenticated_loopback_http_is_authoritative_and_replay_safe` with a connection reset and in `production_hook_reaches_authoritative_state_and_parses_the_server_response` because the processed-event assertion was not satisfied. The outer PTY smoke was skipped after the test failure. |
 | Web checks | FAIL | Unit tests, lint, formatting, build, and bundle embedding passed. The production Playwright step failed: the feed flow required a retry and the energy-drink flow did not observe `Eating an energy drink` within its timeout after retry. |
 
-Hosted Ubuntu is green, but the hosted macOS workspace tests and production
-browser gate are not green, and the skipped macOS production-shared PTY smoke
-has not been established as green. The final release status cannot be promoted
-while those hosted failures remain unresolved.
+The corrective tree must receive a fresh complete hosted Ubuntu/macOS/web run,
+including the macOS outer PTY smoke. The previously observed macOS raw-HTTP
+reset and Linux PTY signal-escalation failure must be investigated and rerun
+rather than inferred fixed from timing changes. Release remains blocked until
+all hosted gates and live Codex acceptance pass from one exact committed source
+SHA.
 
 Historical Task 5/7/8 records remain in
 [`terminal-room-codex-pty.md`](terminal-room-codex-pty.md) and Git history.
 Their older source SHAs and screenshots are historical evidence only and are
-not the release evidence for `8843ce94d464009319f54ab970f59882e8b6e3fe`.
+not release evidence for the corrective working tree identified above.

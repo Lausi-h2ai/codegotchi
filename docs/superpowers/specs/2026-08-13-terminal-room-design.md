@@ -14,7 +14,7 @@ The central product principle is:
 
 This preserves Codex functionality and future update compatibility while giving CodeGotchi a much stronger sense of place and direct interaction than the browser-only projection.
 
-The room is not a small status widget. It is the pet's home: a cozy side-view child's bedroom with a window, laptop desk, shelf, bed, wardrobe, plants/flowers, food area, floor space, and room objects. The pet wanders and interacts with decorative furniture autonomously, while authoritative care actions such as feeding, petting, cleaning, and sleeping remain explicit user interactions.
+The room is not a small status widget. It is the pet's home: a cozy side-view child's bedroom with a window, laptop desk, shelf, bed, food area, floor space, and authoritative care objects. The pet wanders and interacts with decorative furniture autonomously, while authoritative care actions such as feeding, petting, cleaning, and sleeping remain explicit user interactions.
 
 ## Goals
 
@@ -124,20 +124,22 @@ The room is a **side-view dollhouse bedroom**, not isometric.
 
 ### Bedroom vocabulary
 
-Full mode should include:
+The 2026-08-24 visual-clarity refresh **supersedes the earlier density and
+furniture-count requirements**. Full mode retains the essential bedroom
+anchors while prioritizing mascot legibility, care targets, and calm negative
+space:
 
-- a window with simple day/night ambience;
-- laptop desk;
-- wall shelf with books/decorations;
+- a combined window and sparse laptop-desk cue with day/night ambience;
+- one wall shelf with a plant/decoration cue;
 - bed;
-- wardrobe;
-- flowers/plants;
 - food/pantry area;
-- open floor for roaming;
-- authoritative poop objects;
-- small decorative objects that support idle animation.
+- open floor for roaming and care reflow;
+- authoritative poop objects.
 
-The vibe should be cozy, modern, childlike, and lived-in without becoming visually noisy.
+The wardrobe and additional plants are intentionally omitted in this simplified
+hierarchy. The vibe remains cozy, modern, childlike, and lived-in without
+becoming visually noisy. If care and decoration conflict, care wins: an
+authoritative poop must remain visible and cleanable at every supported width.
 
 ### Pixel density
 

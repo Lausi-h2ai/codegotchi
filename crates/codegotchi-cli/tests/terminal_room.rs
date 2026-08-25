@@ -665,7 +665,7 @@ fn full_eighty_column_geometry_keeps_care_objects_between_furniture() {
     let bed = geometry.bed.expect("Full always has a bed");
     assert_eq!(bed.x, 56);
     assert!(geometry.pet.right() <= bed.x);
-    assert_eq!(geometry.poops.len(), 0);
+    assert_eq!(geometry.poops.len(), 1);
     for source in &geometry.food_sources {
         assert!(!rects_overlap(geometry.pet, source.rect));
         assert!(
@@ -740,7 +740,7 @@ fn wide_full_poops_fit_the_actual_pantry_to_pet_interval() {
                         / poop_spacing,
                 ) + 1
             };
-        let expected_poops = available_poops.min(poop_ids.len());
+        let expected_poops = available_poops.max(1).min(poop_ids.len());
 
         assert_eq!(
             geometry.poops.len(),
@@ -775,7 +775,8 @@ fn wide_full_poops_fit_the_actual_pantry_to_pet_interval() {
         );
         assert!(bed.x >= geometry.pet.right().saturating_add(2));
 
-        if let Some((_, last_poop)) = geometry.poops.last() {
+        if available_poops > 0 {
+            let (_, last_poop) = geometry.poops.last().expect("normal poop exists");
             assert!(
                 last_poop.right().saturating_add(2) <= geometry.pet.x,
                 "wide Full needs two clear columns before the pet at width {width}: poop={last_poop:?} pet={:?}",

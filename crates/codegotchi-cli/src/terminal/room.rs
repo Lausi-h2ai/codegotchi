@@ -288,12 +288,14 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
         let food_right = food_sources
             .last()
             .map_or(food_x, |source| source.rect.right().saturating_sub(area.x));
-        let poop_x = pet_x.saturating_sub(24).max(food_right.saturating_add(2));
-        let poop_limit = snapshot
-            .pending_poops
-            .len()
-            .min(wide_poop_capacity(poop_x, pet_x));
-        let poops = wide_poop_slots(area, snapshot, poop_x, 8, poop_limit, 7);
+        let normal_poop_x = pet_x.saturating_sub(24).max(food_right.saturating_add(2));
+        let normal_capacity = wide_poop_capacity(normal_poop_x, pet_x);
+        let poops = if normal_capacity == 0 {
+            care_first_wide_poop_slots(area, snapshot, food_right, pet_x, bed, 8)
+        } else {
+            let poop_limit = snapshot.pending_poops.len().min(normal_capacity);
+            wide_poop_slots(area, snapshot, normal_poop_x, 8, poop_limit, 7)
+        };
         return RoomGeometry {
             pet,
             bed: Some(bed),
@@ -921,6 +923,61 @@ fn wide_poop_capacity(poop_x: u16, pet_x: u16) -> usize {
         return 0;
     }
     usize::from(latest_poop_start.saturating_sub(poop_x) / 7) + 1
+}
+
+/// Preserves cleaning when the normal pantry-to-pet interval is too narrow.
+/// The foreground row is presentation-only floor space and is kept clear of
+/// every interactive care target.
+fn care_first_wide_poop_slots(
+    area: Rect,
+    snapshot: &SimulationSnapshot,
+    food_right: u16,
+    pet_x: u16,
+    bed: Rect,
+    top: u16,
+) -> Vec<(Uuid, Rect)> {
+    let width = wide_poop_target_width();
+    let height = wide_poop_target_height();
+    let mut x = food_right
+        .saturating_add(2)
+        .max(area.width.saturating_sub(6));
+    let mut candidate;
+    let care_zone = Rect::new(
+        area.x,
+        area.y.saturating_add(top),
+        food_right,
+        FULL_ROOM_HEIGHT,
+    );
+    let pet = Rect::new(
+        area.x.saturating_add(pet_x),
+        area.y.saturating_add(4),
+        18,
+        7,
+    );
+    loop {
+        candidate = Rect::new(
+            area.x.saturating_add(x),
+            area.y.saturating_add(top),
+            width,
+            height,
+        );
+        if candidate.right() <= area.right()
+            && !candidate.intersects(care_zone)
+            && !candidate.intersects(pet)
+            && !candidate.intersects(bed)
+        {
+            return snapshot
+                .pending_poops
+                .first()
+                .map(|poop| (poop.id(), candidate))
+                .into_iter()
+                .collect();
+        }
+        if x == 0 {
+            return Vec::new();
+        }
+        x -= 1;
+    }
 }
 
 /// Applies a presentation wander offset to a hit rectangle, clamping it inside
@@ -1998,18 +2055,24 @@ fn full_wide_furniture_layout(
     _area: Rect,
     window: &'static [&'static str],
 ) -> Vec<FullFurnitureSprite> {
-    vec![
-        FullFurnitureSprite {
-            sprite: window,
+    let mut furniture = vec![FullFurnitureSprite {
+        sprite: window,
+        x: 1,
+        y: 1,
+    }];
+    if window.len() == WINDOW_FULL_DAY.len() {
+        furniture.push(FullFurnitureSprite {
+            sprite: &DESK_LAPTOP_FULL,
             x: 1,
-            y: 1,
-        },
-        FullFurnitureSprite {
-            sprite: &SHELF_FULL,
-            x: 20,
-            y: 1,
-        },
-    ]
+            y: u16::try_from(window.len()).unwrap_or(0),
+        });
+    }
+    furniture.push(FullFurnitureSprite {
+        sprite: &SHELF_FULL,
+        x: 20,
+        y: 1,
+    });
+    furniture
 }
 
 fn render_room_backdrop(area: Rect, buffer: &mut Buffer, palette: ResolvedPalette) {
@@ -2036,8 +2099,8 @@ fn render_furniture_full(
         return;
     }
     let window = match ambience {
-        RoomAmbience::Day => &WINDOW_FULL_DAY,
-        RoomAmbience::Night => &WINDOW_FULL_NIGHT,
+        RoomAmbience::Day => &WINDOW_DESK_FULL_DAY,
+        RoomAmbience::Night => &WINDOW_DESK_FULL_NIGHT,
     };
     put_sprite(area, buffer, window, 1, 1, palette);
     put_sprite(area, buffer, &SHELF_FULL, 20, 1, palette);
@@ -2059,6 +2122,26 @@ fn need_bar(value: f32) -> String {
 fn need_percent(value: f32) -> u8 {
     value.clamp(0.0, 100.0).round() as u8
 }
+
+const WINDOW_DESK_FULL_DAY: [&str; 7] = [
+    "╭──────┬──────────╮",
+    "│  ☀   │          │",
+    "│      └──────────┤",
+    "╰───────┴─────────╯",
+    "┌─────┐            ",
+    "│ ▤   │            ",
+    "╰─────╯            ",
+];
+
+const WINDOW_DESK_FULL_NIGHT: [&str; 7] = [
+    "╭──────┬──────────╮",
+    "│      │   ☾      │",
+    "│      └──────────┤",
+    "╰───────┴─────────╯",
+    "┌─────┐            ",
+    "│ ▤   │            ",
+    "╰─────╯            ",
+];
 
 const WINDOW_FULL_DAY: [&str; 4] = [
     "╭──────┬──────────╮",
@@ -2118,12 +2201,14 @@ const FOOD_ENERGY: [&str; 4] = ["  ╭─╮", " │+│ ", " │=│ ", " ╰�
 const POOP_OBJECT_WIDE: [&str; 3] = [" ╭─╮ ", "╰──╯ ", "  ~  "];
 const POOP_OBJECT_COMPACT: [&str; 3] = [" ╭╮ ", "╰╯  ", " ~  "];
 
+const DESK_LAPTOP_FULL: [&str; 3] = ["┌─────┐", "│ ▤   │", "╰─────╯"];
+
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
     use codegotchi_domain::{
         DefaultNeedProgressionStrategy, FoodInventory, FoodKind, Pet, PetSimulation, PetSpecies,
-        SystemClock,
+        Poop, SystemClock,
     };
     use uuid::Uuid;
 
@@ -2137,6 +2222,8 @@ mod tests {
             ("BED_FULL", &BED_FULL),
             ("BED_COMPACT", &BED_COMPACT),
             ("BED_WIDE", &BED_WIDE),
+            ("WINDOW_DESK_FULL_DAY", &WINDOW_DESK_FULL_DAY),
+            ("WINDOW_DESK_FULL_NIGHT", &WINDOW_DESK_FULL_NIGHT),
             ("BED_COMPACT_WIDE", &BED_COMPACT_WIDE),
             ("WINDOW_FULL_DAY", &WINDOW_FULL_DAY),
             ("WINDOW_FULL_NIGHT", &WINDOW_FULL_NIGHT),
@@ -2166,6 +2253,51 @@ mod tests {
             && second.x < first.right()
             && first.y < second.bottom()
             && second.y < first.bottom()
+    }
+
+    #[test]
+    fn full_wide_preserves_pending_poop_care_at_every_supported_width() {
+        let now = Utc::now();
+        let pet = Pet::with_inventory(
+            Uuid::from_u128(3),
+            "Mochi",
+            PetSpecies::Cat,
+            now,
+            FoodInventory::starter(),
+        );
+        let mut snapshot =
+            PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot();
+        let poop_id = Uuid::from_u128(0x7001);
+        snapshot.pending_poops.clear();
+        snapshot.pending_poops.push(Poop::new(poop_id, now));
+
+        for width in 80..=121 {
+            let area = Rect::new(0, 0, width, FULL_ROOM_HEIGHT);
+            let geometry = full_geometry(area, &snapshot, (0, 0));
+            assert_eq!(
+                geometry.poops.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+                [poop_id],
+                "pending care must remain represented at width {width}"
+            );
+            let (_, poop) = &geometry.poops[0];
+            assert!(
+                !rects_overlap(*poop, geometry.pet),
+                "cleaning target overlaps pet at width {width}: poop={poop:?} pet={:?}",
+                geometry.pet
+            );
+            for source in &geometry.food_sources {
+                assert!(
+                    !rects_overlap(*poop, source.rect),
+                    "cleaning target overlaps food at width {width}"
+                );
+            }
+            if let Some(bed) = geometry.bed {
+                assert!(
+                    !rects_overlap(*poop, bed),
+                    "cleaning target overlaps bed at width {width}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -2213,7 +2345,7 @@ mod tests {
             let area = Rect::new(0, 0, width, 14);
             let geometry = full_geometry(area, &snapshot, (0, 0));
             let bed = geometry.bed.expect("Full room has a bed");
-            for furniture in full_wide_furniture_layout(area, &WINDOW_FULL_DAY) {
+            for furniture in full_wide_furniture_layout(area, &WINDOW_DESK_FULL_DAY) {
                 let rect = Rect::new(
                     area.x.saturating_add(furniture.x),
                     area.y.saturating_add(furniture.y),

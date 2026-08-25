@@ -250,7 +250,7 @@ async fn strict_denial_is_verified_fail_open_and_recoverable_through_normal_care
             "/workspace/codegatchi",
             server.base_url(),
             "task-4-strict-token",
-            u32::MAX,
+            1,
         ),
     )
     .expect("stale metadata is written");

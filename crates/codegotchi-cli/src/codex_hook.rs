@@ -212,9 +212,14 @@ pub fn runtime_metadata_is_active(metadata: &RuntimeMetadataV1) -> bool {
     if metadata.owning_pid == std::process::id() {
         return true;
     }
-    std::path::Path::new("/proc")
-        .join(metadata.owning_pid.to_string())
-        .exists()
+    process_exists(metadata.owning_pid)
+}
+
+/// Portable Unix liveness check. Signal zero performs permission and process
+/// existence checks without delivering a signal, including when the hook runs
+/// as a child process on macOS.
+fn process_exists(pid: u32) -> bool {
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok()
 }
 
 fn deterministic_event_id(
@@ -660,7 +665,9 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use super::{HookTransportError, read_http_response};
+    use super::{
+        HookTransportError, RuntimeMetadataV1, read_http_response, runtime_metadata_is_active,
+    };
 
     #[test]
     fn response_read_has_an_outer_deadline_when_peer_dribbles_bytes() {
@@ -691,5 +698,21 @@ mod tests {
             .shutdown(Shutdown::Both)
             .expect("close hook connection");
         server.join().expect("dribble server exits");
+    }
+
+    #[test]
+    fn runtime_liveness_uses_portable_unix_process_probe() {
+        let metadata = RuntimeMetadataV1::new(
+            uuid::Uuid::new_v4(),
+            std::path::PathBuf::from("."),
+            "http://127.0.0.1:1",
+            "token",
+            std::process::id(),
+        );
+        assert!(runtime_metadata_is_active(&metadata));
+
+        let mut stale = metadata.clone();
+        stale.owning_pid = 1;
+        assert!(!runtime_metadata_is_active(&stale));
     }
 }
