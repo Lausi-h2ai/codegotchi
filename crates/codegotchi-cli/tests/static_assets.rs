@@ -218,6 +218,7 @@ async fn production_server_serves_embedded_bundle_spa_and_typed_api_errors() {
     server.shutdown().await.unwrap();
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn installed_binary_serves_assets_without_repository_runtime_dependencies() {
     let temp = TempDir::new("install");
