@@ -48,12 +48,14 @@ expected_trust_config=$(printf '[projects."%s"]\ntrust_level = "trusted"' "$ACCE
 BUFFER=''
 CURSOR=0
 SUBMITTED=0
+KEY_LOG=()
 send_text() {
     local value=$1
     BUFFER="${BUFFER:0:CURSOR}${value}${BUFFER:CURSOR}"
     CURSOR=$((CURSOR + ${#value}))
 }
 send_key() {
+    KEY_LOG+=("$1")
     case "$1" in
         Left) ((CURSOR > 0)) && CURSOR=$((CURSOR - 1)) ;;
         End) CURSOR=${#BUFFER} ;;
@@ -72,6 +74,13 @@ drive_live_acceptance_prompt
 
 [[ $BUFFER == "$ACCEPTANCE_PROMPT" ]]
 [[ $SUBMITTED == 1 ]]
+KEY_LOG=()
+BUFFER=''
+CURSOR=0
+drive_live_acceptance_approval
+[[ ${#KEY_LOG[@]} == 1 ]]
+[[ ${KEY_LOG[0]} == Return ]]
+[[ -z $BUFFER ]]
 live_acceptance_uses_hook_trust_bypass
 live_acceptance_turn_completed WaitingForUser 6 0
 if live_acceptance_turn_completed Active 6 0; then

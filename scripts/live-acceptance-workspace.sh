@@ -45,6 +45,10 @@ drive_live_acceptance_prompt() {
     send_key Return
 }
 
+drive_live_acceptance_approval() {
+    send_key Return
+}
+
 live_acceptance_uses_hook_trust_bypass() {
     local argument
     for argument in "${CODEX_ARGUMENTS[@]}"; do

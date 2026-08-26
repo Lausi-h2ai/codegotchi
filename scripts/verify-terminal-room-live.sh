@@ -943,8 +943,10 @@ verify_approval_probe() {
         sleep 8
         assert_window_usable
         capture_frame 'full-live-approval'
-        send_key 1
-        send_key Return
+        sleep 2
+        assert_window_usable
+        capture_frame 'full-live-approval-modal'
+        drive_live_acceptance_approval
         for _ in $(seq 1 "${CODEGOTCHI_LIVE_TIMEOUT_SEC:-30}"); do
             [[ -f $probe ]] && break
             sleep 1

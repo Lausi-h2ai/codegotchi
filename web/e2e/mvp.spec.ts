@@ -163,11 +163,11 @@ type CareInteraction =
 
 type EnergyDrinkDiagnostics = {
     drop: boolean;
-    request: { method: string; url: string } | null;
+    request: { method: string; url: string };
     response: {
         status: number;
         body: unknown;
-    } | null;
+    };
     feedback: string;
     activity: string;
     inventory: number;
@@ -176,12 +176,7 @@ type EnergyDrinkDiagnostics = {
 
 declare global {
     interface Window {
-        __codeGotchiEnergyDiagnostics?: {
-            drop: boolean;
-            request: EnergyDrinkDiagnostics["request"];
-            response: EnergyDrinkDiagnostics["response"];
-        };
-        __codeGotchiEnergyDrop?: () => void;
+        __codeGotchiEnergyDrop?: boolean;
     }
 }
 
@@ -359,75 +354,62 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         const before = await drink.locator("strong").textContent();
 
         await page.evaluate(() => {
-            window.__codeGotchiEnergyDiagnostics = {
-                drop: false,
-                request: null,
-                response: null,
-            };
-            const originalFetch = window.fetch;
-            window.fetch = async (...arguments_) => {
-                const response = await originalFetch(...arguments_);
-                if (
-                    arguments_[0] === "/api/v1/care/feed" &&
-                    arguments_[1]?.method === "POST"
-                ) {
-                    window.__codeGotchiEnergyDiagnostics.request = {
-                        method: arguments_[1].method,
-                        url: String(arguments_[0]),
-                    };
-                    window.__codeGotchiEnergyDiagnostics.response = {
-                        status: response.status,
-                        body: await response.clone().json().catch(() => null),
-                    };
-                }
-                return response;
-            };
+            window.__codeGotchiEnergyDrop = false;
             const feedTarget = document.querySelector<HTMLButtonElement>(
                 '[aria-label*="feed target" i]',
             );
             if (feedTarget) {
-                window.__codeGotchiEnergyDrop = () => {
-                    window.__codeGotchiEnergyDiagnostics.drop = true;
-                };
                 feedTarget.addEventListener(
                     "drop",
-                    () => window.__codeGotchiEnergyDrop?.(),
+                    () => {
+                        window.__codeGotchiEnergyDrop = true;
+                    },
                     { once: true },
                 );
             }
         });
 
+        const feedResponsePromise = page.waitForResponse((response) => {
+            const request = response.request();
+            return (
+                new URL(response.url()).pathname === "/api/v1/care/feed" &&
+                request.method() === "POST"
+            );
+        });
         await careInteraction({
             kind: "drag",
             source: drink,
             target: feedTarget,
         });
-        const diagnostics = await page.evaluate(async (): Promise<
-            EnergyDrinkDiagnostics
-        > => {
-            const inventory = Number(
-                document.querySelector('[data-testid="food-energy_drink"] strong')
-                    ?.textContent ?? Number.NaN,
-            );
-            const stateResponse = await fetch("/api/v1/state");
-            const state = await stateResponse.json();
-            return {
-                ...window.__codeGotchiEnergyDiagnostics,
-                feedback: document.querySelector(".feedback")?.textContent ?? "",
-                activity:
-                    document.querySelector('[data-testid="activity-label"]')
-                        ?.textContent ?? "",
-                inventory,
-                authoritativeInventory: state.inventory?.energy_drink,
-            };
-        });
+        const feedResponse = await feedResponsePromise;
+        const feedBody = (await feedResponse.json()) as {
+            inventory?: Record<string, number>;
+        };
+        const diagnostics: EnergyDrinkDiagnostics = {
+            drop: await page.evaluate(
+                () => window.__codeGotchiEnergyDrop === true,
+            ),
+            request: {
+                method: feedResponse.request().method(),
+                url: new URL(feedResponse.url()).pathname,
+            },
+            response: {
+                status: feedResponse.status(),
+                body: feedBody,
+            },
+            feedback: (await page.locator(".feedback").textContent()) ?? "",
+            activity:
+                (await page.getByTestId("activity-label").textContent()) ?? "",
+            inventory: Number(await drink.locator("strong").textContent()),
+            authoritativeInventory: feedBody.inventory?.energy_drink,
+        };
         console.log("ENERGY_DRINK_DIAGNOSTICS", diagnostics);
         expect(diagnostics.drop, diagnostics).toBe(true);
         expect(diagnostics.request, diagnostics).toEqual({
             method: "POST",
             url: "/api/v1/care/feed",
         });
-        expect(diagnostics.response?.status, diagnostics).toBe(200);
+        expect(diagnostics.response.status, diagnostics).toBe(200);
         expect(diagnostics.authoritativeInventory, diagnostics).toBe(
             Number(before) - 1,
         );
