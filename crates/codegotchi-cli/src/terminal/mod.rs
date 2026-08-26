@@ -29,6 +29,7 @@ pub use render::render_codex;
 pub use room::{
     FoodSource, RoomAmbience, RoomGeometry, RoomRenderOptions, render_room,
     render_room_with_options, render_room_with_palette, room_geometry, room_geometry_with_frame,
+    wide_full_care_zone,
 };
 pub use screen::{CodexInputModes, CodexScreen, MouseEncoding, MouseTrackingMode};
 pub use session::{

@@ -86,6 +86,12 @@ struct HttpResponse {
     body: Value,
 }
 
+struct RawHttpResponse {
+    status: u16,
+    content_length: Option<usize>,
+    body_bytes: Vec<u8>,
+}
+
 async fn request(
     server: &RunningServer,
     method: &str,
@@ -93,6 +99,21 @@ async fn request(
     token: Option<&str>,
     body: &[u8],
 ) -> HttpResponse {
+    let response = raw_request(server, method, path, token, body).await;
+    let body = serde_json::from_slice(&response.body_bytes).unwrap_or(Value::Null);
+    HttpResponse {
+        status: response.status,
+        body,
+    }
+}
+
+async fn raw_request(
+    server: &RunningServer,
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    body: &[u8],
+) -> RawHttpResponse {
     let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
     let mut request = format!(
         "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
@@ -103,15 +124,24 @@ async fn request(
     }
     request.push_str("\r\n");
     stream.write_all(request.as_bytes()).await.unwrap();
-    stream.write_all(body).await.unwrap();
-    let mut bytes = Vec::new();
-    stream.read_to_end(&mut bytes).await.unwrap();
-    let separator = bytes
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .unwrap();
-    let headers = String::from_utf8_lossy(&bytes[..separator]);
-    let status = headers
+    if !body.is_empty() {
+        stream.write_all(body).await.unwrap();
+    }
+    let mut headers = Vec::new();
+    let mut chunk = [0_u8; 1024];
+    let separator = loop {
+        let read = stream
+            .read(&mut chunk)
+            .await
+            .unwrap_or_else(|error| panic!("read {method} {path} response headers: {error}"));
+        assert!(read > 0, "connection closed before {method} {path} headers");
+        headers.extend_from_slice(&chunk[..read]);
+        if let Some(separator) = headers.windows(4).position(|window| window == b"\r\n\r\n") {
+            break separator;
+        }
+    };
+    let header_text = String::from_utf8_lossy(&headers[..separator]);
+    let status = header_text
         .lines()
         .next()
         .unwrap()
@@ -120,8 +150,56 @@ async fn request(
         .unwrap()
         .parse()
         .unwrap();
-    let body = serde_json::from_slice(&bytes[separator + 4..]).unwrap_or(Value::Null);
-    HttpResponse { status, body }
+    let content_length = header_text
+        .lines()
+        .find_map(|line| {
+            line.split_once(':')
+                .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+        })
+        .map(|(_, value)| value.trim().parse().unwrap());
+    let mut body_bytes = headers[separator + 4..].to_vec();
+    if let Some(content_length) = content_length {
+        while body_bytes.len() < content_length {
+            let read = stream.read(&mut chunk).await.unwrap_or_else(|error| {
+                panic!(
+                    "read {method} {path} response body after {} bytes: {error}",
+                    body_bytes.len()
+                )
+            });
+            assert!(
+                read > 0,
+                "connection closed with {}/{} {method} {path} body bytes",
+                body_bytes.len(),
+                content_length
+            );
+            body_bytes.extend_from_slice(&chunk[..read]);
+        }
+        body_bytes.truncate(content_length);
+    } else {
+        stream
+            .read_to_end(&mut body_bytes)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("read {method} {path} EOF-delimited response body: {error}")
+            });
+    }
+    RawHttpResponse {
+        status,
+        content_length,
+        body_bytes,
+    }
+}
+
+#[tokio::test]
+async fn oversized_raw_http_response_is_completely_read_before_close() {
+    let db = TestDatabase::new();
+    let runtime = runtime(&db);
+    let server = RunningServer::start(runtime, TOKEN).await.unwrap();
+    let oversized = vec![b'x'; 100 * 1024];
+    let response = raw_request(&server, "POST", "/api/v1/events", Some(TOKEN), &oversized).await;
+    assert_eq!(response.status, 413);
+    assert!(response.content_length.is_some());
+    server.shutdown().await.unwrap();
 }
 
 async fn debug_request(server: &RunningServer, token: &str, path: &str) -> HttpResponse {

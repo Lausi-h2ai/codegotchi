@@ -165,11 +165,27 @@ fn managed_pty_escalates_from_interrupt_to_terminate() {
     let mut child = PtyCodexChild::spawn(&invocation, 24, 80).expect("spawn escalation fixture");
     let mut reader = child.reader().expect("clone escalation reader");
     read_until(&mut reader, b"FAKE_SIGNAL_READY");
+    let mut metadata = [0_u8; 64];
+    let metadata_len = reader
+        .read(&mut metadata)
+        .expect("read escalation fixture metadata without blocking on EOF");
+    let ready = String::from_utf8_lossy(&metadata[..metadata_len]).into_owned();
+    let pid = ready
+        .lines()
+        .find_map(|line| line.strip_prefix("FAKE_SIGNAL_PID="))
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    assert!(!pid.is_empty(), "unexpected fixture metadata: {ready:?}");
     child.interrupt().expect("deliver first SIGINT");
     std::thread::sleep(std::time::Duration::from_millis(30));
     child.terminate().expect("deliver escalating SIGTERM");
     let status = child.wait().expect("reap escalation fixture");
-    assert_eq!(status.exit_code(), 143);
+    assert_eq!(
+        status.exit_code(),
+        143,
+        "fixture published {ready:?}; SIGTERM must override ignored SIGINT"
+    );
 }
 
 #[cfg(unix)]

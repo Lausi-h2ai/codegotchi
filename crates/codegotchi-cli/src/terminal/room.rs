@@ -938,9 +938,8 @@ fn care_first_wide_poop_slots(
 ) -> Vec<(Uuid, Rect)> {
     let width = wide_poop_target_width();
     let height = wide_poop_target_height();
-    let mut x = food_right
-        .saturating_add(2)
-        .max(area.width.saturating_sub(6));
+    let reserved = wide_full_care_zone(area);
+    let mut x = reserved.x - area.x;
     let mut candidate;
     let care_zone = Rect::new(
         area.x,
@@ -955,12 +954,7 @@ fn care_first_wide_poop_slots(
         7,
     );
     loop {
-        candidate = Rect::new(
-            area.x.saturating_add(x),
-            area.y.saturating_add(top),
-            width,
-            height,
-        );
+        candidate = Rect::new(area.x.saturating_add(x), reserved.y, width, height);
         if candidate.right() <= area.right()
             && !candidate.intersects(care_zone)
             && !candidate.intersects(pet)
@@ -973,11 +967,22 @@ fn care_first_wide_poop_slots(
                 .into_iter()
                 .collect();
         }
-        if x == 0 {
+        if x + area.x == reserved.right().saturating_sub(1) {
             return Vec::new();
         }
         x -= 1;
     }
+}
+
+/// The autonomous-pet-free care region used by the narrow wide-Full fallback.
+/// Presentation wander must never enter this reserved rectangle.
+#[must_use]
+pub fn wide_full_care_zone(area: Rect) -> Rect {
+    let width = wide_poop_target_width();
+    let right = area.width.saturating_sub(6).max(1);
+    let left = right.saturating_sub(width.min(right));
+    let top = area.y + 8;
+    Rect::new(area.x + left, top, width, wide_poop_target_height())
 }
 
 /// Applies a presentation wander offset to a hit rectangle, clamping it inside
@@ -1090,6 +1095,7 @@ fn render_full(
         format!("Happy  {:8}", need_bar(needs.happiness())),
         format!("Clean  {:8}", need_bar(needs.cleanliness())),
     ];
+    render_furniture_full(area, buffer, palette, options.ambience());
     for (index, line) in status_lines.iter().enumerate() {
         put_line(
             area,
@@ -1107,7 +1113,6 @@ fn render_full(
         &format!("{:?}", activity),
         palette.cell_style(SemanticTone::Tone2),
     );
-    render_furniture_full(area, buffer, palette, options.ambience());
 
     if let Some(bed) = geometry.bed {
         let bed_x = bed.x.saturating_sub(area.x);
@@ -2095,15 +2100,32 @@ fn render_furniture_full(
     palette: ResolvedPalette,
     ambience: RoomAmbience,
 ) {
-    if area.width < 80 {
-        return;
-    }
     let window = match ambience {
         RoomAmbience::Day => &WINDOW_DESK_FULL_DAY,
         RoomAmbience::Night => &WINDOW_DESK_FULL_NIGHT,
     };
-    put_sprite(area, buffer, window, 1, 1, palette);
-    put_sprite(area, buffer, &SHELF_FULL, 20, 1, palette);
+    let window_width = u16::try_from(
+        window
+            .iter()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0),
+    )
+    .unwrap_or(u16::MAX);
+    if area.width > window_width {
+        put_sprite(area, buffer, window, 1, 1, palette);
+    }
+    let shelf_width = u16::try_from(
+        SHELF_FULL
+            .iter()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0),
+    )
+    .unwrap_or(u16::MAX);
+    if area.width >= 20 + shelf_width {
+        put_sprite(area, buffer, &SHELF_FULL, 20, 1, palette);
+    }
 }
 
 /// Compact keeps only one subdued window cue.

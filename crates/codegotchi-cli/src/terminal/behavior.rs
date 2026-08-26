@@ -2,6 +2,8 @@ use codegotchi_domain::{ActivityKind, AgentActivityState, PetBehavior, Simulatio
 use ratatui::layout::{Position, Rect};
 use std::time::Duration;
 
+use super::room::wide_full_care_zone;
+
 /// Broad, durable presentation moods derived exclusively from authoritative
 /// structured state. The terminal renderer never classifies visible Codex
 /// text; this mapping is the only activity projection.
@@ -360,7 +362,11 @@ impl PresentationState {
             };
             let (dx, dy) = step_toward(self.frame.offset, target, self.home, 1);
             let candidate = (self.frame.offset.0 + dx, self.frame.offset.1 + dy);
-            self.frame.offset = clamp_offset(candidate, area);
+            self.frame.offset = if candidate_overlaps_reserved_care(candidate, self.home, area) {
+                self.frame.offset
+            } else {
+                clamp_offset(candidate, area)
+            };
         }
 
         let base = if matches!(self.intent, IdleIntent::Wander(_)) {
@@ -441,6 +447,21 @@ fn clamp_offset(offset: (i16, i16), area: Rect) -> (i16, i16) {
     let y_low = -2i16;
     let y_high = max_y.saturating_sub(4).max(y_low);
     (offset.0.clamp(-max_x, max_x), offset.1.clamp(y_low, y_high))
+}
+
+fn candidate_overlaps_reserved_care(offset: (i16, i16), home: Position, area: Rect) -> bool {
+    if area.height < 14 || area.width < 80 {
+        return false;
+    }
+    let candidate = Rect::new(
+        (i64::from(home.x) + i64::from(offset.0)).clamp(0, i64::from(area.width.saturating_sub(1)))
+            as u16,
+        (i64::from(home.y) + i64::from(offset.1)).clamp(0, i64::from(area.height.saturating_sub(1)))
+            as u16,
+        18,
+        7,
+    );
+    candidate.intersects(wide_full_care_zone(area))
 }
 
 fn random_point(rng: &mut SplitMix64, home: Position, area: Rect) -> Position {

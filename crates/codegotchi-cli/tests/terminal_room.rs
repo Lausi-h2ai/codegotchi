@@ -1,19 +1,22 @@
 use chrono::{Duration, Utc};
 use codegotchi_cli::terminal::{
-    PetPose, PresentationActivity, PresentationFrame, RoomAmbience, RoomRenderOptions,
-    SemanticTone, TerminalThemePreset, auto_style, has_authoritative_nap, presentation_activity,
-    render_room, render_room_with_options, room_geometry,
+    CareGateway, PetPose, PresentationActivity, PresentationFrame, RoomAmbience, RoomCareRequest,
+    RoomInputSession, RoomRenderOptions, SemanticTone, TerminalThemePreset, auto_style,
+    has_authoritative_nap, presentation_activity, render_room, render_room_with_options,
+    room_geometry, room_geometry_with_frame,
 };
 use codegotchi_domain::{
     ActivityKind, AgentActivityState, DefaultNeedProgressionStrategy, FoodInventory, FoodKind, Pet,
     PetBehavior, PetDemand, PetDemandKind, PetSimulation, PetSpecies, Poop, SimulationSnapshot,
     SystemClock,
 };
+use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     buffer::{Buffer, Cell},
     layout::{Position, Rect},
     style::Color,
 };
+use std::sync::Mutex;
 use uuid::Uuid;
 
 fn base_snapshot(now: chrono::DateTime<Utc>) -> SimulationSnapshot {
@@ -449,9 +452,11 @@ fn room_renders_full_compact_and_minimal_projection() {
     let full = Rect::new(0, 0, 40, 14);
     let mut full_buffer = Buffer::filled(full, Cell::new(" "));
     render_room(full, &mut full_buffer, &snapshot, &default_frame(), None);
-    let full_text = buffer_text(&full_buffer, full.width, full.height);
     for label in ["Hunger", "Energy", "Happy", "Clean"] {
-        assert!(full_text.contains(label), "Full room missing {label}");
+        assert!(
+            (0..4).any(|row| row_text(&full_buffer, full.width, row).contains(label)),
+            "Full room missing {label}"
+        );
     }
 
     let compact = Rect::new(0, 0, 40, 7);
@@ -566,6 +571,22 @@ fn full_room_renders_quiet_hierarchy_furniture() {
     assert!(!text.contains("SHELF"));
     assert!(!text.contains("DESK"));
     assert!(!text.contains("PET"));
+}
+
+/// Full mode is selected by height, so a sub-80-column Full room must retain
+/// its bedroom anchors rather than silently falling through to no furniture.
+#[test]
+fn narrow_full_retains_window_desk_and_shelf() {
+    let snapshot = base_snapshot(Utc::now());
+    let area = Rect::new(0, 0, 70, 14);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let text = buffer_text(&buffer, area.width, area.height);
+    assert!(
+        text.contains("▤"),
+        "narrow Full laptop desk missing: {text}"
+    );
+    assert!(text.contains("╱╲"), "narrow Full shelf missing: {text}");
 }
 
 #[test]
@@ -830,6 +851,79 @@ fn rects_overlap(first: Rect, second: Rect) -> bool {
         && second.x < first.right()
         && first.y < second.bottom()
         && second.y < first.bottom()
+}
+
+#[derive(Default)]
+struct RecordingCareGateway {
+    requests: Mutex<Vec<RoomCareRequest>>,
+}
+
+impl CareGateway for RecordingCareGateway {
+    fn feed(&self, _action_id: Uuid, _food_id: &str) {}
+
+    fn clean(&self, action_id: Uuid, poop_id: Uuid) {
+        self.requests
+            .lock()
+            .unwrap()
+            .push(RoomCareRequest::Clean { action_id, poop_id });
+    }
+
+    fn nap(&self, _action_id: Uuid) {}
+
+    fn pet(&self, _action_id: Uuid, _interaction_ms: u64, _pointer_distance: f32) {}
+
+    fn pet_stroke(&self, _action_id: Uuid, _duration_ms: u64, _distance: f64) {}
+}
+
+/// The care-first 80/81-column fallback must reserve a lane the wandering pet
+/// can never enter. Otherwise an authoritative poop remains visible but a left
+/// press is captured by pet hit-testing instead of producing Clean.
+#[test]
+fn care_first_poop_survives_every_allowed_full_wander_offset() {
+    let now = Utc::now();
+    let mut snapshot = base_snapshot(now);
+    let poop_id = Uuid::from_u128(81);
+    snapshot.pending_poops.push(Poop::new(poop_id, now));
+
+    for width in [80_u16, 81] {
+        let area = Rect::new(0, 0, width, 14);
+        for offset_x in -3_i16..=0 {
+            for offset_y in [2_i16, 3] {
+                let frame = PresentationFrame {
+                    pose: PetPose::WalkA,
+                    offset: (offset_x, offset_y),
+                };
+                let geometry = room_geometry_with_frame(area, &snapshot, &frame);
+                let (_, poop) = geometry.poops.first().expect("authoritative poop");
+                let mut input = RoomInputSession::default();
+                let gateway = RecordingCareGateway::default();
+                let requests = input.process(
+                    area,
+                    &snapshot,
+                    &frame,
+                    &MouseEvent {
+                        kind: MouseEventKind::Up(MouseButton::Left),
+                        column: poop.x + poop.width / 2,
+                        row: poop.y + 1,
+                        modifiers: KeyModifiers::NONE,
+                    },
+                );
+                match requests.as_slice() {
+                    [
+                        RoomCareRequest::Clean {
+                            poop_id: cleaned, ..
+                        },
+                    ] => {
+                        assert_eq!(*cleaned, poop_id);
+                    }
+                    unexpected => panic!(
+                        "click did not produce Clean: width={width} offset=({offset_x},{offset_y}) requests={unexpected:?}"
+                    ),
+                }
+                assert!(gateway.requests.lock().unwrap().is_empty());
+            }
+        }
+    }
 }
 
 /// Compact keeps one subdued window cue; Full-only furniture disappears before
