@@ -105,7 +105,7 @@ if live_acceptance_capture_visible 0; then
 fi
 [[ $(live_acceptance_restoration_token) == 'terminal-restoration-ok' ]]
 [[ $(live_acceptance_exit_command) == '/quit' ]]
-[[ $(live_acceptance_approval_prompt) == 'Request my approval to run this exact command outside the read-only sandbox, then run it only if approved: touch approval-probe.txt' ]]
+[[ $(live_acceptance_approval_prompt) == 'Use the shell tool to run exactly this command: touch approval-probe.txt. Send it as a tool call and wait for the interactive approval prompt; do not answer with a prose request.' ]]
 
 PROTOCOL_RECEIPT="$TEST_ROOT/protocol.tsv"
 printf '%s\n' \

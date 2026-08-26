@@ -97,7 +97,7 @@ live_acceptance_exit_command() {
 }
 
 live_acceptance_approval_prompt() {
-    printf '%s\n' 'Request my approval to run this exact command outside the read-only sandbox, then run it only if approved: touch approval-probe.txt'
+    printf '%s\n' 'Use the shell tool to run exactly this command: touch approval-probe.txt. Send it as a tool call and wait for the interactive approval prompt; do not answer with a prose request.'
 }
 
 live_acceptance_protocol_input_verified() {
