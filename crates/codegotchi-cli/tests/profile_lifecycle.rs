@@ -221,7 +221,7 @@ fn profile_guard_serializes_creation_until_command_spawn_boundary() {
         attempt_rx.recv().unwrap(),
         "the competing writer must observe the spawn guard before it calls ensure"
     );
-    let mut command = profile_guard.codex_command("/bin/true");
+    let mut command = profile_guard.codex_command("true");
     profile_guard.verify_before_spawn().unwrap();
     let mut child = profile_guard
         .spawn(&mut command)
