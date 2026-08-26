@@ -2,9 +2,6 @@
 set -eu
 
 mode=${1:?signal mode required}
-printf 'FAKE_SIGNAL_READY\r\n'
-printf 'FAKE_SIGNAL_PID=%s\r\n' "$$"
-
 on_interrupt() {
     printf 'FAKE_SIGNAL_INT\r\n'
     printf 'FAKE_SIGNAL_STATE=alive pgid=%s\n' "$(ps -o pgid= -p $$ | tr -d ' ')" >&2
@@ -21,6 +18,8 @@ on_terminate() {
 
 trap on_interrupt INT
 trap on_terminate TERM
+printf 'FAKE_SIGNAL_READY\r\n'
+printf 'FAKE_SIGNAL_PID=%s\r\n' "$$"
 while :; do
     :
 done

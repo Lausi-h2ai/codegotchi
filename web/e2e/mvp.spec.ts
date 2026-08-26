@@ -161,6 +161,30 @@ type CareInteraction =
     | { kind: "hover"; target: Locator }
     | { kind: "drag"; source: Locator; target: Locator };
 
+type EnergyDrinkDiagnostics = {
+    drop: boolean;
+    request: { method: string; url: string } | null;
+    response: {
+        status: number;
+        body: unknown;
+    } | null;
+    feedback: string;
+    activity: string;
+    inventory: number;
+    authoritativeInventory: number | undefined;
+};
+
+declare global {
+    interface Window {
+        __codeGotchiEnergyDiagnostics?: {
+            drop: boolean;
+            request: EnergyDrinkDiagnostics["request"];
+            response: EnergyDrinkDiagnostics["response"];
+        };
+        __codeGotchiEnergyDrop?: () => void;
+    }
+}
+
 /**
  * Care interactions use this test-only seam because this runner's Chromium
  * compositor does not advance requestAnimationFrame, leaving Playwright's
@@ -334,12 +358,82 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         });
         const before = await drink.locator("strong").textContent();
 
+        await page.evaluate(() => {
+            window.__codeGotchiEnergyDiagnostics = {
+                drop: false,
+                request: null,
+                response: null,
+            };
+            const originalFetch = window.fetch;
+            window.fetch = async (...arguments_) => {
+                const response = await originalFetch(...arguments_);
+                if (
+                    arguments_[0] === "/api/v1/care/feed" &&
+                    arguments_[1]?.method === "POST"
+                ) {
+                    window.__codeGotchiEnergyDiagnostics.request = {
+                        method: arguments_[1].method,
+                        url: String(arguments_[0]),
+                    };
+                    window.__codeGotchiEnergyDiagnostics.response = {
+                        status: response.status,
+                        body: await response.clone().json().catch(() => null),
+                    };
+                }
+                return response;
+            };
+            const feedTarget = document.querySelector<HTMLButtonElement>(
+                '[aria-label*="feed target" i]',
+            );
+            if (feedTarget) {
+                window.__codeGotchiEnergyDrop = () => {
+                    window.__codeGotchiEnergyDiagnostics.drop = true;
+                };
+                feedTarget.addEventListener(
+                    "drop",
+                    () => window.__codeGotchiEnergyDrop?.(),
+                    { once: true },
+                );
+            }
+        });
+
         await careInteraction({
             kind: "drag",
             source: drink,
             target: feedTarget,
         });
-        await expect(page.getByText("Eating an energy drink")).toBeVisible();
+        const diagnostics = await page.evaluate(async (): Promise<
+            EnergyDrinkDiagnostics
+        > => {
+            const inventory = Number(
+                document.querySelector('[data-testid="food-energy_drink"] strong')
+                    ?.textContent ?? Number.NaN,
+            );
+            const stateResponse = await fetch("/api/v1/state");
+            const state = await stateResponse.json();
+            return {
+                ...window.__codeGotchiEnergyDiagnostics,
+                feedback: document.querySelector(".feedback")?.textContent ?? "",
+                activity:
+                    document.querySelector('[data-testid="activity-label"]')
+                        ?.textContent ?? "",
+                inventory,
+                authoritativeInventory: state.inventory?.energy_drink,
+            };
+        });
+        console.log("ENERGY_DRINK_DIAGNOSTICS", diagnostics);
+        expect(diagnostics.drop, diagnostics).toBe(true);
+        expect(diagnostics.request, diagnostics).toEqual({
+            method: "POST",
+            url: "/api/v1/care/feed",
+        });
+        expect(diagnostics.response?.status, diagnostics).toBe(200);
+        expect(diagnostics.authoritativeInventory, diagnostics).toBe(
+            Number(before) - 1,
+        );
+        await expect(page.getByText("Eating an energy drink")).toBeVisible({
+            timeout: 2_000,
+        });
         await expect(drink.locator("strong")).toHaveText(
             String(Number(before) - 1),
         );

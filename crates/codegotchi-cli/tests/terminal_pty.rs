@@ -111,6 +111,14 @@ fn managed_pty_preserves_direct_invocation_input_resize_ansi_and_exit_code() {
         output.contains(&format!("FAKE_CODEX_CWD=<{}>", current_directory.display())),
         "fixture output: {output:?}"
     );
+    let canonical_current_directory = current_directory.canonicalize().unwrap();
+    assert!(
+        output.contains(&format!(
+            "FAKE_CODEX_CWD=<{}>",
+            canonical_current_directory.display()
+        )),
+        "canonical fixture output: {output:?}"
+    );
     assert!(output.contains("FAKE_CODEX_INPUT=<input delivered through pty>"));
     assert!(output.contains("FAKE_CODEX_SIZE=<31 120>"));
     assert_eq!(status.exit_code(), 23);

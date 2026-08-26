@@ -368,6 +368,7 @@ exit 1
     assert!(!temp.join("codex-home").read_dir().unwrap().next().is_some());
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn recursive_symlink_codex_and_browser_failure_are_nonfatal() {
     let temp = TempDir::new("symlink-browser");
@@ -400,9 +401,16 @@ fn browser_helper_nonzero_exit_warns_without_delaying_codex() {
     fs::create_dir_all(&cwd).unwrap();
     let log = temp.join("codex.log");
     let input = temp.join("stdin");
+    let browser = temp.join("failing-browser");
+    fs::write(&browser, "#!/bin/sh\nexit 1\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&browser, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     let mut command = setup_command(&temp, &cwd);
     command
-        .env("CODEGOTCHI_BROWSER", "/bin/false")
+        .env("CODEGOTCHI_BROWSER", &browser)
         .env("FAKE_CODEX_LOG", &log)
         .env("FAKE_STDIN_FILE", &input)
         .args(["run", "--", "codex"]);
@@ -1061,7 +1069,7 @@ fn production_binary_routes_terminal_queries_to_child_pty_without_compositor_lea
     assert_no_owned_metadata(&temp, "terminal query route");
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn foreground_terminal_group_signal_is_not_forwarded_a_second_time() {
     let temp = TempDir::new("pty-signal");
@@ -1133,7 +1141,7 @@ fn foreground_terminal_group_signal_is_not_forwarded_a_second_time() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn direct_wrapper_terminal_signals_are_forwarded_once_to_the_child() {
     let temp = TempDir::new("pty-direct-signal");
@@ -1237,7 +1245,7 @@ fn direct_wrapper_terminal_signals_are_forwarded_once_to_the_child() {
     assert_eq!(status.code(), Some(130), "PTY launcher status: {status}");
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn terminal_foreground_is_restored_after_codex_exits() {
     let temp = TempDir::new("pty-restore");

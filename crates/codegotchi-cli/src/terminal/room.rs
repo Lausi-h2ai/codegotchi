@@ -939,7 +939,10 @@ fn care_first_wide_poop_slots(
     let width = wide_poop_target_width();
     let height = wide_poop_target_height();
     let reserved = wide_full_care_zone(area);
-    let mut x = reserved.x - area.x;
+    let search_start =
+        (reserved.right().saturating_sub(1) - area.x).max(food_right.saturating_add(2));
+    let search_limit = reserved.x - area.x;
+    let mut x = search_start;
     let mut candidate;
     let care_zone = Rect::new(
         area.x,
@@ -954,8 +957,8 @@ fn care_first_wide_poop_slots(
         7,
     );
     loop {
-        candidate = Rect::new(area.x.saturating_add(x), reserved.y, width, height);
-        if candidate.right() <= area.right()
+        candidate = Rect::new(area.x.saturating_add(x), top, width, height);
+        if candidate.right() <= reserved.right()
             && !candidate.intersects(care_zone)
             && !candidate.intersects(pet)
             && !candidate.intersects(bed)
@@ -967,7 +970,7 @@ fn care_first_wide_poop_slots(
                 .into_iter()
                 .collect();
         }
-        if x + area.x == reserved.right().saturating_sub(1) {
+        if x == search_limit {
             return Vec::new();
         }
         x -= 1;
@@ -979,10 +982,9 @@ fn care_first_wide_poop_slots(
 #[must_use]
 pub fn wide_full_care_zone(area: Rect) -> Rect {
     let width = wide_poop_target_width();
-    let right = area.width.saturating_sub(6).max(1);
-    let left = right.saturating_sub(width.min(right));
-    let top = area.y + 8;
-    Rect::new(area.x + left, top, width, wide_poop_target_height())
+    let pet_x = area.width.saturating_sub(24).saturating_sub(20);
+    let left = pet_x.saturating_sub(width + 2);
+    Rect::new(area.x + left, area.y + 8, width, wide_poop_target_height())
 }
 
 /// Applies a presentation wander offset to a hit rectangle, clamping it inside

@@ -3,7 +3,7 @@ use codegotchi_cli::terminal::{
     CareGateway, PetPose, PresentationActivity, PresentationFrame, RoomAmbience, RoomCareRequest,
     RoomInputSession, RoomRenderOptions, SemanticTone, TerminalThemePreset, auto_style,
     has_authoritative_nap, presentation_activity, render_room, render_room_with_options,
-    room_geometry, room_geometry_with_frame,
+    room_geometry, room_geometry_with_frame, wide_full_care_zone,
 };
 use codegotchi_domain::{
     ActivityKind, AgentActivityState, DefaultNeedProgressionStrategy, FoodInventory, FoodKind, Pet,
@@ -895,8 +895,25 @@ fn care_first_poop_survives_every_allowed_full_wander_offset() {
                 };
                 let geometry = room_geometry_with_frame(area, &snapshot, &frame);
                 let (_, poop) = geometry.poops.first().expect("authoritative poop");
+                assert!(
+                    rects_overlap(wide_full_care_zone(area), *poop),
+                    "reserved zone must contain the actual poop target: width={width} zone={:?} poop={poop:?}",
+                    wide_full_care_zone(area)
+                );
                 let mut input = RoomInputSession::default();
                 let gateway = RecordingCareGateway::default();
+                let down_requests = input.process(
+                    area,
+                    &snapshot,
+                    &frame,
+                    &MouseEvent {
+                        kind: MouseEventKind::Down(MouseButton::Left),
+                        column: poop.x + poop.width / 2,
+                        row: poop.y + 1,
+                        modifiers: KeyModifiers::NONE,
+                    },
+                );
+                assert!(down_requests.is_empty());
                 let requests = input.process(
                     area,
                     &snapshot,
