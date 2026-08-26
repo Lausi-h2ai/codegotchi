@@ -79,8 +79,10 @@ pub struct FoodSource {
     pub count: u32,
 }
 
-/// Stable interactive regions of the room. Rendering and mouse hit testing
-/// share this geometry so affordances always correspond to drawn objects.
+/// Stable interactive regions of the room. Every rectangle is in absolute
+/// terminal coordinates, including when `area` is a lower pane with a
+/// non-zero origin. Rendering and mouse hit testing share this geometry so
+/// affordances always correspond to drawn objects.
 #[derive(Clone, Debug)]
 pub struct RoomGeometry {
     /// The pet sprite region; the petting and food-drop target.
@@ -246,13 +248,14 @@ fn room_mode(height: u16) -> RoomMode {
 fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) -> RoomGeometry {
     if area.width >= 80 {
         let bed_x = area.width.saturating_sub(24);
+        let pet_home = wide_full_pet_home(area);
         let bed = Rect::new(
             area.x.saturating_add(bed_x),
             area.y.saturating_add(5),
             23,
             7,
         );
-        let pet_x = bed_x.saturating_sub(20);
+        let pet_x = pet_home.x;
         let pet = if has_authoritative_nap(snapshot) {
             packed_sprite_rect(
                 area,
@@ -262,12 +265,7 @@ fn full_geometry(area: Rect, snapshot: &SimulationSnapshot, offset: (i16, i16)) 
             )
         } else {
             offset_rect(
-                Rect::new(
-                    area.x.saturating_add(pet_x),
-                    area.y.saturating_add(4),
-                    18,
-                    7,
-                ),
+                absolute_room_rect(area, Rect::new(pet_x, pet_home.y, 18, 7)),
                 offset,
                 area,
             )
@@ -944,20 +942,10 @@ fn care_first_wide_poop_slots(
     let search_limit = reserved.x - area.x;
     let mut x = search_start;
     let mut candidate;
-    let care_zone = Rect::new(
-        area.x,
-        area.y.saturating_add(top),
-        food_right,
-        FULL_ROOM_HEIGHT,
-    );
-    let pet = Rect::new(
-        area.x.saturating_add(pet_x),
-        area.y.saturating_add(4),
-        18,
-        7,
-    );
+    let care_zone = absolute_room_rect(area, Rect::new(0, top, food_right, FULL_ROOM_HEIGHT));
+    let pet = absolute_room_rect(area, Rect::new(pet_x, 4, 18, 7));
     loop {
-        candidate = Rect::new(area.x.saturating_add(x), top, width, height);
+        candidate = absolute_room_rect(area, Rect::new(x, top, width, height));
         if candidate.right() <= reserved.right()
             && !candidate.intersects(care_zone)
             && !candidate.intersects(pet)
@@ -982,14 +970,33 @@ fn care_first_wide_poop_slots(
 #[must_use]
 pub fn wide_full_care_zone(area: Rect) -> Rect {
     let width = wide_poop_target_width();
-    let pet_x = area.width.saturating_sub(24).saturating_sub(20);
+    let pet_x = wide_full_pet_home(area).x;
     let left = pet_x.saturating_sub(width + 2);
-    Rect::new(area.x + left, area.y + 8, width, wide_poop_target_height())
+    absolute_room_rect(area, Rect::new(left, 8, width, wide_poop_target_height()))
+}
+
+/// Converts a room-relative rectangle into the absolute physical terminal
+/// coordinate space used by [`RoomGeometry`] and mouse hit testing.
+pub(crate) fn absolute_room_rect(area: Rect, relative: Rect) -> Rect {
+    Rect::new(
+        area.x.saturating_add(relative.x),
+        area.y.saturating_add(relative.y),
+        relative.width,
+        relative.height,
+    )
+}
+
+/// The room-relative home anchor shared by wide Full geometry and autonomous
+/// presentation behavior. Callers comparing it with physical geometry must
+/// convert it with [`absolute_room_rect`].
+pub(crate) fn wide_full_pet_home(area: Rect) -> Position {
+    let bed_x = area.width.saturating_sub(24);
+    Position::new(bed_x.saturating_sub(20), 4)
 }
 
 /// Applies a presentation wander offset to a hit rectangle, clamping it inside
 /// the room area.
-fn offset_rect(rect: Rect, offset: (i16, i16), area: Rect) -> Rect {
+pub(crate) fn offset_rect(rect: Rect, offset: (i16, i16), area: Rect) -> Rect {
     if area.is_empty() {
         return rect;
     }

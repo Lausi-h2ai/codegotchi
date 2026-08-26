@@ -1,5 +1,6 @@
+use std::collections::VecDeque;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -36,12 +37,76 @@ impl Drop for TemporaryDirectory {
 
 fn read_until<R: Read>(reader: &mut R, marker: &[u8]) -> Vec<u8> {
     let mut output = Vec::new();
+    let mut line = Vec::new();
     let mut byte = [0_u8; 1];
-    while !output.windows(marker.len()).any(|window| window == marker) {
+    loop {
         reader.read_exact(&mut byte).expect("read PTY output");
-        output.push(byte[0]);
+        line.push(byte[0]);
+        if byte[0] != b'\n' {
+            continue;
+        }
+        let contains_marker = line.windows(marker.len()).any(|window| window == marker);
+        output.extend_from_slice(&line);
+        line.clear();
+        if contains_marker {
+            return output;
+        }
     }
-    output
+}
+
+struct FragmentedReader {
+    chunks: VecDeque<Vec<u8>>,
+}
+
+impl FragmentedReader {
+    fn new(chunks: impl IntoIterator<Item = &'static [u8]>) -> Self {
+        Self {
+            chunks: chunks
+                .into_iter()
+                .map(<[u8]>::to_vec)
+                .collect::<VecDeque<_>>(),
+        }
+    }
+}
+
+impl Read for FragmentedReader {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let Some(chunk) = self.chunks.front_mut() else {
+            return Ok(0);
+        };
+        let amount = buffer.len().min(chunk.len()).min(1);
+        buffer[..amount].copy_from_slice(&chunk[..amount]);
+        chunk.drain(..amount);
+        if chunk.is_empty() {
+            self.chunks.pop_front();
+        }
+        Ok(amount)
+    }
+}
+
+#[test]
+fn read_until_frames_ready_and_pid_records_across_partial_reads() {
+    let mut reader = FragmentedReader::new([
+        &b"FAKE_SIGNAL_READY\r"[..],
+        &b"\nFAKE_SIGNAL_PID=4242\r"[..],
+        &b"\n"[..],
+    ]);
+
+    let ready = read_until(&mut reader, b"FAKE_SIGNAL_READY");
+    assert!(
+        ready.ends_with(b"\r\n"),
+        "READY record was not complete: {ready:?}"
+    );
+
+    let metadata = read_until(&mut reader, b"FAKE_SIGNAL_PID=");
+    assert!(
+        metadata.ends_with(b"\r\n"),
+        "PID record was not complete: {metadata:?}"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&metadata),
+        "FAKE_SIGNAL_PID=4242\r\n"
+    );
 }
 
 #[test]
@@ -107,17 +172,22 @@ fn managed_pty_preserves_direct_invocation_input_resize_ansi_and_exit_code() {
         "FAKE_CODEX_SESSION_FILE=<{}>",
         session_file.display()
     )));
-    assert!(
-        output.contains(&format!("FAKE_CODEX_CWD=<{}>", current_directory.display())),
-        "fixture output: {output:?}"
-    );
     let canonical_current_directory = current_directory.canonicalize().unwrap();
-    assert!(
-        output.contains(&format!(
-            "FAKE_CODEX_CWD=<{}>",
-            canonical_current_directory.display()
-        )),
-        "canonical fixture output: {output:?}"
+    let observed_current_directory = output
+        .lines()
+        .find_map(|line| {
+            let line = line.trim_end_matches('\r');
+            line.strip_prefix("FAKE_CODEX_CWD=<")
+                .and_then(|path| path.strip_suffix('>'))
+        })
+        .map(PathBuf::from)
+        .unwrap_or_else(|| panic!("fixture emits a CWD record: {output:?}"));
+    assert_eq!(
+        observed_current_directory
+            .canonicalize()
+            .expect("fixture CWD canonicalizes"),
+        canonical_current_directory,
+        "fixture output: {output:?}"
     );
     assert!(output.contains("FAKE_CODEX_INPUT=<input delivered through pty>"));
     assert!(output.contains("FAKE_CODEX_SIZE=<31 120>"));
@@ -172,13 +242,10 @@ fn managed_pty_escalates_from_interrupt_to_terminate() {
     };
     let mut child = PtyCodexChild::spawn(&invocation, 24, 80).expect("spawn escalation fixture");
     let mut reader = child.reader().expect("clone escalation reader");
-    read_until(&mut reader, b"FAKE_SIGNAL_READY");
-    let mut metadata = [0_u8; 64];
-    let metadata_len = reader
-        .read(&mut metadata)
-        .expect("read escalation fixture metadata without blocking on EOF");
-    let ready = String::from_utf8_lossy(&metadata[..metadata_len]).into_owned();
-    let pid = ready
+    let ready = read_until(&mut reader, b"FAKE_SIGNAL_READY");
+    let metadata = read_until(&mut reader, b"FAKE_SIGNAL_PID=");
+    let framed_metadata = [ready.as_slice(), metadata.as_slice()].concat();
+    let pid = String::from_utf8_lossy(&framed_metadata)
         .lines()
         .find_map(|line| line.strip_prefix("FAKE_SIGNAL_PID="))
         .unwrap_or_default()
@@ -186,13 +253,17 @@ fn managed_pty_escalates_from_interrupt_to_terminate() {
         .to_owned();
     assert!(!pid.is_empty(), "unexpected fixture metadata: {ready:?}");
     child.interrupt().expect("deliver first SIGINT");
-    std::thread::sleep(std::time::Duration::from_millis(30));
+    let interrupt = read_until(&mut reader, b"FAKE_SIGNAL_INT");
+    assert!(
+        String::from_utf8_lossy(&interrupt).contains("FAKE_SIGNAL_INT"),
+        "fixture did not publish interrupt handling: {interrupt:?}"
+    );
     child.terminate().expect("deliver escalating SIGTERM");
     let status = child.wait().expect("reap escalation fixture");
     assert_eq!(
         status.exit_code(),
         143,
-        "fixture published {ready:?}; SIGTERM must override ignored SIGINT"
+        "fixture published {framed_metadata:?}; SIGTERM must override ignored SIGINT"
     );
 }
 

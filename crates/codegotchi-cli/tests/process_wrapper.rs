@@ -368,7 +368,7 @@ exit 1
     assert!(!temp.join("codex-home").read_dir().unwrap().next().is_some());
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 #[test]
 fn recursive_symlink_codex_and_browser_failure_are_nonfatal() {
     let temp = TempDir::new("symlink-browser");
@@ -761,12 +761,12 @@ fn sigwinch_is_forwarded_while_child_keeps_inherited_stdio() {
     assert!(fs::read_to_string(signal_log).unwrap().contains("SIGWINCH"));
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn process_group_id(pid: u32) -> i32 {
     process_group_info(pid).0
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn process_group_info(pid: u32) -> (i32, i32) {
     let output = Command::new("ps")
         .args(["-o", "pgid=,tpgid=", "-p", &pid.to_string()])
@@ -789,7 +789,7 @@ fn process_group_info(pid: u32) -> (i32, i32) {
     )
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn parent_process_id(pid: u32) -> u32 {
     let output = Command::new("ps")
         .args(["-o", "ppid=", "-p", &pid.to_string()])
@@ -802,7 +802,7 @@ fn parent_process_id(pid: u32) -> u32 {
         .expect("parent process id parses")
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn signal_seen_before_deadline(path: &Path, expected: &str) -> bool {
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline {

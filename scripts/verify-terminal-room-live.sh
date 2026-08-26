@@ -87,6 +87,15 @@ declare -a CREATED_PIDS=()
 declare -a CREATED_STARTS=()
 declare -a CREATED_MARKERS=()
 declare -A STATE_SUMMARIES=()
+declare -a PRODUCT_SOURCE_PATHS=(
+    crates/codegotchi-cli/src
+    crates/codegotchi-cli/tests
+    crates/codegotchi-cli/examples
+    crates/codegotchi-cli/web-dist
+    web/src
+    web/e2e
+    web/scripts
+)
 
 DISPLAY_USED=""
 DISPLAY_AUTHORITY=""
@@ -117,6 +126,12 @@ FINAL_STATUS="not-run"
 REQUIRED_GATE_BLOCKED=0
 RESTORATION_PROBE_ENABLED=1
 RESTORATION_TOKEN=$(live_acceptance_restoration_token)
+SOURCE_HEAD="not-observed"
+SOURCE_WORKTREE_STATUS="not-observed"
+PRODUCT_SOURCE_DIFF_SHA="not-observed"
+CODEGOTCHI_BINARY_SHA="not-observed"
+HARNESS_SHA="not-observed"
+WORKSPACE_HELPER_SHA="not-observed"
 
 log() {
     local message=$1
@@ -128,6 +143,37 @@ record() {
     local result=$2
     CHECKS+=("$name: $result")
     log "$name: $result"
+}
+
+report_artifact_path() {
+    local path=$1
+    if [[ $path == "$REPOSITORY_ROOT" ]]; then
+        printf '%s\n' '.'
+    elif [[ $path == "$REPOSITORY_ROOT/"* ]]; then
+        printf '%s\n' "${path#"$REPOSITORY_ROOT/"}"
+    else
+        printf '%s\n' '<configured evidence directory>'
+    fi
+}
+
+collect_provenance() {
+    SOURCE_HEAD=$(git -C "$REPOSITORY_ROOT" rev-parse HEAD 2>/dev/null) || {
+        fail 'could not read the exact repository HEAD for acceptance provenance'
+    }
+    local scoped_status
+    scoped_status=$(git -C "$REPOSITORY_ROOT" status --porcelain -- "${PRODUCT_SOURCE_PATHS[@]}" 2>/dev/null) || {
+        fail 'could not inspect the scoped product-source working tree'
+    }
+    if [[ -n $scoped_status ]]; then
+        SOURCE_WORKTREE_STATUS='dirty (scoped product-source diff SHA-256 recorded)'
+    else
+        SOURCE_WORKTREE_STATUS='clean'
+    fi
+    PRODUCT_SOURCE_DIFF_SHA=$(git -C "$REPOSITORY_ROOT" diff --binary HEAD -- "${PRODUCT_SOURCE_PATHS[@]}" \
+        | sha256sum | awk '{print $1}')
+    CODEGOTCHI_BINARY_SHA=$(sha256sum "$CODEGOTCHI_EXECUTABLE" | awk '{print $1}')
+    HARNESS_SHA=$(sha256sum "$SCRIPT_DIR/verify-terminal-room-live.sh" | awk '{print $1}')
+    WORKSPACE_HELPER_SHA=$(sha256sum "$SCRIPT_DIR/live-acceptance-workspace.sh" | awk '{print $1}')
 }
 
 block_required_gate() {
@@ -464,11 +510,15 @@ write_report() {
         printf 'Date (UTC): `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         printf 'Exit status: `%s`\n' "$exit_status"
         printf 'Final status: **%s**\n' "$FINAL_STATUS"
+        printf 'Exact source HEAD: `%s`\n' "$SOURCE_HEAD"
+        printf 'Scoped product-source working tree: `%s`\n' "$SOURCE_WORKTREE_STATUS"
+        printf 'Product-source diff scope: `crates/codegotchi-cli/{src,tests,examples,web-dist} web/{src,e2e,scripts}`\n'
+        printf 'Scoped product-source diff SHA-256: `%s`\n' "$PRODUCT_SOURCE_DIFF_SHA"
+        printf 'CodeGotchi binary SHA-256: `%s`\n' "$CODEGOTCHI_BINARY_SHA"
         printf 'Codex version: `%s`\n' "${CODEX_VERSION:-not-observed}"
-        printf 'Harness SHA-256: `%s`\n' "$(sha256sum "$SCRIPT_DIR/verify-terminal-room-live.sh" | awk '{print $1}')"
-        printf 'Workspace-helper SHA-256: `%s`\n' "$(sha256sum "$SCRIPT_DIR/live-acceptance-workspace.sh" | awk '{print $1}')"
-        printf 'Display path: `%s`\n' "${DISPLAY_USED:-not-selected}"
-        printf 'Evidence directory: `%s`\n\n' "$OUTPUT_DIR"
+        printf 'Harness SHA-256: `%s`\n' "$HARNESS_SHA"
+        printf 'Workspace-helper SHA-256: `%s`\n' "$WORKSPACE_HELPER_SHA"
+        printf 'Evidence directory: `%s`\n\n' "$(report_artifact_path "$OUTPUT_DIR")"
         printf 'This report intentionally excludes Codex arguments, CODEX_HOME contents, runtime metadata, and bearer tokens.\n\n'
         printf '## Checklist\n\n'
         if ((${#CHECKS[@]} == 0)); then
@@ -485,7 +535,7 @@ write_report() {
         else
             local frame
             for frame in "${CAPTURED_FRAMES[@]}"; do
-                printf '%s\n' '- `'"$frame"'`'
+                printf '%s\n' "- $(report_artifact_path "$frame")"
             done
         fi
         printf '\n## Restoration\n\n'
@@ -1037,11 +1087,17 @@ poll_authoritative_turn_completion() {
 }
 
 resize_terminal() {
-    local rows=$1
+    resize_terminal_to "$CURRENT_COLUMNS" "$1"
+}
+
+resize_terminal_to() {
+    local columns=$1
+    local rows=$2
     local before_width before_height after_width after_height resize_hints
     before_width=$(window_geometry_value WIDTH)
     before_height=$(window_geometry_value HEIGHT)
-    display_command xdotool windowsize --sync --usehints "$WINDOW_ID" "$CURRENT_COLUMNS" "$rows" >/dev/null 2>&1 || fail "xdotool could not resize the terminal to ${CURRENT_COLUMNS}x${rows}"
+    display_command xdotool windowsize --sync --usehints "$WINDOW_ID" "$columns" "$rows" >/dev/null 2>&1 || fail "xdotool could not resize the terminal to ${columns}x${rows}"
+    CURRENT_COLUMNS=$columns
     CURRENT_ROWS=$rows
     sleep 0.8
     assert_window_usable
@@ -1161,6 +1217,25 @@ full_clean() {
     sleep 0.8
     assert_window_usable
     record 'authoritative poop clean' 'attempted against the isolated generated-poop target'
+}
+
+full_clean_narrow() {
+    cell_click 31 40
+    sleep 0.8
+    assert_window_usable
+    record '80x45 authoritative poop clean' 'clicked the physical fallback care target in the populated narrow Full room'
+}
+
+verify_narrow_full_care() {
+    local prepared_poops after_clean_poops
+    prepared_poops=$(state_value prepared-80x45 poops)
+    after_clean_poops=$(state_value after-80x45-clean poops)
+    if [[ $prepared_poops =~ ^[0-9]+$ && $prepared_poops -gt 0 && $after_clean_poops =~ ^[0-9]+$ && $after_clean_poops -lt $prepared_poops ]]; then
+        record '80x45 authoritative clean result' 'verified by a settled pending-poop decrement after the visible fallback target click'
+    else
+        record '80x45 authoritative clean result' 'not verified by the settled pending-poop summaries'
+        block_required_gate
+    fi
 }
 
 full_nap() {
@@ -1483,6 +1558,7 @@ main() {
     done
     find_codegotchi_binary
     find_codex_binary
+    collect_provenance
     select_codex_home
     prepare_live_acceptance_workspace "$RUN_ROOT" "$CODEX_HOME_VALUE"
     record 'isolated prompt workspace' 'created run-owned test.md for the bounded file-read interaction'
@@ -1531,6 +1607,15 @@ main() {
     state_summary after-nap
     verify_care_snapshots
     capture_frame 'full-live-care'
+
+    resize_terminal_to 80 45
+    debug_command generate-poop
+    state_summary prepared-80x45
+    capture_frame 'full-live-80x45-care'
+    full_clean_narrow
+    state_summary after-80x45-clean
+    verify_narrow_full_care
+    resize_terminal_to 120 45
 
     verify_hook_trust
     capture_frame 'full-live-checks'

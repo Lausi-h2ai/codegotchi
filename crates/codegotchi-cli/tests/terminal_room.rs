@@ -1,9 +1,9 @@
 use chrono::{Duration, Utc};
 use codegotchi_cli::terminal::{
-    CareGateway, PetPose, PresentationActivity, PresentationFrame, RoomAmbience, RoomCareRequest,
-    RoomInputSession, RoomRenderOptions, SemanticTone, TerminalThemePreset, auto_style,
-    has_authoritative_nap, presentation_activity, render_room, render_room_with_options,
-    room_geometry, room_geometry_with_frame, wide_full_care_zone,
+    CareGateway, PetPose, PresentationActivity, PresentationFrame, PresentationState, RoomAmbience,
+    RoomCareRequest, RoomInputSession, RoomRenderOptions, SemanticTone, TerminalThemePreset,
+    auto_style, has_authoritative_nap, presentation_activity, render_room,
+    render_room_with_options, room_geometry, room_geometry_with_frame, wide_full_care_zone,
 };
 use codegotchi_domain::{
     ActivityKind, AgentActivityState, DefaultNeedProgressionStrategy, FoodInventory, FoodKind, Pet,
@@ -853,6 +853,82 @@ fn rects_overlap(first: Rect, second: Rect) -> bool {
         && second.y < first.bottom()
 }
 
+fn rect_contains(outer: Rect, inner: Rect) -> bool {
+    outer.x <= inner.x
+        && inner.right() <= outer.right()
+        && outer.y <= inner.y
+        && inner.bottom() <= outer.bottom()
+}
+
+/// Full-room geometry is an absolute physical-terminal model even when the
+/// room is the lower pane of a composed terminal. The 80/81-column fallback
+/// poop intentionally occupies the same rectangle as the reserved care lane.
+#[test]
+fn full_wide_geometry_uses_absolute_coordinates_at_nonzero_origins() {
+    let now = Utc::now();
+    let poop_id = Uuid::from_u128(0x8001);
+    for area in [
+        Rect::new(0, 31, 80, 14),
+        Rect::new(0, 31, 81, 14),
+        Rect::new(7, 31, 80, 14),
+    ] {
+        let mut snapshot = base_snapshot(now);
+        snapshot.pending_poops.push(Poop::new(poop_id, now));
+
+        let geometry = room_geometry(area, &snapshot);
+        let reserved = wide_full_care_zone(area);
+        let (_, poop) = geometry
+            .poops
+            .iter()
+            .find(|(id, _)| *id == poop_id)
+            .expect("authoritative poop must remain visible");
+
+        assert!(rect_contains(area, geometry.pet), "pet escaped {area:?}");
+        assert!(rect_contains(area, geometry.bed.expect("Full bed")));
+        assert!(
+            geometry
+                .food_sources
+                .iter()
+                .all(|source| rect_contains(area, source.rect))
+        );
+        assert!(
+            rect_contains(area, *poop),
+            "poop escaped {area:?}: {poop:?}"
+        );
+        assert_eq!(poop.y, area.y + 8, "fallback must use absolute y");
+        assert!(rect_contains(reserved, *poop), "poop must be contained");
+        assert_eq!(reserved, *poop, "fallback and reserved care target align");
+    }
+}
+
+/// The renderer subtracts the physical room origin only for presentation;
+/// the visible fallback object must still land in the same physical cells as
+/// the absolute geometry used by `poop_hit`.
+#[test]
+fn full_wide_fallback_poop_render_and_hitbox_share_nonzero_origin() {
+    let now = Utc::now();
+    let poop_id = Uuid::from_u128(0x8002);
+    let mut snapshot = base_snapshot(now);
+    snapshot.pending_poops.push(Poop::new(poop_id, now));
+    let area = Rect::new(7, 31, 80, 14);
+    let geometry = room_geometry(area, &snapshot);
+    let (_, poop) = geometry.poops.first().expect("fallback poop");
+
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+
+    let visible_cell = Position::new(poop.x + 1, poop.y);
+    assert_eq!(geometry.poop_hit(visible_cell), Some(poop_id));
+    assert_eq!(
+        buffer
+            .cell(visible_cell)
+            .expect("physical poop cell")
+            .symbol(),
+        "╭",
+        "visible fallback poop must be drawn at its geometry origin"
+    );
+}
+
 #[derive(Default)]
 struct RecordingCareGateway {
     requests: Mutex<Vec<RoomCareRequest>>,
@@ -941,6 +1017,100 @@ fn care_first_poop_survives_every_allowed_full_wander_offset() {
             }
         }
     }
+}
+
+/// A real room input lifecycle clicks the visible physical fallback target.
+/// The pet hitbox must not capture this press, and the release must produce
+/// exactly one authoritative clean request at both narrow Full widths.
+#[test]
+fn nonzero_origin_full_fallback_poop_click_cleans_once_without_pet_capture() {
+    let now = Utc::now();
+    let poop_id = Uuid::from_u128(0x8003);
+    for width in [80_u16, 81] {
+        let area = Rect::new(7, 31, width, 14);
+        let mut snapshot = base_snapshot(now);
+        snapshot.pending_poops.push(Poop::new(poop_id, now));
+        let visible_target = wide_full_care_zone(area);
+        let point = Position::new(visible_target.x + 2, visible_target.y + 1);
+        let mut input = RoomInputSession::default();
+
+        assert!(
+            input
+                .process(
+                    area,
+                    &snapshot,
+                    &default_frame(),
+                    &MouseEvent {
+                        kind: MouseEventKind::Down(MouseButton::Left),
+                        column: point.x,
+                        row: point.y,
+                        modifiers: KeyModifiers::NONE,
+                    },
+                )
+                .is_empty()
+        );
+        assert!(
+            !input.has_active_capture(),
+            "fallback poop press must not be captured by the pet"
+        );
+
+        let requests = input.process(
+            area,
+            &snapshot,
+            &default_frame(),
+            &MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Left),
+                column: point.x,
+                row: point.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(requests.len(), 1, "width={width} requests={requests:?}");
+        assert!(matches!(
+            &requests[0],
+            RoomCareRequest::Clean { poop_id: cleaned, .. } if *cleaned == poop_id
+        ));
+    }
+}
+
+/// Exercise reachable presentation frames rather than a guessed offset set.
+/// The moving pet remains outside the actual fallback care lane while offsets
+/// still change, proving the exclusion is not implemented by freezing it.
+#[test]
+fn nonzero_origin_full_wander_avoids_actual_fallback_care_zone_without_freezing() {
+    let now = Utc::now();
+    let poop_id = Uuid::from_u128(0x8004);
+    let area = Rect::new(7, 31, 80, 14);
+    let care_zone = wide_full_care_zone(area);
+    let mut snapshot = base_snapshot(now);
+    snapshot.pending_poops.push(Poop::new(poop_id, now));
+    let mut observed_offsets = std::collections::HashSet::new();
+    let mut saw_walking = false;
+
+    for seed in 0..64_u64 {
+        let mut presentation = PresentationState::new(seed);
+        for tick in 0..=240_u64 {
+            let frame = presentation.tick(
+                std::time::Duration::from_millis(tick * 250),
+                Some(&snapshot),
+                area,
+            );
+            let geometry = room_geometry_with_frame(area, &snapshot, &frame);
+            assert!(
+                !rects_overlap(geometry.pet, care_zone),
+                "reachable frame entered care zone: seed={seed} tick={tick} frame={frame:?} pet={:?} zone={care_zone:?}",
+                geometry.pet
+            );
+            observed_offsets.insert(frame.offset);
+            saw_walking |= matches!(frame.pose, PetPose::WalkA | PetPose::WalkB);
+        }
+    }
+
+    assert!(saw_walking, "presentation must still wander in Full");
+    assert!(
+        observed_offsets.len() > 1,
+        "presentation offsets must change instead of freezing"
+    );
 }
 
 /// Compact keeps one subdued window cue; Full-only furniture disappears before

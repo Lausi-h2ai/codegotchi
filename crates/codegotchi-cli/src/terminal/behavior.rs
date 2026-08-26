@@ -2,7 +2,7 @@ use codegotchi_domain::{ActivityKind, AgentActivityState, PetBehavior, Simulatio
 use ratatui::layout::{Position, Rect};
 use std::time::Duration;
 
-use super::room::wide_full_care_zone;
+use super::room::{absolute_room_rect, offset_rect, wide_full_care_zone, wide_full_pet_home};
 
 /// Broad, durable presentation moods derived exclusively from authoritative
 /// structured state. The terminal renderer never classifies visible Codex
@@ -453,13 +453,10 @@ fn candidate_overlaps_reserved_care(offset: (i16, i16), home: Position, area: Re
     if area.height < 14 || area.width < 80 {
         return false;
     }
-    let candidate = Rect::new(
-        (i64::from(home.x) + i64::from(offset.0)).clamp(0, i64::from(area.width.saturating_sub(1)))
-            as u16,
-        (i64::from(home.y) + i64::from(offset.1)).clamp(0, i64::from(area.height.saturating_sub(1)))
-            as u16,
-        18,
-        7,
+    let candidate = offset_rect(
+        absolute_room_rect(area, Rect::new(home.x, home.y, 18, 7)),
+        offset,
+        area,
     );
     candidate.intersects(wide_full_care_zone(area))
 }
@@ -486,8 +483,11 @@ fn home_for(area: Rect) -> Position {
         } else {
             area.width.saturating_sub(28).max(4)
         };
-        let pet_offset = if area.width >= 80 { 20 } else { 18 };
-        Position::new(bed_x.saturating_sub(pet_offset), 4)
+        if area.width >= 80 {
+            wide_full_pet_home(area)
+        } else {
+            Position::new(bed_x.saturating_sub(18), 4)
+        }
     } else if area.height >= 7 {
         let pet_x = if area.width >= 80 {
             2

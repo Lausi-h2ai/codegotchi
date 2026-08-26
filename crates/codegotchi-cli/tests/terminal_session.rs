@@ -14,13 +14,13 @@ use chrono::Utc;
 use codegotchi_cli::terminal::{
     TerminalBackend, TerminalSessionCore, TerminalSessionError, TerminalSessionEventSource,
     TerminalSessionSignal, TerminalSessionStartError, initialize_terminal_and_spawn, render_codex,
-    run_terminal_session, run_terminal_session_with_events,
+    room_geometry_with_frame, run_terminal_session, run_terminal_session_with_events,
     run_terminal_session_with_spawn_guard_and_initialization_recovery,
-    terminal_session_signal_channel,
+    terminal_session_signal_channel, wide_full_care_zone,
 };
 use codegotchi_cli::{AuthoritativeRuntime, CodexInvocation, SqliteStore};
 use codegotchi_domain::{
-    DefaultNeedProgressionStrategy, FoodInventory, Pet, PetSimulation, PetSpecies,
+    DefaultNeedProgressionStrategy, FoodInventory, Pet, PetSimulation, PetSpecies, Poop,
     SimulationSnapshot, SystemClock,
 };
 use crossterm::event::{
@@ -306,6 +306,36 @@ fn production_session_core_output_reaches_the_production_renderer() {
     assert_eq!(buffer[(0, 0)].fg, Color::Red);
     assert_eq!(buffer[(1, 0)].symbol(), "E");
     assert_eq!(cursor, Some(ratatui::layout::Position::new(5, 0)));
+}
+
+#[test]
+fn eighty_by_forty_five_core_uses_lower_pane_origin_for_full_care_geometry() {
+    let now = Utc::now();
+    let pet = Pet::with_inventory(
+        Uuid::from_u128(0x8100),
+        "Mochi",
+        codegotchi_domain::PetSpecies::Cat,
+        now,
+        FoodInventory::starter(),
+    );
+    let mut snapshot =
+        PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot();
+    let poop_id = Uuid::from_u128(0x8101);
+    snapshot.pending_poops.push(Poop::new(poop_id, now));
+
+    let mut core = TerminalSessionCore::with_seed(45, 80, 0x8102);
+    core.set_snapshot(snapshot.clone());
+    assert_eq!(core.layout().room, Rect::new(0, 31, 80, 14));
+
+    let geometry =
+        room_geometry_with_frame(core.layout().room, &snapshot, &core.presentation_frame());
+    let (_, poop) = geometry
+        .poops
+        .iter()
+        .find(|(id, _)| *id == poop_id)
+        .expect("core Full room retains authoritative poop");
+    assert_eq!(poop.y, core.layout().room.y + 8);
+    assert_eq!(*poop, wide_full_care_zone(core.layout().room));
 }
 
 #[test]
