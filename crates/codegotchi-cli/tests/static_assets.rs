@@ -1,9 +1,13 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Read as StdRead, Write as StdWrite};
-use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(target_os = "linux")]
+use std::io::{BufRead, BufReader, Read as StdRead, Write as StdWrite};
+#[cfg(target_os = "linux")]
+use std::net::{SocketAddr, TcpStream};
+#[cfg(target_os = "linux")]
+use std::process::{Command, Stdio};
 
 use codegotchi_cli::{AuthoritativeRuntime, RunningServer, SqliteStore};
 use codegotchi_domain::{Pet, PetSpecies};
@@ -84,6 +88,7 @@ fn asset_path_from_reference(reference: &str) -> PathBuf {
         .join(reference.trim_start_matches('/'))
 }
 
+#[cfg(target_os = "linux")]
 fn wait_for_file(path: &Path) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while !path.exists() {
@@ -96,6 +101,7 @@ fn wait_for_file(path: &Path) {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn installed_get(address: SocketAddr, path: &str) -> HttpResponse {
     let mut stream = TcpStream::connect(address).expect("installed server accepts HTTP");
     stream
@@ -135,6 +141,7 @@ fn installed_get(address: SocketAddr, path: &str) -> HttpResponse {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn installed_ui_address(line: &str) -> SocketAddr {
     let url = line
         .trim()
