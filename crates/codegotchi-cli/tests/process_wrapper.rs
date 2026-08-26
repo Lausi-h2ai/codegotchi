@@ -212,9 +212,17 @@ fn exact_wrapper_is_transparent_and_persists_profile_but_cleans_metadata() {
             .as_slice()
         )
     );
+    let observed_cwd = log_fields(&log, "CWD")
+        .into_iter()
+        .next()
+        .map(PathBuf::from)
+        .expect("fake Codex logs one working directory");
     assert_eq!(
-        log_fields(&log, "CWD"),
-        vec![cwd.to_string_lossy().into_owned()]
+        observed_cwd
+            .canonicalize()
+            .expect("observed CWD canonicalizes"),
+        cwd.canonicalize().expect("expected CWD canonicalizes"),
+        "fake Codex CWD: {observed_cwd:?}"
     );
 
     let metadata: RuntimeMetadataV1 =
