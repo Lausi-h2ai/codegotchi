@@ -707,10 +707,10 @@ async fn launcher_vertical_flow_persists_and_replays_across_restart() {
         b"",
     )
     .await;
-    assert_eq!(after_restock.body["inventory"]["kibble"], 50);
-    assert_eq!(after_restock.body["inventory"]["treat"], 25);
-    assert_eq!(after_restock.body["inventory"]["fruit"], 25);
-    assert_eq!(after_restock.body["inventory"]["energy_drink"], 10);
+    assert_eq!(after_restock.body["inventory"]["kibble"], u32::MAX);
+    assert_eq!(after_restock.body["inventory"]["treat"], u32::MAX);
+    assert_eq!(after_restock.body["inventory"]["fruit"], u32::MAX);
+    assert_eq!(after_restock.body["inventory"]["energy_drink"], u32::MAX);
 
     let clean_body = serde_json::to_vec(&json!({
         "actionId": "00000000-0000-0000-0000-000000000012",

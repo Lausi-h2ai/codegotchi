@@ -104,7 +104,11 @@ fn snapshot_json_round_trip_restores_all_continuation_state() {
     .unwrap();
 
     assert_eq!(restored.snapshot(), before);
-    assert_eq!(restored.pet().inventory().count(FoodKind::Kibble), 46);
+    assert_eq!(
+        restored.pet().inventory().count(FoodKind::Kibble),
+        46,
+        "the domain still preserves finite fixture inventories; the product runtime normalizes them"
+    );
     assert_eq!(
         restored.pet().pending_poops().len(),
         before.pending_poops.len()

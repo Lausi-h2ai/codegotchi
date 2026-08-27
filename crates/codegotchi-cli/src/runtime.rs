@@ -79,7 +79,13 @@ impl AuthoritativeRuntime {
             }
             RuntimeInitial::Snapshot(snapshot) => snapshot,
         };
-        let snapshot = store.load_or_initialize(initial_snapshot)?;
+        let loaded_snapshot = store.load_or_initialize(initial_snapshot)?;
+        let mut snapshot = loaded_snapshot;
+        let unlimited_inventory = FoodInventory::unlimited();
+        if snapshot.inventory != unlimited_inventory {
+            snapshot.inventory = unlimited_inventory;
+            store.save(&snapshot)?;
+        }
         let simulation =
             PetSimulation::from_snapshot(snapshot, SystemClock, DefaultNeedProgressionStrategy)?;
         let (snapshots, _) = broadcast::channel(32);
@@ -287,7 +293,7 @@ impl AuthoritativeRuntime {
         self.persist_and_broadcast(&mut simulation, before, false)
     }
 
-    /// Fixed demo transition: restore the starter pantry (50/25/25/10) at the
+    /// Fixed demo transition: restore the unlimited care-item pantry at the
     /// current wall clock. There is no caller-supplied value.
     pub fn debug_restock(&self) -> Result<MutationReceipt, RuntimeError> {
         let mut simulation = self.lock_simulation()?;
@@ -425,7 +431,7 @@ fn seed_new_pet(pet: Pet) -> Pet {
         pet.name().to_owned(),
         pet.species(),
         pet.last_updated_at(),
-        FoodInventory::starter(),
+        FoodInventory::unlimited(),
     )
 }
 
@@ -486,6 +492,49 @@ mod tests {
             .expect("replayed pet should be accepted");
         assert!(second.duplicate);
         assert_eq!(second.snapshot, first.snapshot);
+    }
+
+    #[test]
+    fn restoring_a_runtime_normalizes_existing_care_items_to_unlimited() {
+        let start = Utc::now();
+        let mut finite = FoodInventory::default();
+        finite.add(codegotchi_domain::FoodKind::Kibble, 1);
+        let pet = Pet::with_inventory(
+            Uuid::from_u128(9003),
+            "Mochi",
+            codegotchi_domain::PetSpecies::Cat,
+            start,
+            finite,
+        );
+        let initial =
+            PetSimulation::new(pet, FakeClock::new(start), DefaultNeedProgressionStrategy)
+                .snapshot();
+        let store = SqliteStore::open(":memory:").unwrap();
+        let runtime = AuthoritativeRuntime::new(store.clone(), initial).unwrap();
+
+        runtime
+            .feed(Uuid::from_u128(9004), "kibble")
+            .expect("first feed should apply");
+        runtime
+            .feed(Uuid::from_u128(9005), "kibble")
+            .expect("care items should not run out");
+
+        assert_eq!(
+            runtime
+                .snapshot()
+                .inventory
+                .count(codegotchi_domain::FoodKind::Kibble),
+            u32::MAX
+        );
+        assert_eq!(
+            store
+                .load()
+                .unwrap()
+                .expect("runtime snapshot persists")
+                .inventory
+                .count(codegotchi_domain::FoodKind::Kibble),
+            u32::MAX
+        );
     }
 
     #[test]

@@ -171,8 +171,8 @@ export class CodeGotchiClient {
     }
 
     /**
-     * Fixed demo control: restore the starter pantry through the guarded
-     * debug route. Only shown when the runtime reports debug enabled.
+     * Fixed demo control: restore the unlimited care-item pantry through the
+     * guarded debug route. Only shown when the runtime reports debug enabled.
      */
     public async restock(): Promise<CareResponse> {
         const response = await this.request<CareResponse>(

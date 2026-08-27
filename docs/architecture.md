@@ -106,7 +106,7 @@ $HOME/.local/state/codegotchi/state.sqlite
 The versioned snapshot contains pet identity/name/species, needs, behavior,
 activity, outcomes, work and digestion points, timestamps, inventory, pending
 poops, enforcement mode, session activity, and event/care replay sets. New
-pets receive 50 kibble, 25 treats, and 25 fruit exactly once. Restarts restore
+pets receive an unlimited supply of every known care item. Restarts restore
 the cared-for state and replay IDs rather than reseeding it.
 
 Short-lived metadata is placed in `$XDG_RUNTIME_DIR/codegotchi/`, falling back
@@ -181,8 +181,9 @@ The runtime also advertises its debug mode over
 `GET /api/v1/debug/status` (`debugEnabled`), so a room launched with
 `CODEGOTCHI_ENABLE_DEBUG=1 codegotchi run -- codex` can show the guarded
 "Restock pantry" button. `debug restock` and the button both restore the
-starter pantry (50/25/25/10) at the current wall clock; food never regenerates
-on its own, so this keeps demos from soft-locking on an empty pantry.
+unlimited care-item pantry at the current wall clock. Active product sessions
+never run out of care items; the control remains a deterministic demo and
+compatibility action.
 
 `debug neglect` sets hunger and energy critical at the current wall clock
 (energy 0 / hunger 100), which is enough to exercise every strict refusal

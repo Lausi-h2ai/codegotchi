@@ -34,6 +34,41 @@ fn default_frame() -> PresentationFrame {
     PresentationFrame::default()
 }
 
+#[test]
+fn care_item_labels_show_names_without_quantities() {
+    let snapshot = base_snapshot(Utc::now());
+    for area in [
+        Rect::new(0, 0, 60, 14),
+        Rect::new(0, 0, 120, 14),
+        Rect::new(0, 0, 70, 7),
+        Rect::new(0, 0, 120, 7),
+    ] {
+        let mut buffer = Buffer::filled(area, Cell::new(" "));
+        render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+        let text = buffer_text(&buffer, area.width, area.height);
+
+        for label in ["KIB", "TRT", "FRT", "ENE"] {
+            assert!(
+                text.contains(label),
+                "care-item name {label} missing at {area:?}: {text}"
+            );
+        }
+        for quantity in ["x50", "x25", "x10", "FOOD", "drag"] {
+            assert!(
+                !text.contains(quantity),
+                "care-item quantity/affordance text {quantity} leaked at {area:?}: {text}"
+            );
+        }
+    }
+
+    let area = Rect::new(0, 0, 24, 3);
+    let mut buffer = Buffer::filled(area, Cell::new(" "));
+    render_room(area, &mut buffer, &snapshot, &default_frame(), None);
+    let text = buffer_text(&buffer, area.width, area.height);
+    assert!(text.contains('F'), "Minimal care-item name missing: {text}");
+    assert!(!text.contains("x50"), "Minimal quantity leaked: {text}");
+}
+
 fn buffer_text(buffer: &Buffer, width: u16, height: u16) -> String {
     let mut text = String::new();
     for y in 0..height {
@@ -815,12 +850,8 @@ fn wide_full_poops_fit_the_actual_pantry_to_pet_interval() {
     let area = Rect::new(0, 0, 100, 14);
     let geometry = room_geometry(area, &snapshot);
     assert_eq!(geometry.pet.x, 56);
-    assert_eq!(geometry.poops.len(), 2);
-    let last_poop = geometry
-        .poops
-        .last()
-        .expect("width 100 has a second poop")
-        .1;
+    assert_eq!(geometry.poops.len(), 3);
+    let last_poop = geometry.poops.last().expect("width 100 has a third poop").1;
     assert!(last_poop.right().saturating_add(2) <= geometry.pet.x);
 
     let mut without_poops = base_snapshot(now);
@@ -1158,7 +1189,7 @@ fn compact_is_a_seven_row_vignette_with_segmented_needs_and_care_objects() {
         "HAPPY",
         "CLEAN",
         "Calm  A1 S1",
-        "FOOD",
+        "KIB",
         "BED",
         "POOP",
     ] {
@@ -1320,7 +1351,7 @@ fn minimal_packs_the_pet_across_three_rows_and_keeps_every_core_target() {
         !text.contains("◉ PET") && !text.contains("(=^.^=) PET"),
         "Minimal should render a mascot instead of a text-only PET control: {text}"
     );
-    for marker in ["H", "E", "P", "C", "[FOOD", "[BED]", "[POOP]", "AFF"] {
+    for marker in ["H", "E", "P", "C", "KIB", "[BED]", "[POOP]", "AFF"] {
         assert!(text.contains(marker), "Minimal missing {marker}: {text}");
     }
     for source in &geometry.food_sources {
@@ -1370,7 +1401,7 @@ fn compact_to_minimal_removes_scenery_but_preserves_care_hit_regions() {
     assert!(minimal_geometry.bed.is_some());
     assert!(!minimal_geometry.food_sources.is_empty());
     assert!(!minimal_geometry.poops.is_empty());
-    assert!(minimal_text.contains("[FOOD") && minimal_text.contains("[BED]"));
+    assert!(minimal_text.contains("KIB") && minimal_text.contains("[BED]"));
 }
 
 #[test]
@@ -1488,14 +1519,14 @@ fn minimal_renderer_uses_the_selected_narrow_target_labels() {
             })
             .collect::<String>()
     };
-    assert_eq!(row(geometry.food_sources[0].rect), "F50");
+    assert_eq!(row(geometry.food_sources[0].rect), "KIB");
     assert_eq!(row(geometry.bed.expect("minimal bed")), "B");
     assert_eq!(row(geometry.poops[0].1), "P");
     assert_eq!(row(geometry.poops[1].1), "P");
 }
 
 #[test]
-fn minimal_renderer_uses_the_selected_no_food_label() {
+fn minimal_renderer_omits_a_food_label_when_no_food_is_available() {
     let now = Utc::now();
     let pet = Pet::with_inventory(
         Uuid::from_u128(42),
@@ -1508,11 +1539,8 @@ fn minimal_renderer_uses_the_selected_no_food_label() {
     let area = Rect::new(0, 0, 24, 3);
     let mut buffer = Buffer::filled(area, Cell::new(" "));
     render_room(area, &mut buffer, &snapshot, &default_frame(), None);
-    assert!(
-        row_text(&buffer, area.width, 1).contains("F-"),
-        "narrow Minimal should use the packed disabled-food label: {}",
-        row_text(&buffer, area.width, 1)
-    );
+    let row = row_text(&buffer, area.width, 1);
+    assert!(!row.contains("F-") && !row.contains("FOOD"), "{row}");
 }
 
 /// Minimal exposes exactly one deterministic stocked food source, regardless
@@ -1567,7 +1595,7 @@ fn minimal_food_source_matches_every_nonempty_inventory_combination() {
 }
 
 #[test]
-fn minimal_with_no_food_has_disabled_food_copy_and_no_hit_source() {
+fn minimal_with_no_food_has_no_label_or_hit_source() {
     let now = Utc::now();
     let pet = Pet::with_inventory(
         Uuid::from_u128(1),
@@ -1586,8 +1614,8 @@ fn minimal_with_no_food_has_disabled_food_copy_and_no_hit_source() {
     render_room(area, &mut buffer, &snapshot, &default_frame(), None);
     let text = buffer_text(&buffer, area.width, area.height);
     assert!(
-        text.contains("FOOD none"),
-        "disabled food copy missing: {text}"
+        !text.contains("FOOD none"),
+        "legacy empty-food copy leaked: {text}"
     );
     assert!(
         !text.contains("[FOOD x0]"),
@@ -2051,7 +2079,7 @@ fn minimal_keeps_a_pet_and_recognizable_care_affordance_icons() {
     let mut buffer = Buffer::filled(area, Cell::new(" "));
     render_room(area, &mut buffer, &snapshot, &default_frame(), None);
     let text = buffer_text(&buffer, area.width, area.height);
-    for marker in ["FOOD", "BED", "POOP", "AFF"] {
+    for marker in ["KIB", "BED", "POOP", "AFF"] {
         assert!(
             text.contains(marker),
             "Minimal affordance missing {marker}: {text}"
@@ -2113,7 +2141,7 @@ fn wide_room_keeps_named_targets_and_minimal_keeps_a_pet_mark() {
         None,
     );
     let compact_text = buffer_text(&compact_buffer, compact.width, compact.height);
-    for marker in ["Calm", "FOOD", "BED", "POOP"] {
+    for marker in ["Calm", "KIB", "BED", "POOP"] {
         assert!(
             compact_text.contains(marker),
             "wide Compact affordance missing {marker}: {compact_text}"
@@ -2164,17 +2192,7 @@ fn rendered_care_extents_are_inside_their_hit_regions() {
                 "energy_drink" => "ENE",
                 other => panic!("unexpected food id {other}"),
             };
-            let label = if area.height >= 14 {
-                format!("{food_name} x{}", food.count)
-            } else if area.width < 110 {
-                if food_name == "FOOD" {
-                    format!("FOOD{}", compact_count_for_test(food.count))
-                } else {
-                    format!("{}{}", food_name, compact_count_for_test(food.count))
-                }
-            } else {
-                format!("FOOD x{}", food.count)
-            };
+            let label = food_name;
             let food_rows = match food_kind {
                 FoodKind::Kibble => ["  ╭─╮", " ╱·╲ ", "│···│"],
                 FoodKind::Treat => ["  ╭─╮", " │≋│ ", " │ │ "],
@@ -2270,24 +2288,6 @@ fn rendered_care_extents_are_inside_their_hit_regions() {
     }
 }
 
-fn compact_count_for_test(count: u32) -> String {
-    if count < 1_000 {
-        count.to_string()
-    } else if count < 1_000_000 {
-        format!("{}k", count / 1_000)
-    } else if count < 1_000_000_000 {
-        format!("{}M", count / 1_000_000)
-    } else {
-        let whole = count / 1_000_000_000;
-        let tenth = (count % 1_000_000_000) / 100_000_000;
-        if tenth == 0 {
-            format!("{whole}B")
-        } else {
-            format!("{whole}.{tenth}B")
-        }
-    }
-}
-
 #[test]
 fn rendered_food_labels_do_not_overlap_poops_in_wide_layouts() {
     let now = Utc::now();
@@ -2301,32 +2301,12 @@ fn rendered_food_labels_do_not_overlap_poops_in_wide_layouts() {
         let mut buffer = Buffer::filled(area, Cell::new(" "));
         render_room(area, &mut buffer, &snapshot, &default_frame(), None);
         for (index, source) in geometry.food_sources.iter().enumerate() {
-            let label = if area.height >= 14 {
-                format!(
-                    "{} x{}",
-                    match source.food_id {
-                        "kibble" => "KIB",
-                        "treat" => "TRT",
-                        "fruit" => "FRT",
-                        "energy_drink" => "ENE",
-                        other => panic!("unexpected food id {other}"),
-                    },
-                    source.count
-                )
-            } else if index == 0 {
-                format!("FOOD x{}", source.count)
-            } else {
-                format!(
-                    "{}x{}",
-                    match source.food_id {
-                        "kibble" => "KIB",
-                        "treat" => "TRT",
-                        "fruit" => "FRT",
-                        "energy_drink" => "ENE",
-                        other => panic!("unexpected food id {other}"),
-                    },
-                    source.count
-                )
+            let label = match source.food_id {
+                "kibble" => "KIB",
+                "treat" => "TRT",
+                "fruit" => "FRT",
+                "energy_drink" => "ENE",
+                other => panic!("unexpected food id {other}"),
             };
             let row_offset = if area.height >= 14 || index == 0 {
                 3
@@ -2372,7 +2352,7 @@ fn minimal_care_labels_start_inside_their_hit_regions() {
             .collect::<String>()
     };
     let food = geometry.food_sources.first().expect("starter food source");
-    assert_eq!(row(food.rect.x, 5), "[FOOD");
+    assert_eq!(row(food.rect.x, 3), "KIB");
     let bed = geometry.bed.expect("Minimal bed");
     assert_eq!(row(bed.x, 5), "[BED]");
     let (_, poop) = geometry.poops.first().expect("seeded poop");
@@ -2380,7 +2360,7 @@ fn minimal_care_labels_start_inside_their_hit_regions() {
 }
 
 #[test]
-fn minimal_empty_poop_copy_reflows_after_a_wide_food_count() {
+fn minimal_empty_poop_copy_reflows_after_a_wide_food_label() {
     let now = Utc::now();
     let mut inventory = FoodInventory::new();
     inventory.add(FoodKind::Kibble, u32::MAX);
@@ -2510,13 +2490,13 @@ fn compact_eighty_column_geometry_keeps_care_targets_in_bounds() {
     let mut buffer = Buffer::filled(area, Cell::new(" "));
     render_room(area, &mut buffer, &snapshot, &default_frame(), None);
     let text = buffer_text(&buffer, area.width, area.height);
-    for marker in ["FOOD", "TRT", "FRT", "ENE", "BED", "POOP"] {
+    for marker in ["KIB", "TRT", "FRT", "ENE", "BED", "POOP"] {
         assert!(text.contains(marker), "Compact 80 missing {marker}: {text}");
     }
 }
 
 #[test]
-fn compact_eighty_column_geometry_abbreviates_large_authoritative_counts() {
+fn compact_eighty_column_geometry_keeps_all_short_care_item_names() {
     let now = Utc::now();
     let mut inventory = FoodInventory::new();
     for food in [
@@ -2564,7 +2544,7 @@ fn compact_eighty_column_geometry_abbreviates_large_authoritative_counts() {
     let mut buffer = Buffer::filled(area, Cell::new(" "));
     render_room(area, &mut buffer, &snapshot, &default_frame(), None);
     let text = buffer_text(&buffer, area.width, area.height);
-    for marker in ["FOOD", "TRT", "FRT", "ENE", "BED", "POOP"] {
+    for marker in ["KIB", "TRT", "FRT", "ENE", "BED", "POOP"] {
         assert!(text.contains(marker), "Compact 80 missing {marker}: {text}");
     }
 }

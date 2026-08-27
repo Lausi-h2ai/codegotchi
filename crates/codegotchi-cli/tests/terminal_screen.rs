@@ -75,6 +75,51 @@ fn screen_handles_ansi_state_and_read_only_cell_access() {
 }
 
 #[test]
+fn screen_scrollback_by_moves_between_live_and_historical_output() {
+    let mut screen = CodexScreen::new(3, 20);
+    screen.process(b"one\r\ntwo\r\nthree\r\nfour\r\nfive");
+    let live = screen.contents();
+
+    assert_eq!(screen.scrollback(), 0);
+    assert!(screen.scrollback_by(1));
+    assert_eq!(screen.scrollback(), 1);
+    assert_ne!(screen.contents(), live);
+
+    assert!(screen.scrollback_by(-1));
+    assert_eq!(screen.scrollback(), 0);
+    assert_eq!(screen.contents(), live);
+    assert!(!screen.scrollback_by(-1));
+}
+
+#[test]
+fn screen_scrollback_by_works_while_codex_uses_alternate_screen() {
+    let mut screen = CodexScreen::new(3, 20);
+    screen.process(b"\x1b[?1049h\x1b[Hfirst frame");
+    screen.process(b"\x1b[2J\x1b[Hsecond frame");
+    let live = screen.contents();
+
+    assert!(screen.alternate_screen());
+    assert!(screen.scrollback_by(1));
+    assert_ne!(screen.contents(), live);
+    assert!(screen.contents().contains("first frame"));
+
+    assert!(screen.scrollback_by(-1));
+    assert_eq!(screen.contents(), live);
+}
+
+#[test]
+fn screen_scrollback_by_collects_alternate_frames_from_one_pty_chunk() {
+    let mut screen = CodexScreen::new(3, 20);
+    screen
+        .process(b"\x1b[?1049h\x1b[Hfirst frame\x1b[2J\x1b[Hsecond frame\x1b[2J\x1b[Hthird frame");
+    let live = screen.contents();
+
+    assert!(screen.scrollback_by(1));
+    assert_ne!(screen.contents(), live);
+    assert!(screen.contents().contains("second frame"));
+}
+
+#[test]
 fn input_modes_track_vt_controls_and_split_focus_without_visible_text() {
     let mut screen = CodexScreen::new(8, 40);
     assert_eq!(screen.input_modes(), CodexInputModes::default());

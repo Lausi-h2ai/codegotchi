@@ -324,10 +324,10 @@ async fn authenticated_loopback_http_is_authoritative_and_replay_safe() {
     let state = request(&server, "GET", "/api/v1/state", Some(TOKEN), b"").await;
     assert_eq!(state.status, 200);
     assert_eq!(state.body["petId"], Uuid::from_u128(1).to_string());
-    assert_eq!(state.body["inventory"]["kibble"], 50);
-    assert_eq!(state.body["inventory"]["treat"], 25);
-    assert_eq!(state.body["inventory"]["fruit"], 25);
-    assert_eq!(state.body["inventory"]["energy_drink"], 10);
+    assert_eq!(state.body["inventory"]["kibble"], u32::MAX);
+    assert_eq!(state.body["inventory"]["treat"], u32::MAX);
+    assert_eq!(state.body["inventory"]["fruit"], u32::MAX);
+    assert_eq!(state.body["inventory"]["energy_drink"], u32::MAX);
 
     let oversized = vec![b'x'; 100 * 1024];
     let oversized_response =
@@ -472,7 +472,7 @@ async fn authenticated_loopback_http_is_authoritative_and_replay_safe() {
     .await;
     assert_eq!(drank.status, 200);
     assert_eq!(drank.body["duplicate"], false);
-    assert_eq!(drank.body["inventory"]["energy_drink"], 9);
+    assert_eq!(drank.body["inventory"]["energy_drink"], u32::MAX);
 
     let nap = serde_json::json!({
         "actionId": Uuid::from_u128(25),
@@ -581,7 +581,7 @@ async fn debug_neglect_drains_energy_and_a_nap_recovers_it_without_freezing_the_
 }
 
 #[tokio::test]
-async fn debug_restock_restores_the_starter_inventory_and_persists() {
+async fn debug_restock_restores_the_unlimited_inventory_and_persists() {
     let db = TestDatabase::new();
     let runtime = runtime(&db);
     let server = RunningServer::start(runtime.clone(), TOKEN).await.unwrap();
@@ -605,14 +605,14 @@ async fn debug_restock_restores_the_starter_inventory_and_persists() {
     }
     let before = request(&server, "GET", "/api/v1/state", Some(TOKEN), b"").await;
     assert_eq!(before.status, 200);
-    assert_eq!(before.body["inventory"]["kibble"], 46);
+    assert_eq!(before.body["inventory"]["kibble"], u32::MAX);
 
     let restock = debug_request(&server, TOKEN, "/api/v1/debug/restock").await;
     assert_eq!(restock.status, 200);
-    assert_eq!(restock.body["inventory"]["kibble"], 50);
-    assert_eq!(restock.body["inventory"]["treat"], 25);
-    assert_eq!(restock.body["inventory"]["fruit"], 25);
-    assert_eq!(restock.body["inventory"]["energy_drink"], 10);
+    assert_eq!(restock.body["inventory"]["kibble"], u32::MAX);
+    assert_eq!(restock.body["inventory"]["treat"], u32::MAX);
+    assert_eq!(restock.body["inventory"]["fruit"], u32::MAX);
+    assert_eq!(restock.body["inventory"]["energy_drink"], u32::MAX);
 
     // The mutation persists through the store, not just in memory.
     let persisted = SqliteStore::open(&db.path)
@@ -624,13 +624,13 @@ async fn debug_restock_restores_the_starter_inventory_and_persists() {
         persisted
             .inventory
             .count(codegotchi_domain::FoodKind::Kibble),
-        50
+        u32::MAX
     );
     assert_eq!(
         persisted
             .inventory
             .count(codegotchi_domain::FoodKind::EnergyDrink),
-        10
+        u32::MAX
     );
 
     server.shutdown().await.unwrap();
@@ -824,7 +824,7 @@ async fn sqlite_reload_keeps_inventory_enforcement_and_replay_ids_without_reseed
     )
     .unwrap();
     assert_eq!(restored.snapshot(), before);
-    assert_eq!(restored.snapshot().inventory.total(), 109);
+    assert_eq!(restored.snapshot().inventory.total(), u32::MAX);
     assert_eq!(
         restored.snapshot().enforcement_mode,
         codegotchi_domain::EnforcementMode::Strict

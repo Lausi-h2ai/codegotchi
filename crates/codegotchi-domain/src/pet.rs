@@ -256,6 +256,8 @@ pub enum FoodKind {
 }
 
 impl FoodKind {
+    pub const ALL: [Self; 4] = [Self::Kibble, Self::Treat, Self::Fruit, Self::EnergyDrink];
+
     pub fn from_id(food_id: &str) -> Option<Self> {
         match food_id {
             "kibble" => Some(Self::Kibble),
@@ -276,6 +278,9 @@ impl FoodKind {
     }
 }
 
+/// The persisted quantity used for care items that can never run out.
+pub const UNLIMITED_QUANTITY: u32 = u32::MAX;
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FoodInventory {
     #[serde(flatten)]
@@ -287,8 +292,8 @@ impl FoodInventory {
         Self::default()
     }
 
-    /// The starter pantry every new demo pet receives: enough of each food to
-    /// exercise the care loop without running dry during a session.
+    /// A finite starter pantry retained for bounded domain fixtures and
+    /// compatibility with older callers.
     pub fn starter() -> Self {
         let mut inventory = Self::default();
         inventory.add(FoodKind::Kibble, 50);
@@ -298,10 +303,23 @@ impl FoodInventory {
         inventory
     }
 
-    /// Restores the exact starter quantities, so a debug restock is a fixed,
-    /// deterministic transition rather than an unbounded top-up.
+    /// The product pantry: every known care item is always available.
+    pub fn unlimited() -> Self {
+        let mut inventory = Self::default();
+        for food in FoodKind::ALL {
+            inventory.add(food, UNLIMITED_QUANTITY);
+        }
+        inventory
+    }
+
+    /// Restores finite starter quantities for bounded domain fixtures.
     pub fn restock_to_starter(&mut self) {
         *self = Self::starter();
+    }
+
+    /// Restores the product pantry without changing any other pet state.
+    pub fn restock_to_unlimited(&mut self) {
+        *self = Self::unlimited();
     }
 
     pub fn count(&self, food: FoodKind) -> u32 {
@@ -319,6 +337,9 @@ impl FoodInventory {
 
     pub fn remove(&mut self, food: FoodKind, amount: u32) -> bool {
         let count = self.count(food);
+        if count == UNLIMITED_QUANTITY {
+            return true;
+        }
         if count < amount {
             return false;
         }
@@ -612,8 +633,8 @@ impl Pet {
         self.inventory.remove(food, 1)
     }
 
-    pub(crate) fn restock_inventory_to_starter(&mut self) {
-        self.inventory.restock_to_starter();
+    pub(crate) fn restock_inventory_to_unlimited(&mut self) {
+        self.inventory.restock_to_unlimited();
     }
 
     pub(crate) fn consume_digestion_points(&mut self, points: u64) {
@@ -768,6 +789,24 @@ mod tests {
         assert_eq!(inventory.count(super::FoodKind::Kibble), 1);
         assert!(!inventory.remove(super::FoodKind::Kibble, 2));
         assert_eq!(inventory.count(super::FoodKind::Kibble), 1);
+    }
+
+    #[test]
+    fn unlimited_inventory_keeps_every_care_item_available_after_consumption() {
+        let inventory = FoodInventory::unlimited();
+
+        for food in [
+            super::FoodKind::Kibble,
+            super::FoodKind::Treat,
+            super::FoodKind::Fruit,
+            super::FoodKind::EnergyDrink,
+        ] {
+            assert_eq!(inventory.count(food), u32::MAX);
+            assert!(inventory.contains(food));
+            let mut consumed = inventory.clone();
+            assert!(consumed.remove(food, 1));
+            assert_eq!(consumed.count(food), u32::MAX);
+        }
     }
 
     #[test]

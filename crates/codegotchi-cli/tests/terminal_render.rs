@@ -298,6 +298,21 @@ fn rendering_does_not_mutate_codex_screen() {
 }
 
 #[test]
+fn renderer_paints_the_selected_alternate_screen_history_frame() {
+    let mut screen = CodexScreen::new(3, 20);
+    screen.process(b"\x1b[?1049h\x1b[Hfirst frame");
+    screen.process(b"\x1b[2J\x1b[Hsecond frame");
+    assert!(screen.scrollback_by(1));
+
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 3));
+    render(&screen, buffer.area, &mut buffer);
+
+    assert_eq!(buffer[(0, 0)].symbol(), "f");
+    assert_eq!(buffer[(0, 1)].symbol(), " ");
+    assert!(screen.contents().contains("first frame"));
+}
+
+#[test]
 fn production_renderer_composes_through_test_backend_and_cursor() {
     let mut screen = CodexScreen::new(2, 6);
     screen.process(b"hello");

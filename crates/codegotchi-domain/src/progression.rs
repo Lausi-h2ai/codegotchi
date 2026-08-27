@@ -288,12 +288,11 @@ where
         self.refresh_behavior(self.pet.last_updated_at());
     }
 
-    /// Guarded demo control: restore the starter pantry (50/25/25/10) at the
-    /// current wall clock. Needs, timeline, and behavior are untouched, so a
-    /// drained demo pet can be refed without waiting for the wall clock.
+    /// Guarded demo control: restore the unlimited product pantry at the
+    /// current wall clock. Needs, timeline, and behavior are untouched.
     pub fn apply_debug_restock(&mut self) {
         self.current_state_at(self.clock.now());
-        self.pet.restock_inventory_to_starter();
+        self.pet.restock_inventory_to_unlimited();
         self.refresh_behavior(self.pet.last_updated_at());
     }
 
@@ -2071,7 +2070,7 @@ mod tests {
     }
 
     #[test]
-    fn debug_restock_restores_the_starter_inventory_without_touching_needs() {
+    fn debug_restock_restores_the_unlimited_inventory_without_touching_needs() {
         let mut pantry = FoodInventory::default();
         pantry.add(FoodKind::Kibble, 3);
         pantry.add(FoodKind::Treat, 1);
@@ -2088,7 +2087,7 @@ mod tests {
 
         simulation.apply_debug_restock();
 
-        assert_eq!(simulation.pet.inventory(), &FoodInventory::starter());
+        assert_eq!(simulation.pet.inventory(), &FoodInventory::unlimited());
         assert_eq!(simulation.pet.needs().hunger(), 42.0);
         assert_eq!(simulation.pet.behavior(), PetBehavior::Wandering);
     }

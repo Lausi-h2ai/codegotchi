@@ -21,7 +21,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crossterm::event::{Event, EventStream};
+use crossterm::event::{Event, EventStream, MouseEventKind};
 use futures_util::StreamExt;
 use ratatui::{
     Terminal,
@@ -371,6 +371,12 @@ impl TerminalSessionCore {
     /// returning bounded terminal-query replies for the child PTY.
     pub fn process_output(&mut self, bytes: &[u8]) -> Vec<u8> {
         self.screen.process(bytes)
+    }
+
+    /// Scrolls the upper Codex viewport without sending a mouse protocol event
+    /// to the child. Positive values reveal older output.
+    pub fn scroll_codex(&mut self, lines: i16) -> bool {
+        self.screen.scrollback_by(lines)
     }
 
     /// Resizes the virtual screen using `(rows, columns)` order.
@@ -1416,6 +1422,20 @@ where
             }
             return Ok(());
         }
+        if layout.codex.contains(point)
+            && mouse.modifiers.is_empty()
+            && core.screen().input_modes().mouse_tracking == super::MouseTrackingMode::Disabled
+        {
+            let lines = match mouse.kind {
+                MouseEventKind::ScrollUp => 3,
+                MouseEventKind::ScrollDown => -3,
+                _ => 0,
+            };
+            if lines != 0 {
+                core.scroll_codex(lines);
+                return Ok(());
+            }
+        }
     }
     let bytes = core.encode_event(&event);
     if bytes.is_empty() {
@@ -2062,6 +2082,48 @@ mod tests {
         assert!(
             writer_bytes.lock().expect("writer lock").is_empty(),
             "room mouse input must never be forwarded to the Codex PTY"
+        );
+    }
+
+    #[test]
+    fn upper_wheel_scrolls_local_codex_scrollback_when_mouse_tracking_is_disabled() {
+        let compositor_bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut compositor = fixed_compositor(Arc::clone(&compositor_bytes), 80, 24);
+        let mut core = TerminalSessionCore::new(24, 80);
+        core.process_output(b"\x1b[?1049h\x1b[Hframe-0");
+        for index in 1..40 {
+            let frame = format!("\x1b[2J\x1b[Hframe-{index}");
+            core.process_output(frame.as_bytes());
+        }
+        let live = core.screen().contents();
+        let writer_bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut writer = Some(Box::new(RecordingWriter {
+            bytes: Arc::clone(&writer_bytes),
+        }) as super::PtyWriter);
+        let mut room_input = RoomInputSession::default();
+
+        handle_event(
+            &mut compositor,
+            &mut core,
+            &mut None,
+            &mut writer,
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: 5,
+                row: 2,
+                modifiers: KeyModifiers::NONE,
+            }),
+            None,
+            &mut room_input,
+            Duration::ZERO,
+        )
+        .expect("upper scroll should be handled locally");
+
+        assert!(core.screen().scrollback() > 0);
+        assert_ne!(core.screen().contents(), live);
+        assert!(
+            writer_bytes.lock().expect("writer lock").is_empty(),
+            "local upper scrolling must not reach the Codex PTY"
         );
     }
 

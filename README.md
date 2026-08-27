@@ -85,10 +85,10 @@ Codex the usable pane first while retaining the pet and essential care.
   to that same contract. The browser projection measures the equivalent
   pointer gesture. Only the authoritative response can resolve an affection
   demand.
-- In Full and Compact, feed by dragging a stocked food source (`KIB`, `TRT`,
-  `FRT`, or `ENE`) onto the pet; empty inventory is not rendered as a drag
-  source there. Kibble, treats, and fruit satisfy snack demands; an energy
-  drink restores energy but does not satisfy a snack demand.
+- In Full and Compact, feed by dragging a care item (`KIB`, `TRT`, `FRT`, or
+  `ENE`) onto the pet. Care items are reusable and their quantities are not
+  displayed. Kibble, treats, and fruit satisfy snack demands; an energy drink
+  restores energy but does not satisfy a snack demand.
 - Clean poop by clicking an authoritative poop object in the terminal room.
   In the browser projection, arm the shovel and select a poop, then use the
   trash target (or drag the selected poop to it). A poop remains visible until
@@ -98,13 +98,18 @@ Codex the usable pane first while retaining the pet and essential care.
   only presentation and never recovers energy.
 
 Minimal mode keeps the condensed `CG` need row, a one-line tray for the first
-stocked food kind (`[FOOD x<count>]`), `BED`, visible `POOP` slots, and
-`AFF`/`SNACK` demand markers. Empty inventory renders a disabled `[FOOD none]`
-label and no food hit region, so the room never presents an actionable zero-stock
-source. Drag the stocked tray to the pet, click the bed, and click a poop just as
-in the larger layouts. Full and Compact expose every stocked food kind; use the
-browser projection when a Minimal session has no food or when you need a kind
-other than its deterministic first stocked source.
+care item (`KIB`, `TRT`, `FRT`, or `ENE`), `BED`, visible `POOP` slots, and
+`AFF`/`SNACK` demand markers. Drag the care-item name to the pet, click the
+bed, and click a poop just as in the larger layouts. Full and Compact expose
+every known care item. The meter values still drain over time, but using a
+care item never depletes its availability.
+
+The upper Codex pane keeps the terminal's normal input behavior. When Codex
+is not reporting mouse tracking, plain wheel events scroll CodeGotchi's local
+Codex scrollback. Hold `Shift` while dragging to select text in the terminal,
+then use the terminal's native `Shift+Insert` (or emulator paste shortcut) to
+paste. This keeps selection and clipboard ownership with the Linux terminal
+emulator.
 
 The browser remains an optional fallback and second projection of the same
 runtime. Use `--ui browser` when a terminal host is unavailable, `--ui both` to
@@ -145,8 +150,8 @@ attention-incident deadline, enforcement mode, and event/care replay IDs.
 Elapsed wall-clock time is applied when the runtime resumes, so closing the
 browser or stopping CodeGotchi does not freeze the pet. A single long catch-up
 creates at most five missed incident objects, while needs still progress
-across the complete absence. New pets receive 50 kibble, 25 treats, and 25
-fruit once.
+across the complete absence. New pets receive an unlimited supply of every
+known care item.
 
 Short-lived metadata is stored in the mode-0700
 `$XDG_RUNTIME_DIR/codegotchi/` directory, falling back to the CodeGotchi state
@@ -217,9 +222,8 @@ CODEGOTCHI_ENABLE_DEBUG=1 codegotchi debug generate-poop
 They operate only against the active authenticated runtime and are intended
 for a disposable demo session. Starting the runtime itself with
 `CODEGOTCHI_ENABLE_DEBUG=1 codegotchi run -- codex` additionally enables the
-debug room: the pet room shows a "Restock pantry" button that restores the
-starter food (50 kibble, 25 treats, 25 fruit, 10 energy drinks) without
-restarting the session.
+debug room: the pet room shows a "Restock pantry" button that restores all
+care items without restarting the session.
 
 `debug neglect` makes hunger and energy critical at the current wall clock so
 the refusal tiers and the hammock-nap/energy-drink care loop can be
@@ -227,10 +231,10 @@ demonstrated immediately. It deliberately does not jump the simulation
 timeline far into the future; an earlier version advanced 100 hours, which
 froze naps and need progression until the wall clock caught up.
 
-`debug restock` restores the starter pantry at the current wall clock. Food is
-otherwise a finite consumable: once the pantry is empty, feeding returns
-`out_of_stock` and nothing in the simulation ever replenishes it, so the
-guarded restock keeps disposable demos from soft-locking on an empty fridge.
+`debug restock` restores all care items at the current wall clock. Active
+product sessions already keep every care item available indefinitely, so the
+guarded control is retained as a deterministic demo action and compatibility
+control.
 
 ## Privacy and runtime boundary
 

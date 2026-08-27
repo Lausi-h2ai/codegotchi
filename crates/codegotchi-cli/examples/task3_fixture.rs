@@ -95,7 +95,7 @@ fn fixture_snapshot(mode: FixtureMode, now: chrono::DateTime<Utc>) -> Simulation
         "Mochi",
         PetSpecies::Cat,
         now,
-        FoodInventory::starter(),
+        FoodInventory::unlimited(),
     );
     let mut snapshot =
         PetSimulation::new(pet, SystemClock, DefaultNeedProgressionStrategy).snapshot();
@@ -189,10 +189,12 @@ fn seed_fixture(
         ))?;
     }
 
-    // Exhaust kibble through the normal care API so a real browser action can
-    // exercise the backend's typed out-of-stock error without a fixture route.
+    // Seed the same authoritative care activity used by the browser flow.
+    // The unlimited pantry keeps these setup feeds from consuming kibble while
+    // still producing the deterministic poop state expected by the fixture.
     for index in 0..50_u128 {
         runtime.feed(Uuid::from_u128(1_000 + index), "kibble")?;
     }
+
     Ok(())
 }

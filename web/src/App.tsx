@@ -251,7 +251,7 @@ function App({ launchToken }: AppProps) {
                 <h1>CodeGotchi</h1>
                 <p className="hero-copy">
                     A small, authoritative room for a coding companion. Every
-                    need, food count, and poop below comes from the backend.
+                    need, care item, and poop below comes from the backend.
                 </p>
             </header>
 
@@ -584,7 +584,7 @@ function App({ launchToken }: AppProps) {
                                             draggable
                                             key={food.id}
                                             type="button"
-                                            aria-label={`${food.label}, ${snapshot.inventory[food.id] ?? 0} available`}
+                                            aria-label={food.label}
                                             onClick={() => submitFeed(food.id)}
                                             onDragStart={(event) => {
                                                 event.dataTransfer.setData(
@@ -597,10 +597,6 @@ function App({ launchToken }: AppProps) {
                                                 {food.icon}
                                             </span>
                                             <span>{food.label}</span>
-                                            <strong>
-                                                {snapshot.inventory[food.id] ??
-                                                    0}
-                                            </strong>
                                         </button>
                                     ))}
                                 </div>

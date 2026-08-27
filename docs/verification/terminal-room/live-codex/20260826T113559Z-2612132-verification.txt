@@ -1,0 +1,39 @@
+# Real Codex terminal-room acceptance
+
+Run: `20260826T113559Z-2612132`
+Date (UTC): `2026-08-26T11:36:47Z`
+Exit status: `1`
+Final status: **BLOCKED**
+Exact source HEAD: `5f30c68491da7f7e6e4671a9a62a05dff10c941d`
+Scoped product-source working tree: `clean`
+Product-source diff scope: `crates/codegotchi-cli/{src,tests,examples,web-dist} web/{src,e2e,scripts}`
+Scoped product-source diff SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
+CodeGotchi binary SHA-256: `671f407f89375d9425c52c448392a772c142e444536e9b5b668c90d77442f0eb`
+Codex version: `codex-cli 0.149.1`
+Harness SHA-256: `8e601a843cc515bc00184806af6b5b927cf517bd07e9d627e6a4d821a9736f84`
+Workspace-helper SHA-256: `81099dd7d16a108ebde020ee0583e45a994964b0ee38930a10e310f143b610ca`
+Evidence directory: `docs/verification/terminal-room/live-codex`
+
+This report intentionally excludes Codex arguments, CODEX_HOME contents, runtime metadata, and bearer tokens.
+
+## Checklist
+
+- installed Codex version: observed
+- auth isolation: references the selected authorized CODEX_HOME without copying or printing its contents
+- isolated prompt workspace: created run-owned test.md for the bounded file-read interaction
+- isolated Codex home: run-owned trust/config with a credential symlink to the selected authorized auth.json; credential contents were not copied
+- acceptance model: gpt-5.6-luna with low reasoning
+- Codex argument isolation: trailing arguments are supplied through a private NUL-delimited file, not process argv
+- controller terminal usability: manual/unavailable (the harness controller did not expose a parent tty for restoration evidence)
+
+## Captures
+
+- No screenshot was captured.
+
+## Restoration
+
+- BLOCKED: retained run root: `/tmp/codegotchi-terminal-room-live.BeuOVB` (cleanup could not prove full process-tree termination).
+- Private display credential cleanup: `not-owned; inherited Xauthority was left untouched`.
+- Run-owned process cleanup scans the exact per-run environment marker after root cleanup, including descendants reparented after root death.
+- Process diagnostics intentionally omit command lines so operator arguments and credentials cannot enter the report.
+- No Codex screen transcript is captured or parsed; structured state receipts are paired with supervised PNG evidence.

@@ -329,10 +329,10 @@ fn petting_hitbox_follows_the_wandering_pet() {
     assert!(*pointer_distance >= 120.0);
 }
 
-/// Full exposes every stocked food kind as its own draggable source with its
-/// authoritative count, and each drag submits the correct food id.
+/// Full exposes every available care item as its own draggable source, and
+/// each drag submits the correct food id.
 #[test]
-fn every_stocked_food_is_a_draggable_source_with_count() {
+fn every_available_food_is_a_draggable_source_with_authoritative_id() {
     let snapshot = base_snapshot();
     let room = Rect::new(0, 0, 120, 14);
     let geometry = room_geometry_with_frame(room, &snapshot, &default_frame());
@@ -918,8 +918,7 @@ fn overlapping_pet_and_food_hit_regions_prioritize_the_pet() {
 }
 
 /// The cells actually occupied by rendered food/poop affordances must route to
-/// the same care requests as their geometry. This intentionally uses a large
-/// inventory count so a fixed-width rectangle cannot pass by accident.
+/// the same care requests as their geometry.
 #[test]
 fn rendered_food_and_poop_edges_dispatch_care_requests() {
     let mut snapshot = base_snapshot();
@@ -932,11 +931,7 @@ fn rendered_food_and_poop_edges_dispatch_care_requests() {
     for room in [Rect::new(0, 0, 120, 14), Rect::new(0, 0, 120, 7)] {
         let geometry = room_geometry_with_frame(room, &snapshot, &default_frame());
         let food = geometry.food_sources.first().expect("starter food source");
-        let food_label_width = if room.height >= 14 {
-            format!("KIB x{}", food.count).chars().count()
-        } else {
-            format!("FOOD x{}", food.count).chars().count()
-        };
+        let food_label_width = "KIB".chars().count();
         let food_edge = Position::new(
             food.rect.x + u16::try_from(food_label_width - 1).unwrap(),
             food.rect.y + 3,

@@ -15,8 +15,7 @@ use super::CodexScreen;
 /// cursor is hidden or outside the clipped area.
 #[must_use]
 pub fn render_codex(screen: &CodexScreen, area: Rect, buffer: &mut Buffer) -> Option<Position> {
-    let vt_screen = screen.screen();
-    let (rows, columns) = vt_screen.size();
+    let (rows, columns) = screen.visible_size();
     let visible_rows = rows.min(area.height);
     let visible_columns = columns.min(area.width);
 
@@ -28,7 +27,7 @@ pub fn render_codex(screen: &CodexScreen, area: Rect, buffer: &mut Buffer) -> Op
             let Some(y) = area.y.checked_add(row) else {
                 continue;
             };
-            let Some(source) = vt_screen.cell(row, column) else {
+            let Some(source) = screen.visible_cell(row, column) else {
                 continue;
             };
 
@@ -66,11 +65,11 @@ pub fn render_codex(screen: &CodexScreen, area: Rect, buffer: &mut Buffer) -> Op
         }
     }
 
-    if vt_screen.hide_cursor() {
+    if screen.visible_hide_cursor() {
         return None;
     }
 
-    let (cursor_row, cursor_column) = vt_screen.cursor_position();
+    let (cursor_row, cursor_column) = screen.visible_cursor_position();
     if cursor_row >= visible_rows || cursor_column >= visible_columns {
         return None;
     }

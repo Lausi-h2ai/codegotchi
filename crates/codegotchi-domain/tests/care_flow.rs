@@ -147,6 +147,37 @@ fn care_flow_seeds_inventory_feeds_works_cleans_and_replays_authoritatively() {
 }
 
 #[test]
+fn unlimited_care_items_apply_effects_without_depleting() {
+    let clock = FakeClock::new(start());
+    let pet = Pet::with_inventory(
+        Uuid::from_u128(43),
+        "Mochi",
+        PetSpecies::Cat,
+        start(),
+        FoodInventory::unlimited(),
+    );
+    let mut simulation = without_attention(
+        PetSimulation::new(pet, clock, DefaultNeedProgressionStrategy),
+        &FakeClock::new(start()),
+    );
+
+    for action_id in 1..=100 {
+        simulation
+            .apply_care(&CareCommand::Feed {
+                action_id: Uuid::from_u128(action_id),
+                food_id: "kibble".to_owned(),
+            })
+            .unwrap();
+    }
+
+    assert_eq!(
+        simulation.pet().inventory().count(FoodKind::Kibble),
+        u32::MAX
+    );
+    assert_eq!(simulation.pet().needs().hunger(), 0.0);
+}
+
+#[test]
 fn all_foods_apply_literal_effects_and_consume_one_authoritative_item() {
     let cases = [
         (FoodKind::Kibble, "kibble", 25.0, 40),

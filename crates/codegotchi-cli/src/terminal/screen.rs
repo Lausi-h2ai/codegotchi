@@ -42,6 +42,7 @@ pub struct CodexInputModes {
 
 const DEFAULT_SCROLLBACK: usize = 1_000;
 const MAX_SCROLLBACK: usize = 10_000;
+const MAX_ALTERNATE_SCREEN_HISTORY: usize = 128;
 const MAX_TRACKED_SEQUENCE: usize = 128;
 const MAX_PENDING_QUERY_RESPONSES: usize = 32;
 
@@ -195,10 +196,65 @@ impl Callbacks for TerminalQueryCallbacks {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AlternateScreenFrame {
+    rows: u16,
+    columns: u16,
+    cells: Vec<vt100::Cell>,
+    row_text: Vec<String>,
+    contents: String,
+    cursor_position: (u16, u16),
+    hide_cursor: bool,
+}
+
+impl AlternateScreenFrame {
+    fn capture(screen: &vt100::Screen) -> Option<Self> {
+        let (rows, columns) = screen.size();
+        let mut cells = Vec::with_capacity(usize::from(rows) * usize::from(columns));
+        for row in 0..rows {
+            for column in 0..columns {
+                cells.push(screen.cell(row, column)?.clone());
+            }
+        }
+
+        Some(Self {
+            rows,
+            columns,
+            cells,
+            row_text: screen.rows(0, columns).collect(),
+            contents: screen.contents(),
+            cursor_position: screen.cursor_position(),
+            hide_cursor: screen.hide_cursor(),
+        })
+    }
+
+    fn cell(&self, row: u16, column: u16) -> Option<&vt100::Cell> {
+        if row >= self.rows || column >= self.columns {
+            return None;
+        }
+        self.cells
+            .get(usize::from(row) * usize::from(self.columns) + usize::from(column))
+    }
+
+    fn text_at(&self, row: u16, column: u16, width: u16) -> String {
+        self.row_text
+            .get(usize::from(row))
+            .map(|text| {
+                text.chars()
+                    .skip(usize::from(column))
+                    .take(usize::from(width))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
 /// Incremental, non-interactive representation of a Codex PTY terminal.
 pub struct CodexScreen {
     parser: vt100::Parser<TerminalQueryCallbacks>,
     focus_tracker: FocusTracker,
+    alternate_history: VecDeque<AlternateScreenFrame>,
+    alternate_history_offset: usize,
 }
 
 impl CodexScreen {
@@ -220,20 +276,76 @@ impl CodexScreen {
                 TerminalQueryCallbacks::default(),
             ),
             focus_tracker: FocusTracker::default(),
+            alternate_history: VecDeque::new(),
+            alternate_history_offset: 0,
         }
     }
 
     /// Feeds an arbitrary PTY output chunk to both the VT parser and the
     /// protocol-side focus-mode tracker.
     pub fn process(&mut self, bytes: &[u8]) -> Vec<u8> {
+        let mut was_alternate = self.alternate_screen();
+        let mut offset_before_output = self.alternate_history_offset;
+        let mut remaining = bytes;
+        while let Some(clear_offset) = full_screen_clear_offset(remaining) {
+            let (before_clear, after_prefix) = remaining.split_at(clear_offset);
+            self.process_bytes(before_clear);
+            self.record_alternate_history_frame(was_alternate, offset_before_output);
+
+            let (clear, after_clear) = after_prefix.split_at(4);
+            self.process_bytes(clear);
+            remaining = after_clear;
+            was_alternate = self.alternate_screen();
+            offset_before_output = self.alternate_history_offset;
+        }
+        self.process_bytes(remaining);
+        self.record_alternate_history_frame(was_alternate, offset_before_output);
+        self.parser.callbacks_mut().drain()
+    }
+
+    fn process_bytes(&mut self, bytes: &[u8]) {
         self.parser.process(bytes);
         self.focus_tracker.feed(bytes);
-        self.parser.callbacks_mut().drain()
+    }
+
+    fn record_alternate_history_frame(&mut self, was_alternate: bool, offset_before_output: usize) {
+        if !self.alternate_screen() {
+            self.alternate_history.clear();
+            self.alternate_history_offset = 0;
+            return;
+        }
+        if !was_alternate {
+            self.alternate_history.clear();
+            self.alternate_history_offset = 0;
+        }
+        self.record_alternate_frame(was_alternate, offset_before_output);
+    }
+
+    fn record_alternate_frame(&mut self, was_alternate: bool, offset_before_output: usize) {
+        let Some(frame) = AlternateScreenFrame::capture(self.parser.screen()) else {
+            return;
+        };
+        if self.alternate_history.back() == Some(&frame) {
+            return;
+        }
+
+        self.alternate_history.push_back(frame);
+        if self.alternate_history.len() > MAX_ALTERNATE_SCREEN_HISTORY {
+            self.alternate_history.pop_front();
+        }
+        self.alternate_history_offset = if was_alternate && offset_before_output > 0 {
+            offset_before_output.saturating_add(1)
+        } else {
+            0
+        }
+        .min(self.alternate_history.len().saturating_sub(1));
     }
 
     /// Resizes the virtual terminal while retaining its parser state.
     pub fn resize(&mut self, rows: u16, cols: u16) {
         self.parser.screen_mut().set_size(rows.max(1), cols.max(1));
+        self.alternate_history.clear();
+        self.alternate_history_offset = 0;
     }
 
     /// Returns a read-only view of the underlying VT screen for rendering.
@@ -245,34 +357,39 @@ impl CodexScreen {
     /// Returns the current terminal size as `(rows, columns)`.
     #[must_use]
     pub fn size(&self) -> (u16, u16) {
-        self.screen().size()
+        self.visible_size()
     }
 
     /// Returns the current cursor position as `(row, column)`, both zero-based.
     #[must_use]
     pub fn cursor_position(&self) -> (u16, u16) {
-        self.screen().cursor_position()
+        self.visible_cursor_position()
     }
 
     /// Returns a read-only cell at a zero-based location.
     #[must_use]
     pub fn cell(&self, row: u16, col: u16) -> Option<&vt100::Cell> {
-        self.screen().cell(row, col)
+        self.visible_cell(row, col)
     }
 
     /// Returns text from one row, restricted to a zero-based column and width.
     #[must_use]
     pub fn text_at(&self, row: u16, col: u16, width: u16) -> String {
-        self.screen()
-            .rows(col, width)
-            .nth(usize::from(row))
-            .unwrap_or_default()
+        if let Some(frame) = self.alternate_history_frame() {
+            frame.text_at(row, col, width)
+        } else {
+            self.screen()
+                .rows(col, width)
+                .nth(usize::from(row))
+                .unwrap_or_default()
+        }
     }
 
     /// Returns the current visible text without granting mutation access.
     #[must_use]
     pub fn contents(&self) -> String {
-        self.screen().contents()
+        self.alternate_history_frame()
+            .map_or_else(|| self.screen().contents(), |frame| frame.contents.clone())
     }
 
     /// Returns whether the alternate screen buffer is active.
@@ -284,7 +401,74 @@ impl CodexScreen {
     /// Returns the current scrollback offset.
     #[must_use]
     pub fn scrollback(&self) -> usize {
-        self.screen().scrollback()
+        if self.alternate_screen() {
+            self.alternate_history_offset
+        } else {
+            self.screen().scrollback()
+        }
+    }
+
+    /// Moves the virtual terminal viewport by a signed number of rows.
+    ///
+    /// Positive values reveal older output; negative values return toward the
+    /// live bottom of the Codex screen. Returns whether the viewport moved.
+    pub fn scrollback_by(&mut self, lines: i16) -> bool {
+        if self.alternate_screen() {
+            let before = self.alternate_history_offset;
+            let maximum = self.alternate_history.len().saturating_sub(1);
+            self.alternate_history_offset = if lines.is_negative() {
+                before.saturating_sub(usize::from(lines.unsigned_abs()))
+            } else {
+                before
+                    .saturating_add(usize::from(lines.unsigned_abs()))
+                    .min(maximum)
+            };
+            return self.alternate_history_offset != before;
+        }
+
+        let before = self.scrollback();
+        let target = if lines.is_negative() {
+            before.saturating_sub(usize::from(lines.unsigned_abs()))
+        } else {
+            before.saturating_add(usize::from(lines.unsigned_abs()))
+        };
+        self.parser.screen_mut().set_scrollback(target);
+        self.scrollback() != before
+    }
+
+    pub(crate) fn visible_size(&self) -> (u16, u16) {
+        self.alternate_history_frame()
+            .map_or_else(|| self.screen().size(), |frame| (frame.rows, frame.columns))
+    }
+
+    pub(crate) fn visible_cell(&self, row: u16, column: u16) -> Option<&vt100::Cell> {
+        self.alternate_history_frame().map_or_else(
+            || self.screen().cell(row, column),
+            |frame| frame.cell(row, column),
+        )
+    }
+
+    pub(crate) fn visible_cursor_position(&self) -> (u16, u16) {
+        self.alternate_history_frame().map_or_else(
+            || self.screen().cursor_position(),
+            |frame| frame.cursor_position,
+        )
+    }
+
+    pub(crate) fn visible_hide_cursor(&self) -> bool {
+        self.alternate_history_frame()
+            .map_or_else(|| self.screen().hide_cursor(), |frame| frame.hide_cursor)
+    }
+
+    fn alternate_history_frame(&self) -> Option<&AlternateScreenFrame> {
+        if !self.alternate_screen() || self.alternate_history_offset == 0 {
+            return None;
+        }
+        self.alternate_history.get(
+            self.alternate_history
+                .len()
+                .saturating_sub(1 + self.alternate_history_offset),
+        )
     }
 
     /// Returns the negotiated mode read model used by all Codex input
@@ -306,6 +490,10 @@ impl CodexScreen {
     pub fn focus_reporting(&self) -> bool {
         self.focus_tracker.focus_reporting
     }
+}
+
+fn full_screen_clear_offset(bytes: &[u8]) -> Option<usize> {
+    bytes.windows(4).position(|sequence| sequence == b"\x1b[2J")
 }
 
 impl Default for CodexScreen {

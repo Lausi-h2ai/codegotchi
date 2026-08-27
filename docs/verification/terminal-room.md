@@ -1,140 +1,160 @@
-# Terminal Room Final Verification
+# Terminal-room release verification ledger
 
-Status: **FAIL / BLOCKED**
+Status: **local and real-Codex gates pass; hosted final-SHA run is not
+release-green**.
 
-Ledger refreshed: **2026-08-25**.
-Current corrective working tree: based on
-`2d08945353df262ce0f1710834d7b4da748b1461`; corrective code-and-test binary
-diff SHA-256: `425068360099c8972668aad0025f756b90fd81b3275a2b2437c11e0837900f69`.
-The fingerprint covers the five modified files under `crates/` and excludes
-documentation, so updating this ledger does not invalidate its own provenance.
+This ledger was rewritten on 2026-08-26 from the exact final local source
+commit. The product-source scope is clean and the final evidence is retained
+under this directory. The repository as a whole is intentionally dirty only
+because this ledger, the visual captures, and the live-Codex evidence are
+working-tree release artifacts; no product-source diff is present.
 
-This corrective wave fixes the Full-room 80/81-column cleaning regression,
-restores the sparse window/desk silhouette, amends the normative bedroom
-specification, and replaces Linux-only runtime-liveness probing with portable
-Unix signal-zero probing. The local matrix and production visual review pass.
-The release remains blocked because hosted Ubuntu/macOS/web checks have not run
-against this corrective tree, the macOS raw-HTTP and PTY integration gates have
-not been rerun, and live Codex acceptance plus final promoted screenshots must
-be captured from the eventual committed SHA.
+## 1. Exact final source and provenance
 
-## Fresh local matrix
+| Item | Evidence |
+|---|---|
+| Exact final source SHA | `a50104304dfddf2085f33049f75a448c94841adb` |
+| Product-source scope | `crates/codegotchi-cli/{src,tests,examples,web-dist} web/{src,e2e,scripts}` |
+| Relevant product-source working tree | Clean at the accepted live run |
+| Scoped product-source diff SHA-256 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` (empty diff at final HEAD) |
+| CodeGotchi binary SHA-256 | `671f407f89375d9425c52c448392a772c142e444536e9b5b668c90d77442f0eb` |
+| Acceptance harness SHA-256 | `8e601a843cc515bc00184806af6b5b927cf517bd07e9d627e6a4d821a9736f84` |
+| Workspace helper SHA-256 | `a5b41babdb507b9fd5609295345c0038db785a9edf06199c911eb8f79c323109` |
+| Codex CLI | `codex-cli 0.149.1` |
 
-The following gates were rerun on 2026-08-25 against the exact corrective
-working tree identified above:
+The live report intentionally omits Codex arguments, CODEX_HOME contents,
+runtime metadata, and bearer tokens. It also records the exact source SHA,
+working-tree scope, and all four binary/tool fingerprints:
+[`20260826T133957Z-2792986-verification.txt`](terminal-room/live-codex/20260826T133957Z-2792986-verification.txt).
 
-| Gate | Result | Evidence |
-|---|---|---|
-| `cargo fmt --all -- --check` | PASS | Fresh local run. |
-| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | PASS | Fresh local run. |
-| `cargo test --workspace` | PASS | Fresh local run; workspace tests completed with no failures. |
-| `cargo test -p codegotchi-cli --test terminal_room authoritative_sleep_hitbox -- --nocapture` | PASS; 2 tests | Full and Compact bed-sleep hitboxes match their rendered sprites. |
-| `cargo test -p codegotchi-cli --lib browser_helper_timeout_terminates_a_stuck_native_wait --no-fail-fast` | PASS | Native browser-helper wait terminates within the injected deadline. |
-| `cargo test -p codegotchi-cli --lib response_read_has_an_outer_deadline_when_peer_dribbles_bytes --no-fail-fast` | PASS | Debug-hook transport rejects a dribbled response at its outer deadline. |
-| `corepack pnpm test` | PASS; 123 tests | Fresh web test run. |
-| `corepack pnpm lint` | PASS | Fresh web lint run. |
-| `corepack pnpm format:check` | PASS | Fresh web format run. |
-| `corepack pnpm build` | PASS | Fresh production web build. |
-| `node web/scripts/embed-web.mjs` | PASS | Embedded production bundle unchanged after the fresh build. |
-| `corepack pnpm playwright:test:production` | PASS; 17 tests | Fresh embedded-production browser run. |
-| Production visual fixture review | PASS | Real production `terminal_room_fixture` rendered in xterm on Xvfb and was screenshot-inspected at 80 and 120 columns; the desk cue is visible and the 80-column fallback poop is cleanable and unclipped. |
+## 2. Fresh local Linux matrix
 
-These local results do not establish hosted release readiness.
-In particular, a Linux run cannot establish macOS runtime behavior.
+These commands were rerun after the final product and harness changes:
 
-## Visual evidence
+| Gate | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | PASS |
+| `cargo test --workspace` | PASS — 421 passed, 0 failed, 10 ignored |
+| `corepack pnpm test` | PASS — 5 files, 123 tests |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm format:check` | PASS |
+| `corepack pnpm build` | PASS |
+| `node web/scripts/embed-web.mjs` | PASS |
 
-The August 24 promoted set in [`terminal-room/README.md`](terminal-room/README.md)
-is now **historical, not authoritative**:
+The coordinate-space regression coverage is fresh as well:
 
-- [`full-120x45-light.png`](terminal-room/full-120x45-light.png)
-- [`full-120x45-dark.png`](terminal-room/full-120x45-dark.png)
-- [`compact-120x30-light.png`](terminal-room/compact-120x30-light.png)
-- [`minimal-120x21-light.png`](terminal-room/minimal-120x21-light.png)
-- [`full-120x45-bed-sleep.png`](terminal-room/full-120x45-bed-sleep.png)
-- [`full-120x45-floor-doze.png`](terminal-room/full-120x45-floor-doze.png)
-- [`auto-120x45-light.png`](terminal-room/auto-120x45-light.png)
-- [`auto-120x45-dark.png`](terminal-room/auto-120x45-dark.png)
+| Focused gate | Result |
+|---|---|
+| Full geometry/render tests (`full_wide`) | PASS — 2 |
+| Nonzero-origin Full geometry, click lifecycle, and wander tests | PASS — 4 |
+| Integrated 80×45 lower-pane origin test | PASS — 1 |
 
-The files were captured on 2026-08-24 from an uncommitted working tree based
-on `1f0f8db0aca15bc172a12e508bad2ceee3665575`. The captured product-source
-diff was recorded as
-`4645edebe436968a9baa55b786893bcc5151de6e9c74060b0b6ed6aad42391aa`.
-Recomputing the binary diff from that base to the five product-source files in
-`8843ce94d464009319f54ab970f59882e8b6e3fe` produces the same hash. The
-committed product sources therefore match the recorded capture source; the
-capture is not being inferred from commit time alone.
+The implementation keeps all `RoomGeometry` rectangles in absolute terminal
+coordinates. Presentation home/offset values remain room-relative internally;
+the behavior collision path explicitly converts them before comparing against
+the absolute care zone. The tests cover Full areas `(0,31,80,14)`,
+`(0,31,81,14)`, and `(7,31,80,14)`, rendered/hitbox alignment, exactly-once
+Down→Up cleaning, pet exclusion, reachable wandering, and the production
+80×45 layout seam.
 
-Those files predate the desk restoration and care-first poop reflow. The
-corrective production visual review passed at widths 80 and 120, but the eight
-promoted final frames must be recaptured from the eventual final committed SHA
-and re-adjudicated before release.
+## 3. Browser stress result
 
-The six matching named-state files and their hashes are recorded in
-[`docs/mockups/current/README.md`](../mockups/current/README.md). The fixture
-intentionally leaves the upper pane blank because it has no real Codex
-process. That is not a lower-pane defect and is not presented as live-session
-acceptance evidence.
+The production Playwright command uses the built and embedded bundle; it does
+not use Vite dev mode. The complete suite was run in ten fresh sequential
+invocations: **10 × 17 tests passed, 0 failed**. The energy-drink diagnostics
+retained the following successful layers on every exercised run: native drop,
+exact `POST /api/v1/care/feed`, HTTP 200, authoritative inventory decrement,
+rendered inventory propagation, and transient `Eating an energy drink`
+feedback. A separate one-worker energy-drink stress also passed 20/20.
 
-## Live official-Codex acceptance
+The intentionally excluded exploratory run used concurrent workers against a
+single restartable fixture and failed during fixture reset with
+`fixture_restarting`; it was a test-harness concurrency result, not a
+production-flow failure, and caused no production change.
 
-Status: **BLOCKED / MUST RERUN**.
+## 4. Terminal PTY stress result
 
-The August 24 live acceptance record remains useful historical evidence for the
-prior renderer, but it is not acceptance for the current care geometry, restored
-desk, or runtime-liveness fix. A new live official-Codex session must cover the
-complete release checklist from the final committed SHA.
+`cargo test -p codegotchi-cli --test terminal_pty -- --nocapture` passed in
+**50 consecutive fresh invocations**, five tests per invocation: **250 passed,
+0 failed**. The test now frames complete lines across legal partial reads,
+consumes the newline after `FAKE_SIGNAL_READY`, and waits for a complete
+`FAKE_SIGNAL_PID` record. The production signal behavior was not changed.
 
-The durable record is
-[`terminal-room/live-codex/20260824T150816Z-2359630-verification.txt`](terminal-room/live-codex/20260824T150816Z-2359630-verification.txt).
-It records an exit-status-zero run against official `codex-cli 0.149.1` using
-`gpt-5.6-luna` with low reasoning in an isolated workspace and Codex home.
-The real TUI edited and submitted `Read this file called test.md and tell me
-what it says.`, read the run-owned file with live tool activity, and answered
-`My grandma is a wonderful woman.`
+## 5. Final promoted visual evidence
 
-The same session captured the official approval modal and approved one exact
-temp-workspace command, a real multiline xterm paste, focus out/in, upper-pane
-click/scroll routing, authoritative pet/feed/clean/nap results, and the Full →
-Compact → Minimal → Full cycle. Content-free receipts verify negotiated paste
-and focus delivery plus the actual physical-terminal/Codex-PTY resize pairs.
-Normal exit restored the same xterm to a real interactive shell with matching
-PTY state and an executed command receipt; a separate bounded termination case
-also restored its PTY state, and the controller terminal survived with matching
-`stty` state. The populated final frame is
-[`20260824T150816Z-2359630-full-live-final.png`](terminal-room/live-codex/20260824T150816Z-2359630-full-live-final.png),
-and the restored-shell receipt is
-[`20260824T150816Z-2359630-normal-exit-restored-shell-input.png`](terminal-room/live-codex/20260824T150816Z-2359630-normal-exit-restored-shell-input.png).
+The final product-source fixture recapture is in
+[`terminal-room/final-20260826-final/`](terminal-room/final-20260826-final/).
+The product-source scope was unchanged by the later test-only portability cfg
+commits. Every image below was opened and inspected at native resolution. The lower
+pane has no seam or clipping; the mascot is recognizable; Full/Compact/Minimal
+hierarchy, care targets, bed sleep, floor doze, and Auto host-palette
+readability are retained. The 80-column image shows the narrow Full fallback
+care target in the visible care lane.
 
-The invocation used `--ask-for-approval on-request --sandbox read-only`.
-Approval is proven by the retained official modal, the exact isolated
-`touch approval-probe.txt` request, the run-owned file receipt, and the return
-to authoritative `WaitingForUser`. Direct inspection found no bearer token or
-authentication content in any retained PNG. The older
-[`task-7-round1-blocked.txt`](terminal-room/live-codex/task-7-round1-blocked.txt)
-remains historical preflight evidence only.
+| Capture | Native pixels | SHA-256 | Inspection |
+|---|---:|---|---|
+| [`full-120x45-light.png`](terminal-room/final-20260826-final/full-120x45-light.png) | 1324×904 | `76e7f2a0207910d97666d902c6383a94f9b8e6e5fa9f95f0842b42811938d85b` | PASS — Full light/default |
+| [`full-120x45-dark.png`](terminal-room/final-20260826-final/full-120x45-dark.png) | 1324×904 | `2406adc0eb803424b575d7023d84d26082a39be8e333550ab70a7cf9a34f19c6` | PASS — Full dark |
+| [`compact-120x30-light.png`](terminal-room/final-20260826-final/compact-120x30-light.png) | 1324×604 | `a8aedd62bdc885a11cad7953794eb99a364ba1b2eae643be178977c6877df6ac` | PASS — Compact |
+| [`minimal-120x21-light.png`](terminal-room/final-20260826-final/minimal-120x21-light.png) | 1324×424 | `e4a74cbedc2b23ce6240b3e064560e62e6b09392103324fc9bd28e435cfaeed3` | PASS — Minimal |
+| [`full-120x45-bed-sleep.png`](terminal-room/final-20260826-final/full-120x45-bed-sleep.png) | 1324×904 | `0e3dec1730521cadf3dce1d3357a2c35694253a599d7be114f1cefb0d0f37871` | PASS — authoritative bed sleep |
+| [`full-120x45-floor-doze.png`](terminal-room/final-20260826-final/full-120x45-floor-doze.png) | 1324×904 | `bea745398fad84104bceb999e0d3f1309a4b5ff9204137644de601d0652e895f` | PASS — generic floor doze |
+| [`auto-120x45-light.png`](terminal-room/final-20260826-final/auto-120x45-light.png) | 1324×904 | `a3e092ec8f0400489aac52b1c8295a62d5ba880140d66a99cc550287d1d31565` | PASS — Auto/light host |
+| [`auto-120x45-dark.png`](terminal-room/final-20260826-final/auto-120x45-dark.png) | 1324×904 | `d9ffda9955e92c41936b6a5d48fc5c79803e59ddf1e9c1569a2135bd5ca11fa2` | PASS — Auto/dark host |
+| [`full-80x45-care.png`](terminal-room/final-20260826-final/full-80x45-care.png) | 884×904 | `97d23fd52edbe4c3c464cb41fa24ba74d9a62be1f77b961048f088c707f4a7ab` | PASS — narrow Full fallback target |
 
-## Hosted CI
+## 6. Final real-Codex acceptance
 
-Hosted CI has **not run** for the corrective tree. The prior workflow for
-`8843ce94d464009319f54ab970f59882e8b6e3fe`, run
-[`32729444290`](https://github.com/Lausi-h2ai/codegotchi/actions/runs/32729444290),
-completed on 2026-08-24 with overall result **FAILURE** and is historical only:
+The exact final product source was exercised through the official Codex
+terminal path. The accepted run is
+[`20260826T133957Z-2792986-verification.txt`](terminal-room/live-codex/20260826T133957Z-2792986-verification.txt),
+with final populated and narrow-care frames:
 
-| Hosted job | Result | Evidence |
-|---|---|---|
-| Rust checks (Ubuntu) | PASS | Formatting, clippy, and Rust workspace tests passed. |
-| Rust checks (macOS) | FAIL | Formatting and clippy passed. Workspace tests failed in `authenticated_loopback_http_is_authoritative_and_replay_safe` with a connection reset and in `production_hook_reaches_authoritative_state_and_parses_the_server_response` because the processed-event assertion was not satisfied. The outer PTY smoke was skipped after the test failure. |
-| Web checks | FAIL | Unit tests, lint, formatting, build, and bundle embedding passed. The production Playwright step failed: the feed flow required a retry and the energy-drink flow did not observe `Eating an energy drink` within its timeout after retry. |
+- [`full-live-final.png`](terminal-room/live-codex/20260826T133957Z-2792986-full-live-final.png)
+- [`full-live-80x45-care.png`](terminal-room/live-codex/20260826T133957Z-2792986-full-live-80x45-care.png)
 
-The corrective tree must receive a fresh complete hosted Ubuntu/macOS/web run,
-including the macOS outer PTY smoke. The previously observed macOS raw-HTTP
-reset and Linux PTY signal-escalation failure must be investigated and rerun
-rather than inferred fixed from timing changes. Release remains blocked until
-all hosted gates and live Codex acceptance pass from one exact committed source
-SHA.
+Result: **PASS**. Structured receipts prove the real approval modal and
+isolated approval command, authoritative pet/feed/clean/nap outcomes, the
+120×45 → 120×30 → 120×21 → 120×45 resize sequence, normal shell restoration,
+bounded termination restoration, parent-tty preservation, and the new 80×45
+phase. At 80×45, the harness generated an authoritative poop, captured the
+populated room, clicked the visible fallback target, and observed the pending
+poop count change from 1 to 0 before restoring 120×45.
 
-Historical Task 5/7/8 records remain in
-[`terminal-room-codex-pty.md`](terminal-room-codex-pty.md) and Git history.
-Their older source SHAs and screenshots are historical evidence only and are
-not release evidence for the corrective working tree identified above.
+## 7. Hosted Ubuntu result
+
+The final-source hosted CI run is
+[32971855910](https://github.com/Lausi-h2ai/codegotchi/actions/runs/32971855910),
+at `a50104304dfddf2085f33049f75a448c94841adb`. Ubuntu formatting, Clippy, and
+the complete Rust workspace test job all completed **PASS**.
+
+## 8. Hosted Web result
+
+Run [32971855910](https://github.com/Lausi-h2ai/codegotchi/actions/runs/32971855910)
+completed every Web step through bundle embedding, but its production
+Playwright step returned exit code 1. The exact job log is not available yet
+because the same workflow run remains open on the macOS job; therefore this
+ledger does not guess whether the failure is A–F from the release checklist and
+does not claim hosted Web PASS. The complete local production suite and stress
+remain green as recorded in section 3.
+
+## 9. Hosted macOS result / macOS status
+
+No macOS runtime execution was performed locally. The designated acceptance
+environment is GitHub Actions `macos-latest`. In final-source run
+[32971855910](https://github.com/Lausi-h2ai/codegotchi/actions/runs/32971855910),
+macOS formatting and Clippy passed, but the workspace test step remained
+`in_progress` for more than an hour and the outer-PTY smoke had not started at
+ledger refresh. This is recorded as **pending/unresolved**, not PASS; no local
+macOS runtime claim is made. The prior hosted Clippy failure caused by stale
+test-helper cfg scopes is fixed in the pushed source.
+
+## Release disposition
+
+The product fixes, local Linux matrix, browser stress, terminal PTY stress,
+final visual evidence, and exact-source real-Codex acceptance pass. Ubuntu is
+green at the pushed source. Release remains blocked by the hosted Web failure
+whose diagnostics are unavailable until the run closes, and by the unresolved
+hosted macOS workspace-test run. Repository status and the exact source scope
+are recorded separately so neither hosted result is overstated.

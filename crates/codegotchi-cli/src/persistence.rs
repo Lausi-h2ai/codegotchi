@@ -187,10 +187,10 @@ fn decode_snapshot(
 
 /// Upgrades a persisted snapshot written before the energy care loop existed.
 /// Those snapshots have no `nappingUntil` field (the field was introduced
-/// together with the energy drinks), so their inventory also never received
-/// the newly seeded 10 energy drinks. Newer snapshots always carry
-/// `nappingUntil` (even while awake), so a snapshot whose drinks were
-/// genuinely consumed to zero is left untouched.
+/// together with the energy drinks), so their inventory also lacks the
+/// historical energy-drink field. Newer snapshots always carry `nappingUntil`
+/// (even while awake). The runtime subsequently normalizes every loaded
+/// inventory to the unlimited product pantry.
 fn migrate_legacy_snapshot_json(snapshot_json: String) -> String {
     let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&snapshot_json) else {
         return snapshot_json;

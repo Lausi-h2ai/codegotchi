@@ -1307,16 +1307,6 @@ h3 {
     cursor: grabbing;
 }
 
-.food-item strong {
-    min-width: 2rem;
-    padding: 0.15rem 0.35rem;
-    border-radius: 999px;
-    color: #ffffff;
-    background: #687bc0;
-    font-size: 0.75rem;
-    text-align: center;
-}
-
 .food-item[data-food-id="energy_drink"] span:first-child {
     color: #b26a00;
     font-size: 1.05rem;

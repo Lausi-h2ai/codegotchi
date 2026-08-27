@@ -130,7 +130,9 @@ describe("CodeGotchi pet room", () => {
         expect(screen.getByText("Energy 81%")).toBeInTheDocument();
         expect(screen.getByText("Happiness 94%")).toBeInTheDocument();
         expect(screen.getByText("Cleanliness 76%")).toBeInTheDocument();
-        expect(screen.getByTestId("food-kibble")).toHaveTextContent("50");
+        expect(screen.getByTestId("food-kibble")).toHaveTextContent("Kibble");
+        expect(screen.getByTestId("food-kibble")).not.toHaveTextContent("50");
+        expect(screen.getByTestId("food-kibble")).not.toHaveTextContent("∞");
         expect(
             screen.getByTestId("poop-00000000-0000-0000-0000-000000000099"),
         ).toBeInTheDocument();
@@ -146,7 +148,15 @@ describe("CodeGotchi pet room", () => {
         expect(
             screen.getByRole("button", { name: /hammock nap/i }),
         ).toBeInTheDocument();
-        expect(screen.getByTestId("food-energy_drink")).toHaveTextContent("10");
+        expect(screen.getByTestId("food-energy_drink")).toHaveTextContent(
+            "Energy drink",
+        );
+        expect(screen.getByTestId("food-energy_drink")).not.toHaveTextContent(
+            "10",
+        );
+        expect(screen.getByTestId("food-energy_drink")).not.toHaveTextContent(
+            "∞",
+        );
     });
 
     it("sends one hammock nap when the hammock is clicked", () => {

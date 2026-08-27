@@ -1,0 +1,151 @@
+# Real Codex terminal-room acceptance
+
+Run: `20260826T133829Z-2782809`
+Date (UTC): `2026-08-26T13:39:33Z`
+Exit status: `1`
+Final status: **BLOCKED**
+Exact source HEAD: `a50104304dfddf2085f33049f75a448c94841adb`
+Scoped product-source working tree: `clean`
+Product-source diff scope: `crates/codegotchi-cli/{src,tests,examples,web-dist} web/{src,e2e,scripts}`
+Scoped product-source diff SHA-256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
+CodeGotchi binary SHA-256: `671f407f89375d9425c52c448392a772c142e444536e9b5b668c90d77442f0eb`
+Codex version: `codex-cli 0.149.1`
+Harness SHA-256: `8e601a843cc515bc00184806af6b5b927cf517bd07e9d627e6a4d821a9736f84`
+Workspace-helper SHA-256: `a5b41babdb507b9fd5609295345c0038db785a9edf06199c911eb8f79c323109`
+Evidence directory: `docs/verification/terminal-room/live-codex`
+
+This report intentionally excludes Codex arguments, CODEX_HOME contents, runtime metadata, and bearer tokens.
+
+## Checklist
+
+- installed Codex version: observed
+- auth isolation: references the selected authorized CODEX_HOME without copying or printing its contents
+- isolated prompt workspace: created run-owned test.md for the bounded file-read interaction
+- isolated Codex home: run-owned trust/config with a credential symlink to the selected authorized auth.json; credential contents were not copied
+- acceptance model: gpt-5.6-luna with low reasoning
+- Codex argument isolation: trailing arguments are supplied through a private NUL-delimited file, not process argv
+- private display transport: verified authenticated local Unix-socket X transport before xdotool use
+- window activation: verified with xdotool before timed interaction
+- isolated runtime metadata: found without printing its contents
+- authoritative snapshot polling: enabled with redacted state summaries
+- authoritative snapshot initial: poops=0 demands=0 kibble=50 treat=25 fruit=25 energy=10 happiness=100 cleanliness=100 care_ids=0 work_points=0 activity=Idle outcome=None sessions=0 last_activity=2026-08-26T13:38:30.215131306Z last_outcome=none napping=inactive
+- isolated debug restock: applied without exposing runtime credentials
+- isolated debug generate-poop: applied without exposing runtime credentials
+- authoritative snapshot prepared: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=100 care_ids=3 work_points=0 activity=Idle outcome=None sessions=0 last_activity=2026-08-26T13:38:30.215131306Z last_outcome=none napping=inactive
+- capture full-live-initial: saved nonblank frame (terminal geometry 120x45)
+- authoritative snapshot before-prompt: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=100 care_ids=3 work_points=0 activity=Idle outcome=None sessions=0 last_activity=2026-08-26T13:38:30.215131306Z last_outcome=none napping=inactive
+- capture full-live-prompt: saved nonblank frame (terminal geometry 120x45)
+- authoritative snapshot after-response: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=99.938416 care_ids=3 work_points=0 activity=Idle outcome=None sessions=0 last_activity=2026-08-26T13:38:30.215131306Z last_outcome=none napping=inactive
+- authoritative snapshot after-response: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=99.871796 care_ids=3 work_points=1 activity=Active outcome=None sessions=1 last_activity=2026-08-26T13:38:33.605528785Z last_outcome=none napping=inactive
+- authoritative snapshot after-response: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=99.80515 care_ids=3 work_points=1 activity=Active outcome=None sessions=1 last_activity=2026-08-26T13:38:33.605528785Z last_outcome=none napping=inactive
+- authoritative snapshot after-response: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=99.73841 care_ids=3 work_points=1 activity=Active outcome=None sessions=1 last_activity=2026-08-26T13:38:33.605528785Z last_outcome=none napping=inactive
+- authoritative snapshot after-response: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=99.67176 care_ids=3 work_points=6 activity=Idle outcome=None sessions=1 last_activity=2026-08-26T13:38:36.936554636Z last_outcome=none napping=inactive
+- authoritative snapshot after-response: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=99.60508 care_ids=3 work_points=6 activity=Idle outcome=None sessions=1 last_activity=2026-08-26T13:38:36.936554636Z last_outcome=none napping=inactive
+- authoritative snapshot after-response: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=99.519806 care_ids=3 work_points=11 activity=Active outcome=None sessions=1 last_activity=2026-08-26T13:38:39.432799945Z last_outcome=none napping=inactive
+- authoritative snapshot after-response: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=99.4718 care_ids=3 work_points=11 activity=Idle outcome=None sessions=1 last_activity=2026-08-26T13:38:39.705042435Z last_outcome=none napping=inactive
+- authoritative snapshot after-response: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=99.4051 care_ids=3 work_points=11 activity=WaitingForUser outcome=None sessions=1 last_activity=2026-08-26T13:38:39.705042435Z last_outcome=none napping=inactive
+- capture full-live-response: saved nonblank frame (terminal geometry 120x45)
+- authoritative snapshot before-approval: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=99.4051 care_ids=3 work_points=11 activity=WaitingForUser outcome=None sessions=1 last_activity=2026-08-26T13:38:39.705042435Z last_outcome=none napping=inactive
+- capture full-live-approval-prompt: saved nonblank frame (terminal geometry 120x45)
+- authoritative snapshot approval-started: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=99.271774 care_ids=3 work_points=11 activity=WaitingForUser outcome=None sessions=1 last_activity=2026-08-26T13:38:39.705042435Z last_outcome=none napping=inactive
+- authoritative snapshot approval-started: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=99.20508 care_ids=3 work_points=12 activity=Active outcome=None sessions=1 last_activity=2026-08-26T13:38:43.319682406Z last_outcome=none napping=inactive
+- capture full-live-approval: saved nonblank frame (terminal geometry 120x45)
+- capture full-live-approval-modal: saved nonblank frame (terminal geometry 120x45)
+- capture full-live-after-approval: saved nonblank frame (terminal geometry 120x45)
+- authoritative snapshot after-approval: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=98.47177 care_ids=3 work_points=17 activity=Idle outcome=None sessions=1 last_activity=2026-08-26T13:38:54.684146565Z last_outcome=none napping=inactive
+- authoritative snapshot after-approval: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=98.394325 care_ids=3 work_points=17 activity=WaitingForUser outcome=None sessions=1 last_activity=2026-08-26T13:38:54.684146565Z last_outcome=none napping=inactive
+- approval/review interaction: real Codex approval modal captured; approved the exact temp-workspace touch command, observed the file, and returned to authoritative WaitingForUser
+- capture full-live-paste: saved nonblank frame (terminal geometry 120x45)
+- capture full-live-focus-return: saved nonblank frame (terminal geometry 120x45)
+- authoritative snapshot before-codex-mouse: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=98.27176 care_ids=3 work_points=17 activity=WaitingForUser outcome=None sessions=1 last_activity=2026-08-26T13:38:54.684146565Z last_outcome=none napping=inactive
+- authoritative snapshot after-codex-mouse: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=98.20515 care_ids=3 work_points=17 activity=WaitingForUser outcome=None sessions=1 last_activity=2026-08-26T13:38:54.684146565Z last_outcome=none napping=inactive
+- capture full-live-codex-mouse: saved nonblank frame (terminal geometry 120x45)
+- ordinary prompt entry and editing/navigation: verified input sequence: typed test.mX, navigated left, inserted d, moved to end, removed X, and submitted the bounded test.md request
+- model response: captured for supervised visual inspection after authoritative live activity settled
+- tool activity: verified by authoritative runtime progress after the bounded prompt submission
+- bracketed multiline paste visual: real xterm PRIMARY paste sent with Shift+Insert and captured in the populated Codex composer
+- focus out/in visual: run-owned peer xterm became active, then the Codex xterm was reactivated and captured
+- Codex scroll/click visual: real upper-pane click and wheel events were sent; the room care count remained unchanged and Codex stayed usable
+- terminal input protocol receipt: bracketed paste and focus loss/gain were negotiated and delivered; a mouse event includes its negotiated mode and delivery disposition
+- Codex mouse protocol receipt: event=mouse tracking=Disabled encoding=Default delivered=false
+- trailing Codex arguments: model and low effort are visible in the official Codex header; the successful tool read of the run-owned test.md proves the generated --cd workspace argument was honored
+- pet stroke input: attempted qualified strokes at three positions spanning the Full room wander lane; no pet completion is inferred from input alone
+- authoritative snapshot after-pet: poops=1 demands=0 kibble=47 treat=25 fruit=25 energy=10 happiness=100 cleanliness=97.811325 care_ids=6 work_points=17 activity=WaitingForUser outcome=None sessions=1 last_activity=2026-08-26T13:38:54.684146565Z last_outcome=none napping=inactive
+- stocked food drag-to-pet: attempted from the Full kibble source to three positions spanning the awake/sleeping pet lane
+- authoritative snapshot after-feed: poops=1 demands=0 kibble=46 treat=25 fruit=25 energy=10 happiness=100 cleanliness=97.54463 care_ids=7 work_points=17 activity=WaitingForUser outcome=None sessions=1 last_activity=2026-08-26T13:38:54.684146565Z last_outcome=none napping=inactive
+- authoritative poop clean: attempted against the isolated generated-poop target
+- authoritative snapshot after-clean: poops=0 demands=0 kibble=46 treat=25 fruit=25 energy=10 happiness=100 cleanliness=100 care_ids=8 work_points=17 activity=WaitingForUser outcome=None sessions=1 last_activity=2026-08-26T13:38:54.684146565Z last_outcome=none napping=inactive
+- authoritative nap: attempted against the Full bed target
+- authoritative snapshot after-nap: poops=0 demands=0 kibble=46 treat=25 fruit=25 energy=10 happiness=100 cleanliness=100 care_ids=10 work_points=17 activity=WaitingForUser outcome=None sessions=1 last_activity=2026-08-26T13:38:54.684146565Z last_outcome=none napping=active
+- authoritative pet result: verified by a settled processed-care increment immediately after the isolated pet stroke
+- authoritative feed result: verified by a settled inventory decrement
+- authoritative clean result: verified by a settled pending-poop decrement
+- authoritative nap result: verified by a settled future napping deadline
+- capture full-live-care: saved nonblank frame (terminal geometry 120x45)
+- xterm outer resize 80x45: verified by changed xterm geometry after a --usehints cell-grid request (484x589)
+- resize 80x45: xterm cell-grid request applied with resize hints; populated Codex/room frame captured for supervised PTY/layout inspection
+- capture 80x45: saved nonblank frame (terminal geometry 80x45)
+- isolated debug generate-poop: applied without exposing runtime credentials
+- authoritative snapshot prepared-80x45: poops=1 demands=0 kibble=43 treat=25 fruit=25 energy=10 happiness=100 cleanliness=100 care_ids=13 work_points=17 activity=WaitingForUser outcome=None sessions=1 last_activity=2026-08-26T13:38:54.684146565Z last_outcome=none napping=active
+- capture full-live-80x45-care: saved nonblank frame (terminal geometry 80x45)
+- 80x45 authoritative poop clean: clicked the physical fallback care target in the populated narrow Full room
+- authoritative snapshot after-80x45-clean: poops=0 demands=0 kibble=43 treat=25 fruit=25 energy=10 happiness=100 cleanliness=100 care_ids=14 work_points=17 activity=WaitingForUser outcome=None sessions=1 last_activity=2026-08-26T13:38:54.684146565Z last_outcome=none napping=active
+- 80x45 authoritative clean result: verified by a settled pending-poop decrement after the visible fallback target click
+- xterm outer resize 120x45: verified by changed xterm geometry after a --usehints cell-grid request (724x589)
+- resize 120x45: xterm cell-grid request applied with resize hints; populated Codex/room frame captured for supervised PTY/layout inspection
+- capture 120x45: saved nonblank frame (terminal geometry 120x45)
+- Codex hook trust: invocation-scoped automation bypass enabled for the generated CodeGotchi hook profile; no persistent trust choice was fabricated
+- capture full-live-checks: saved nonblank frame (terminal geometry 120x45)
+- xterm outer resize 120x30: verified by changed xterm geometry after a --usehints cell-grid request (724x394)
+- resize 120x30: xterm cell-grid request applied with resize hints; populated Codex/room frame captured for supervised PTY/layout inspection
+- capture 120x30: saved nonblank frame (terminal geometry 120x30)
+- xterm outer resize 120x21: verified by changed xterm geometry after a --usehints cell-grid request (724x277)
+- resize 120x21: xterm cell-grid request applied with resize hints; populated Codex/room frame captured for supervised PTY/layout inspection
+- capture 120x21: saved nonblank frame (terminal geometry 120x21)
+- xterm outer resize 120x45: verified by changed xterm geometry after a --usehints cell-grid request (724x589)
+- resize 120x45: xterm cell-grid request applied with resize hints; populated Codex/room frame captured for supervised PTY/layout inspection
+- capture 120x45: saved nonblank frame (terminal geometry 120x45)
+- PTY resize protocol receipt: physical terminal and Codex PTY dimensions were recorded for Full, Compact, and Minimal cycles
+- capture full-live-final: saved nonblank frame (terminal geometry 120x45)
+- normal exit raw-mode restoration: run-owned PTY stty state matched before/after the session
+- capture normal-exit-restored-shell: saved nonblank frame (terminal geometry 120x45)
+- capture normal-exit-restored-shell-input: saved nonblank frame (terminal geometry 120x45)
+- normal Codex exit: same xterm left the alternate screen, executed a receipt command in a real interactive shell, and closed cleanly
+- window activation: verified with xdotool before timed interaction
+- bounded termination case: termination attempted only against the verified run-owned CodeGotchi descendant tree; tagged-process cleanup checks for reparented survivors
+- bounded termination restoration: xterm exited within the bounded signal window; wrapper restoration artifacts were checked
+- bounded termination raw-mode restoration: run-owned PTY stty state matched before/after the session
+- live acceptance overall: PASS
+- controller terminal usability: manual/unavailable (the harness controller did not expose a parent tty for restoration evidence)
+
+## Captures
+
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-full-live-initial.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-full-live-prompt.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-full-live-response.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-full-live-approval-prompt.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-full-live-approval.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-full-live-approval-modal.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-full-live-after-approval.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-full-live-paste.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-full-live-focus-return.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-full-live-codex-mouse.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-full-live-care.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-80x45.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-full-live-80x45-care.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-120x45.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-full-live-checks.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-120x30.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-120x21.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-120x45.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-full-live-final.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-normal-exit-restored-shell.png
+- docs/verification/terminal-room/live-codex/20260826T133829Z-2782809-normal-exit-restored-shell-input.png
+
+## Restoration
+
+- BLOCKED: retained run root: `/tmp/codegotchi-terminal-room-live.HDoMWB` (cleanup could not prove full process-tree termination).
+- Private display credential cleanup: `removed or redacted`.
+- Run-owned process cleanup scans the exact per-run environment marker after root cleanup, including descendants reparented after root death.
+- Process diagnostics intentionally omit command lines so operator arguments and credentials cannot enter the report.
+- No Codex screen transcript is captured or parsed; structured state receipts are paired with supervised PNG evidence.

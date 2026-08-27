@@ -28,6 +28,7 @@ Environment overrides:
   CODEGOTCHI_CODEX_BIN           Codex executable (default CODEGOTCHI_REAL_CODEX or codex)
   CODEGOTCHI_LIVE_CODEX_HOME     Authorized CODEX_HOME to reference without copying it
   CODEGOTCHI_LIVE_OUTPUT_DIR     Evidence directory (default docs/verification/terminal-room/live-codex)
+  CODEGOTCHI_LIVE_TERMINAL_THEME Terminal theme (default auto; auto|mono|soft-green|amber|night)
   CODEGOTCHI_LIVE_NO_BUILD       Set to 1 to refuse an automatic cargo build
   CODEGOTCHI_LIVE_TIMEOUT_SEC    Per bounded wait timeout (default 30)
 
@@ -41,6 +42,16 @@ if [[ ${1-} == "--help" || ${1-} == "-h" ]]; then
     usage
     exit 0
 fi
+
+CODEGOTCHI_LIVE_TERMINAL_THEME=${CODEGOTCHI_LIVE_TERMINAL_THEME:-auto}
+case "$CODEGOTCHI_LIVE_TERMINAL_THEME" in
+    auto|mono|soft-green|amber|night) ;;
+    *)
+        printf 'FAIL: CODEGOTCHI_LIVE_TERMINAL_THEME must be auto, mono, soft-green, amber, or night\n' >&2
+        exit 2
+        ;;
+esac
+export CODEGOTCHI_LIVE_TERMINAL_THEME
 
 CODEX_ARGUMENTS=(--disable apps --ask-for-approval on-request --sandbox read-only)
 CUSTOM_CODEX_ARGUMENTS=0
@@ -788,7 +799,7 @@ set -Eeuo pipefail
 restore_prefix=${CODEGOTCHI_LIVE_RESTORE_PREFIX:?}
 stty -g >"${restore_prefix}-before" 2>/dev/null || printf '%s\n' unavailable >"${restore_prefix}-before"
 set +e
-"${CODEGOTCHI_LIVE_CODEGOTCHI_BIN:?}" run --ui terminal --terminal-theme auto -- codex
+"${CODEGOTCHI_LIVE_CODEGOTCHI_BIN:?}" run --ui terminal --terminal-theme "${CODEGOTCHI_LIVE_TERMINAL_THEME:?}" -- codex
 status=$?
 set -e
 stty -g >"${restore_prefix}-after" 2>/dev/null || printf '%s\n' unavailable >"${restore_prefix}-after"
@@ -929,7 +940,7 @@ record_codex_checks() {
     record 'tool activity' 'verified by authoritative runtime progress after the bounded prompt submission'
     record 'bracketed multiline paste visual' 'real xterm PRIMARY paste sent with Shift+Insert and captured in the populated Codex composer'
     record 'focus out/in visual' 'run-owned peer xterm became active, then the Codex xterm was reactivated and captured'
-    record 'Codex scroll/click visual' 'real upper-pane click and wheel events were sent; the room care count remained unchanged and Codex stayed usable'
+    record 'Codex scroll/click visual' 'real upper-pane click and wheel events were sent; care availability remained unchanged and Codex stayed usable'
 }
 
 verify_protocol_input_receipts() {
@@ -1163,19 +1174,63 @@ focus_probe() {
 }
 
 codex_mouse_probe() {
-    local before_care after_care
+    local before_care after_care before_scroll after_scroll
     state_summary before-codex-mouse
     before_care=$(state_value before-codex-mouse care_ids)
+    capture_frame 'full-live-codex-before-scroll'
+    before_scroll="$OUTPUT_DIR/$RUN_ID-full-live-codex-before-scroll.png"
     cell_move 60 10
     display_command xdotool click 1 >/dev/null 2>&1 || fail 'could not click the Codex upper pane'
-    display_command xdotool click 4 >/dev/null 2>&1 || fail 'could not scroll up in the Codex upper pane'
-    display_command xdotool click 5 >/dev/null 2>&1 || fail 'could not scroll down in the Codex upper pane'
+    for _ in {1..5}; do
+        display_command xdotool click 4 >/dev/null 2>&1 || fail 'could not scroll up in the Codex upper pane'
+    done
+    sleep 0.5
+    assert_window_usable
+    capture_frame 'full-live-codex-after-scroll'
+    after_scroll="$OUTPUT_DIR/$RUN_ID-full-live-codex-after-scroll.png"
+    if cmp -s "$before_scroll" "$after_scroll"; then
+        record 'local upper-pane scrollback visual' 'not verified: the before/after upper-pane captures were identical'
+        block_required_gate
+    else
+        record 'local upper-pane scrollback visual' 'captured distinct before/after upper-pane frames after five plain wheel-up events'
+    fi
+    for _ in {1..5}; do
+        display_command xdotool click 5 >/dev/null 2>&1 || fail 'could not scroll down in the Codex upper pane'
+    done
     sleep 0.5
     assert_window_usable
     state_summary after-codex-mouse
     after_care=$(state_value after-codex-mouse care_ids)
     [[ $before_care == "$after_care" ]] || fail 'upper-pane Codex mouse probe unexpectedly mutated room care state'
     capture_frame 'full-live-codex-mouse'
+}
+
+codex_selection_probe() {
+    local selection_ok=0
+    local row
+    for row in {0..20}; do
+        cell_move 1 "$row"
+        display_command xdotool keydown Shift_L >/dev/null 2>&1 || fail 'could not hold Shift for terminal selection'
+        cell_move 45 "$row"
+        display_command xdotool mousedown 1 >/dev/null 2>&1 || fail 'could not start the upper-pane terminal selection'
+        cell_move 1 "$row"
+        display_command xdotool mouseup 1 >/dev/null 2>&1 || fail 'could not finish the upper-pane terminal selection'
+        display_command xdotool keyup Shift_L >/dev/null 2>&1 || fail 'could not release Shift after terminal selection'
+        if display_command xclip -selection primary -out 2>/dev/null | grep -Fqi 'shell tool'; then
+            selection_ok=1
+            break
+        fi
+    done
+    if ((selection_ok == 1)); then
+        record 'native upper-pane selection and PRIMARY copy' 'verified a real Shift-drag selection in xterm and matched the known Codex response text in PRIMARY'
+        capture_frame 'full-live-selection'
+    else
+        record 'native upper-pane selection and PRIMARY copy' 'not verified: xterm PRIMARY did not contain the selected Codex response text'
+        block_required_gate
+    fi
+    send_key Escape
+    sleep 0.2
+    assert_window_usable
 }
 
 full_pet() {
@@ -1366,8 +1421,8 @@ verify_care_snapshots() {
         block_required_gate
     fi
 
-    if [[ $prepared_kibble =~ ^[0-9]+$ && $after_feed_kibble =~ ^[0-9]+$ && $after_feed_kibble -lt $prepared_kibble ]]; then
-        record 'authoritative feed result' 'verified by a settled inventory decrement'
+    if [[ $prepared_kibble =~ ^[0-9]+$ && $after_feed_kibble =~ ^[0-9]+$ && $after_feed_kibble == "$prepared_kibble" ]]; then
+        record 'authoritative feed result' 'verified by a settled care action with unchanged unlimited availability'
     else
         record 'authoritative feed result' 'not verified by the settled snapshot'
         block_required_gate
@@ -1553,7 +1608,7 @@ termination_case() {
 
 main() {
     local command_name
-    for command_name in xterm xdotool xclip xdpyinfo import identify timeout sed awk find ps xprop od tr grep basename seq sha256sum tail; do
+    for command_name in xterm xdotool xclip xdpyinfo import identify timeout sed awk find ps xprop od tr grep basename seq sha256sum tail cmp; do
         require_command "$command_name"
     done
     find_codegotchi_binary
@@ -1564,6 +1619,7 @@ main() {
     record 'isolated prompt workspace' 'created run-owned test.md for the bounded file-read interaction'
     record 'isolated Codex home' 'run-owned trust/config with a credential symlink to the selected authorized auth.json; credential contents were not copied'
     record 'acceptance model' 'gpt-5.6-luna with low reasoning'
+    record 'terminal theme' "$CODEGOTCHI_LIVE_TERMINAL_THEME"
     prepare_launch_files
     select_display
 
@@ -1588,6 +1644,7 @@ main() {
         bracketed_paste_probe
         focus_probe
         codex_mouse_probe
+        codex_selection_probe
         record_codex_checks
         verify_protocol_input_receipts || true
         record 'trailing Codex arguments' 'model and low effort are visible in the official Codex header; the successful tool read of the run-owned test.md proves the generated --cd workspace argument was honored'

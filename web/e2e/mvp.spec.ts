@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const launchUrl = "/#token=task3-playwright-token";
 const fixtureToken = "task3-playwright-token";
+const unlimitedCareQuantity = 2 ** 32 - 1;
 const motionRegions = new Set([
     "window",
     "shelf",
@@ -162,7 +163,6 @@ type CareInteraction =
     | { kind: "drag"; source: Locator; target: Locator };
 
 type EnergyDrinkDiagnostics = {
-    drop: boolean;
     request: { method: string; url: string };
     response: {
         status: number;
@@ -170,15 +170,8 @@ type EnergyDrinkDiagnostics = {
     };
     feedback: string;
     activity: string;
-    inventory: number;
     authoritativeInventory: number | undefined;
 };
-
-declare global {
-    interface Window {
-        __codeGotchiEnergyDrop?: boolean;
-    }
-}
 
 /**
  * Care interactions use this test-only seam because this runner's Chromium
@@ -270,7 +263,9 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         await expect(
             page.getByRole("region", { name: "Desk and work area" }),
         ).toBeVisible();
-        await expect(page.getByTestId("food-treat")).toContainText("25");
+        await expect(page.getByTestId("food-treat")).toContainText("Treat");
+        await expect(page.getByTestId("food-treat")).not.toContainText("25");
+        await expect(page.getByTestId("food-treat")).not.toContainText("∞");
         await expect(page.getByTestId(/poop-/).first()).toBeVisible();
         await expect(page.getByTestId("activity-label")).toContainText(
             "Working",
@@ -315,7 +310,7 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         );
     });
 
-    test("feeds with drag and drop and keeps the authoritative result after reload", async ({
+    test("feeds with drag and drop while keeping the care item available after reload", async ({
         page,
     }) => {
         await resetFixture(page, "default");
@@ -324,25 +319,21 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         const feedTarget = page.getByRole("button", {
             name: /feed target/i,
         });
-        const before = await food.locator("strong").textContent();
-
         await careInteraction({
             kind: "drag",
             source: food,
             target: feedTarget,
         });
         await expect(page.getByText("Eating a treat")).toBeVisible();
-        await expect(food.locator("strong")).toHaveText(
-            String(Number(before) - 1),
-        );
+        await expect(food).toContainText("Treat");
+        await expect(food).not.toContainText("∞");
 
         await page.reload();
-        await expect(food.locator("strong")).toHaveText(
-            String(Number(before) - 1),
-        );
+        await expect(page.getByTestId("food-treat")).toContainText("Treat");
+        await expect(page.getByTestId("food-treat")).not.toContainText("∞");
     });
 
-    test("drinks an energy drink and keeps the authoritative count after reload", async ({
+    test("drinks an energy drink and keeps it available after reload", async ({
         page,
     }) => {
         await resetFixture(page, "default");
@@ -351,24 +342,6 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         const feedTarget = page.getByRole("button", {
             name: /feed target/i,
         });
-        const before = await drink.locator("strong").textContent();
-
-        await page.evaluate(() => {
-            window.__codeGotchiEnergyDrop = false;
-            const feedTarget = document.querySelector<HTMLButtonElement>(
-                '[aria-label*="feed target" i]',
-            );
-            if (feedTarget) {
-                feedTarget.addEventListener(
-                    "drop",
-                    () => {
-                        window.__codeGotchiEnergyDrop = true;
-                    },
-                    { once: true },
-                );
-            }
-        });
-
         const feedResponsePromise = page.waitForResponse((response) => {
             const request = response.request();
             return (
@@ -386,9 +359,6 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
             inventory?: Record<string, number>;
         };
         const diagnostics: EnergyDrinkDiagnostics = {
-            drop: await page.evaluate(
-                () => window.__codeGotchiEnergyDrop === true,
-            ),
             request: {
                 method: feedResponse.request().method(),
                 url: new URL(feedResponse.url()).pathname,
@@ -400,29 +370,29 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
             feedback: (await page.locator(".feedback").textContent()) ?? "",
             activity:
                 (await page.getByTestId("activity-label").textContent()) ?? "",
-            inventory: Number(await drink.locator("strong").textContent()),
             authoritativeInventory: feedBody.inventory?.energy_drink,
         };
         console.log("ENERGY_DRINK_DIAGNOSTICS", diagnostics);
-        expect(diagnostics.drop, diagnostics).toBe(true);
         expect(diagnostics.request, diagnostics).toEqual({
             method: "POST",
             url: "/api/v1/care/feed",
         });
         expect(diagnostics.response.status, diagnostics).toBe(200);
         expect(diagnostics.authoritativeInventory, diagnostics).toBe(
-            Number(before) - 1,
+            unlimitedCareQuantity,
         );
         await expect(page.getByText("Eating an energy drink")).toBeVisible({
             timeout: 2_000,
         });
-        await expect(drink.locator("strong")).toHaveText(
-            String(Number(before) - 1),
-        );
+        await expect(drink).toContainText("Energy drink");
+        await expect(drink).not.toContainText("∞");
 
         await page.reload();
-        await expect(drink.locator("strong")).toHaveText(
-            String(Number(before) - 1),
+        await expect(page.getByTestId("food-energy_drink")).toContainText(
+            "Energy drink",
+        );
+        await expect(page.getByTestId("food-energy_drink")).not.toContainText(
+            "∞",
         );
     });
 
@@ -452,13 +422,13 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         await resetFixture(page, "default");
         await page.goto(launchUrl);
         const food = page.getByTestId("food-treat");
-        const before = await food.locator("strong").textContent();
         const trash = page.getByRole("button", { name: "Trash" });
 
         await careInteraction({ kind: "drag", source: food, target: trash });
         await page.waitForTimeout(150);
 
-        await expect(food.locator("strong")).toHaveText(before ?? "");
+        await expect(food).toContainText("Treat");
+        await expect(food).not.toContainText("∞");
         await expect(page.getByRole("alert")).toHaveCount(0);
     });
 
@@ -482,21 +452,30 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         await expect(page.getByText("Cleaned up")).toHaveCount(0);
     });
 
-    test("presents a real backend care error", async ({ page }) => {
+    test("keeps care items available after repeated use", async ({ page }) => {
         await resetFixture(page, "default");
         await page.goto(launchUrl);
-        const emptyFood = page.getByTestId("food-kibble");
-        const feedTarget = page.getByRole("button", {
-            name: /feed target/i,
-        });
+        const food = page.getByTestId("food-kibble");
 
-        await careInteraction({
-            kind: "drag",
-            source: emptyFood,
-            target: feedTarget,
-        });
+        for (let index = 0; index < 3; index += 1) {
+            const feedResponsePromise = page.waitForResponse((response) => {
+                const request = response.request();
+                return (
+                    new URL(response.url()).pathname === "/api/v1/care/feed" &&
+                    request.method() === "POST"
+                );
+            });
+            await careInteraction({ kind: "click", target: food });
+            const feedResponse = await feedResponsePromise;
+            const body = (await feedResponse.json()) as {
+                inventory?: Record<string, number>;
+            };
+            expect(feedResponse.status()).toBe(200);
+            expect(body.inventory?.kibble).toBe(unlimitedCareQuantity);
+        }
 
-        await expect(page.getByRole("alert")).toContainText("out of stock");
+        await expect(food).toContainText("Kibble");
+        await expect(food).not.toContainText("∞");
     });
 
     test("cleans a poop only after shovel, poop, and trash, then persists removal", async ({
@@ -926,18 +905,17 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         );
 
         const fruit = page.getByTestId("food-fruit");
-        const beforeFruit = Number(await fruit.locator("strong").textContent());
         await careInteraction({ kind: "click", target: fruit });
         await expect(page.getByText("Eating fruit")).toBeVisible();
-        await expect(fruit.locator("strong")).toHaveText(
-            String(beforeFruit - 1),
-        );
+        await expect(fruit).toContainText("Fruit");
+        await expect(fruit).not.toContainText("∞");
 
         const restock = page.getByTestId("restock");
         await expect(restock).toBeVisible();
         await careInteraction({ kind: "click", target: restock });
         await expect(page.getByText("Restocked the pantry")).toBeVisible();
-        await expect(fruit.locator("strong")).toHaveText("25");
+        await expect(fruit).toContainText("Fruit");
+        await expect(fruit).not.toContainText("∞");
 
         const poops = page.locator("[data-poop-id]");
         const beforePoops = await poops.count();
