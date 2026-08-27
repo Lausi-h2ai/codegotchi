@@ -338,6 +338,12 @@ pub struct PetRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct NameRequest {
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotMutationResponse {
     #[serde(flatten)]
@@ -403,7 +409,7 @@ fn decision_is_blocked(value: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::PetRequest;
+    use super::{NameRequest, PetRequest};
     use serde_json::json;
     use uuid::Uuid;
 
@@ -426,6 +432,27 @@ mod tests {
                 "interactionMs": 1_500,
                 "pointerDistance": 120.0,
             })
+        );
+    }
+
+    #[test]
+    fn name_request_serializes_only_the_name_field() {
+        let request: NameRequest = serde_json::from_value(json!({
+            "name": "Luna",
+        }))
+        .expect("name request should deserialize");
+
+        assert_eq!(request.name, "Luna");
+        assert_eq!(
+            serde_json::to_value(&request).expect("name request should serialize"),
+            json!({"name": "Luna"})
+        );
+        assert!(
+            serde_json::from_value::<NameRequest>(json!({
+                "name": "Luna",
+                "extra": true,
+            }))
+            .is_err()
         );
     }
 }

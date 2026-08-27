@@ -16,7 +16,9 @@ use crate::{
     clock::Clock,
     event::{ActivityKind, AgentEvent, AgentEventError, AgentEventKind},
     permission::{EnforcementMode, PetSettings},
-    pet::{AgentActivityState, AgentOutcome, FoodKind, Pet, PetBehavior, PetNeeds, Poop},
+    pet::{
+        AgentActivityState, AgentOutcome, FoodKind, Pet, PetBehavior, PetNameError, PetNeeds, Poop,
+    },
     poop::{DefaultPoopGenerationStrategy, PoopGenerationStrategy},
 };
 
@@ -239,6 +241,12 @@ where
 
     pub fn pet(&self) -> &Pet {
         &self.pet
+    }
+
+    pub fn rename(&mut self, name: impl Into<String>) -> Result<bool, PetNameError> {
+        let previous_name = self.pet.name().to_owned();
+        self.pet.rename(name)?;
+        Ok(previous_name != self.pet.name())
     }
 
     pub fn session_activities(&self) -> &BTreeMap<Uuid, SessionActivity> {
@@ -524,6 +532,7 @@ where
                     }
                     FoodKind::Fruit => {
                         self.pet.needs_mut().adjust_hunger(-15.0);
+                        self.pet.needs_mut().adjust_energy(5.0);
                         self.pet.add_digestion_points(25);
                     }
                     FoodKind::EnergyDrink => {

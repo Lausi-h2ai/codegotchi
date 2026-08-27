@@ -305,6 +305,16 @@ async fn strict_denial_is_verified_fail_open_and_recoverable_through_normal_care
     assert_eq!(mode_snapshot.enforcement_mode, EnforcementMode::Strict);
     assert!(mode_snapshot.last_updated_at > initial.last_updated_at);
 
+    let rename = invoke_cli(&["name", "  Luna  "], &metadata_path, false).await;
+    assert!(
+        rename.status.success(),
+        "rename stderr: {:?}",
+        rename.stderr
+    );
+    assert!(String::from_utf8_lossy(&rename.stdout).contains("Luna"));
+    let renamed = next_snapshot(&mut snapshots).await;
+    assert_eq!(renamed.name, "Luna");
+
     let extra_mode = request(
         &server,
         "POST",
@@ -346,7 +356,7 @@ async fn strict_denial_is_verified_fail_open_and_recoverable_through_normal_care
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
-                "permissionDecisionReason": "The pet refuses this action because its hunger is critical. Feed the pet in the CodeGotchi UI, then retry the Codex request afterward."
+                "permissionDecisionReason": "Luna refuses this action because hunger is critical. Feed Luna in the CodeGotchi UI, then retry the Codex request afterward."
             }
         })
     );

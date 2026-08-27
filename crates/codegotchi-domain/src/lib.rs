@@ -24,8 +24,8 @@ pub use permission::{
     RequiredAction, WorkDecision, WorkPermissionPolicy, WorkPermissionStrategy, WorkReasonCode,
 };
 pub use pet::{
-    AgentActivityState, AgentOutcome, FoodInventory, FoodKind, Pet, PetBehavior, PetNeeds,
-    PetSpecies, Poop,
+    AgentActivityState, AgentOutcome, FoodInventory, FoodKind, MAX_PET_NAME_CHARS, Pet,
+    PetBehavior, PetNameError, PetNeeds, PetSpecies, Poop, normalize_pet_name,
 };
 pub use poop::{
     DefaultPoopGenerationStrategy, PoopGenerationStrategy, PoopGenerationThreshold,

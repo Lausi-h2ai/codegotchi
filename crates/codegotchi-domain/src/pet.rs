@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use uuid::Uuid;
 
 use crate::attention::PetDemand;
@@ -215,6 +216,33 @@ impl Default for PetNeeds {
 pub enum PetSpecies {
     #[default]
     Cat,
+}
+
+pub const MAX_PET_NAME_CHARS: usize = 32;
+
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
+pub enum PetNameError {
+    #[error("pet name must not be empty")]
+    Empty,
+    #[error("pet name must be at most {MAX_PET_NAME_CHARS} characters")]
+    TooLong,
+    #[error("pet name must not contain control characters")]
+    ContainsControl,
+}
+
+pub fn normalize_pet_name(name: impl Into<String>) -> Result<String, PetNameError> {
+    let name = name.into();
+    if name.chars().any(char::is_control) {
+        return Err(PetNameError::ContainsControl);
+    }
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(PetNameError::Empty);
+    }
+    if name.chars().count() > MAX_PET_NAME_CHARS {
+        return Err(PetNameError::TooLong);
+    }
+    Ok(name.to_owned())
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -564,6 +592,11 @@ impl Pet {
         &self.name
     }
 
+    pub fn rename(&mut self, name: impl Into<String>) -> Result<(), PetNameError> {
+        self.name = normalize_pet_name(name)?;
+        Ok(())
+    }
+
     pub fn species(&self) -> PetSpecies {
         self.species
     }
@@ -709,8 +742,8 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        AgentActivityState, AgentOutcome, FoodInventory, Pet, PetBehavior, PetNeeds, PetSpecies,
-        Poop,
+        AgentActivityState, AgentOutcome, FoodInventory, Pet, PetBehavior, PetNameError, PetNeeds,
+        PetSpecies, Poop,
     };
     use crate::attention::{PetDemand, PetDemandKind};
 
@@ -762,6 +795,30 @@ mod tests {
         assert_eq!(pet.work_points(), 0);
         assert_eq!(pet.digestion_points(), 0);
         assert_eq!(pet.last_updated_at(), start);
+    }
+
+    #[test]
+    fn pet_can_be_renamed_with_a_trimmed_bounded_single_line_name() {
+        let start = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        let mut pet = Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, start);
+
+        pet.rename("  Luna 🌙  ").expect("valid name is accepted");
+
+        assert_eq!(pet.name(), "Luna 🌙");
+        assert_eq!(
+            pet.rename("   ").expect_err("blank name is rejected"),
+            PetNameError::Empty
+        );
+        assert_eq!(
+            pet.rename("name\nwith a newline")
+                .expect_err("multi-line name is rejected"),
+            PetNameError::ContainsControl
+        );
+        assert_eq!(
+            pet.rename("123456789012345678901234567890123")
+                .expect_err("long name is rejected"),
+            PetNameError::TooLong
+        );
     }
 
     #[test]

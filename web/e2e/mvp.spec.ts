@@ -310,6 +310,40 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
         );
     });
 
+    test("projects an authenticated pet rename into the production room", async ({
+        page,
+    }) => {
+        await resetFixture(page, "default");
+        await page.goto(launchUrl);
+        await expect(page.getByRole("heading", { level: 2 })).toContainText(
+            "Mochi",
+        );
+
+        const renameResponse = await page.evaluate(async (name) => {
+            const response = await fetch("/api/v1/name", {
+                method: "POST",
+                headers: {
+                    Authorization: "Bearer task3-playwright-token",
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ name }),
+            });
+            return {
+                status: response.status,
+                body: (await response.json()) as { name?: string },
+            };
+        }, "Luna");
+        expect(renameResponse.status).toBe(200);
+        expect(renameResponse.body.name).toBe("Luna");
+        await expect(page.getByRole("heading", { level: 2 })).toContainText(
+            "Luna",
+        );
+        await page.reload();
+        await expect(page.getByRole("heading", { level: 2 })).toContainText(
+            "Luna",
+        );
+    });
+
     test("feeds with drag and drop while keeping the care item available after reload", async ({
         page,
     }) => {
@@ -1086,8 +1120,8 @@ test.describe.serial("CodeGotchi production browser vertical slice", () => {
             },
         });
         expect(response.blocked).toBe(true);
-        expect(response.reason).toContain("desperately needs attention");
-        expect(response.reason).toContain("Pet it in the CodeGotchi UI");
+        expect(response.reason).toContain("desperately need attention");
+        expect(response.reason).toContain("Pet Mochi in the CodeGotchi UI");
     });
 
     test("catches up overdue persisted care pressure once and keeps it after refresh", async ({

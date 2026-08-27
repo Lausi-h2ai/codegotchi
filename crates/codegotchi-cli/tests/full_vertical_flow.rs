@@ -18,8 +18,6 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-const EXPECTED_STRICT_REASON: &str = "The pet refuses this action because its hunger is critical. Feed the pet in the CodeGotchi UI, then retry the Codex request afterward.";
-
 struct TestEnvironment {
     root: PathBuf,
     home: PathBuf,
@@ -854,6 +852,12 @@ async fn strict_flow_denies_cares_retries_and_fails_open_when_server_stops() {
     assert_eq!(neglected.body["enforcementMode"], "strict");
     assert_eq!(neglected.body["needs"]["hunger"], 100.0);
     assert_eq!(neglected.body["needs"]["energy"], 0.0);
+    let pet_name = neglected.body["name"]
+        .as_str()
+        .expect("state snapshot includes the pet name");
+    let expected_strict_reason = format!(
+        "{pet_name} refuses this action because hunger is critical. Feed {pet_name} in the CodeGotchi UI, then retry the Codex request afterward."
+    );
 
     let denial_payload = fixture("bash_pre.json");
     let denial_event = translate_hook_json(&denial_payload, &launcher.metadata)
@@ -861,10 +865,13 @@ async fn strict_flow_denies_cares_retries_and_fails_open_when_server_stops() {
     let denial = invoke_hook(&launcher.metadata_path, &denial_payload);
     assert!(denial.status.success());
     let expected_denial = format!(
-        "{{\"hookSpecificOutput\":{{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"{EXPECTED_STRICT_REASON}\"}}}}\n"
+        "{{\"hookSpecificOutput\":{{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"{expected_strict_reason}\"}}}}\n"
     );
     assert_eq!(denial.stdout, expected_denial.as_bytes());
-    assert!(String::from_utf8_lossy(&denial.stdout).contains("Feed the pet in the CodeGotchi UI"));
+    assert!(
+        String::from_utf8_lossy(&denial.stdout)
+            .contains(&format!("Feed {pet_name} in the CodeGotchi UI"))
+    );
     assert!(String::from_utf8_lossy(&denial.stdout).contains("retry the Codex request afterward"));
 
     // Two kibble bring hunger from 100 down to 50, below the mild neglect

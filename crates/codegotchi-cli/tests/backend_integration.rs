@@ -284,6 +284,55 @@ async fn production_hook_reaches_authoritative_state_and_parses_the_server_respo
     server.shutdown().await.unwrap();
 }
 
+#[tokio::test]
+async fn authenticated_name_route_updates_and_persists_the_pet_name() {
+    let db = TestDatabase::new();
+    let runtime = runtime(&db);
+    let server = RunningServer::start(runtime.clone(), TOKEN).await.unwrap();
+
+    assert_eq!(
+        request(&server, "POST", "/api/v1/name", None, br#"{"name":"Luna"}"#)
+            .await
+            .status,
+        401
+    );
+
+    let response = request(
+        &server,
+        "POST",
+        "/api/v1/name",
+        Some(TOKEN),
+        br#"{"name":"  Luna  "}"#,
+    )
+    .await;
+    assert_eq!(response.status, 200);
+    assert_eq!(response.body["name"], "Luna");
+    assert!(!response.body["duplicate"].as_bool().unwrap());
+    assert_eq!(runtime.snapshot().name, "Luna");
+    assert_eq!(
+        SqliteStore::open(&db.path)
+            .unwrap()
+            .load()
+            .unwrap()
+            .unwrap()
+            .name,
+        "Luna"
+    );
+
+    let invalid = request(
+        &server,
+        "POST",
+        "/api/v1/name",
+        Some(TOKEN),
+        br#"{"name":"name\nwith newline"}"#,
+    )
+    .await;
+    assert_eq!(invalid.status, 422);
+    assert_eq!(invalid.body["error"]["code"], "invalid_name");
+
+    server.shutdown().await.unwrap();
+}
+
 fn invoke_hook(metadata_path: &std::path::Path, payload: &[u8]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_codegotchi"))
         .arg("hook")

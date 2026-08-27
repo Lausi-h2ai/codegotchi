@@ -12,7 +12,7 @@ use crate::classify::{
 };
 use crate::protocol::{
     DebugRequest, EventIngestRequest, EventIngestResponse, HookInput, HookOutput, ModeRequest,
-    PermissionContext, RuntimeMetadataV1, SnapshotMutationResponse,
+    NameRequest, PermissionContext, RuntimeMetadataV1, SnapshotMutationResponse,
 };
 use crate::runtime_metadata::read_metadata;
 
@@ -326,6 +326,16 @@ pub fn send_mode_to_runtime(
     let body =
         serde_json::to_vec(&ModeRequest { mode }).map_err(|_| HookTransportError::Response)?;
     let body = send_json_request(metadata, "/api/v1/mode", &body)?;
+    serde_json::from_slice(&body).map_err(|_| HookTransportError::Response)
+}
+
+pub fn send_name_to_runtime(
+    metadata: &RuntimeMetadataV1,
+    name: impl Into<String>,
+) -> Result<SnapshotMutationResponse, HookTransportError> {
+    let body = serde_json::to_vec(&NameRequest { name: name.into() })
+        .map_err(|_| HookTransportError::Response)?;
+    let body = send_json_request(metadata, "/api/v1/name", &body)?;
     serde_json::from_slice(&body).map_err(|_| HookTransportError::Response)
 }
 

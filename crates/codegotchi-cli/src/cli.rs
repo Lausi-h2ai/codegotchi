@@ -3,12 +3,12 @@ use std::ffi::{OsStr, OsString};
 use std::io::Write;
 use std::path::Path;
 
-use codegotchi_domain::EnforcementMode;
+use codegotchi_domain::{EnforcementMode, normalize_pet_name};
 
 use crate::codex_hook::{
     CODEGOTCHI_SESSION_FILE, HookTransportError, run_hook_from_environment,
     runtime_metadata_is_active, send_debug_generate_poop_to_runtime, send_debug_neglect_to_runtime,
-    send_debug_restock_to_runtime, send_mode_to_runtime,
+    send_debug_restock_to_runtime, send_mode_to_runtime, send_name_to_runtime,
 };
 use crate::launcher;
 use crate::protocol::HookOutput;
@@ -48,6 +48,9 @@ pub fn run_os(mut arguments: impl Iterator<Item = OsString>) -> Result<i32, CliE
         Some(command) if command == OsStr::new("mode") => {
             run_mode(arguments.map(|argument| argument.to_string_lossy().into_owned())).map(|_| 0)
         }
+        Some(command) if command == OsStr::new("name") => {
+            run_name(arguments.map(|argument| argument.to_string_lossy().into_owned())).map(|_| 0)
+        }
         Some(command) if command == OsStr::new("debug") => {
             run_debug(arguments.map(|argument| argument.to_string_lossy().into_owned())).map(|_| 0)
         }
@@ -55,11 +58,11 @@ pub fn run_os(mut arguments: impl Iterator<Item = OsString>) -> Result<i32, CliE
             launcher::run(arguments).map_err(|error| CliError(error.to_string()))
         }
         Some(command) => Err(CliError(format!(
-            "unsupported command `{}`; use `codegotchi hook`, `codegotchi mode decorative|strict`, or a guarded `codegotchi debug` command",
+            "unsupported command `{}`; use `codegotchi hook`, `codegotchi name <name>`, `codegotchi mode decorative|strict`, or a guarded `codegotchi debug` command",
             command.to_string_lossy()
         ))),
         None => Err(CliError(String::from(
-            "a command is required; use `codegotchi hook`, `codegotchi mode decorative|strict`, or `codegotchi debug neglect|generate-poop`",
+            "a command is required; use `codegotchi hook`, `codegotchi name <name>`, `codegotchi mode decorative|strict`, or `codegotchi debug neglect|generate-poop`",
         ))),
     }
 }
@@ -92,6 +95,32 @@ fn run_mode(mut arguments: impl Iterator<Item = String>) -> Result<(), CliError>
         mode_name(mode),
         if receipt.duplicate {
             "already active"
+        } else {
+            "persisted and broadcast"
+        }
+    );
+    Ok(())
+}
+
+fn run_name(mut arguments: impl Iterator<Item = String>) -> Result<(), CliError> {
+    let name = arguments.next().ok_or_else(|| {
+        CliError(String::from(
+            "name requires exactly one value; quote names containing spaces",
+        ))
+    })?;
+    if arguments.next().is_some() {
+        return Err(CliError(String::from(
+            "name accepts exactly one value; quote names containing spaces",
+        )));
+    }
+    let name = normalize_pet_name(name.as_str()).map_err(|error| CliError(error.to_string()))?;
+    let metadata = active_metadata()?;
+    let receipt = send_name_to_runtime(&metadata, name).map_err(runtime_command_error)?;
+    println!(
+        "name {}: {}",
+        receipt.snapshot.name,
+        if receipt.duplicate {
+            "already set"
         } else {
             "persisted and broadcast"
         }

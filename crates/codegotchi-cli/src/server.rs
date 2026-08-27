@@ -27,8 +27,8 @@ use crate::assets;
 use crate::persistence::PersistenceError;
 use crate::protocol::{
     CleanRequest, DebugRequest, DebugStatusResponse, ErrorEnvelope, EventIngestRequest,
-    EventIngestResponse, FeedRequest, HealthResponse, ModeRequest, NapRequest, PetRequest,
-    SnapshotMutationResponse,
+    EventIngestResponse, FeedRequest, HealthResponse, ModeRequest, NameRequest, NapRequest,
+    PetRequest, SnapshotMutationResponse,
 };
 use crate::runtime::{AuthoritativeRuntime, MutationReceipt, RuntimeError};
 
@@ -220,6 +220,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/state", get(state_handler))
         .route("/api/v1/events", post(events_handler))
         .route("/api/v1/mode", post(mode_handler))
+        .route("/api/v1/name", post(name_handler))
         .route("/api/v1/debug/neglect", post(debug_neglect_handler))
         .route("/api/v1/debug/restock", post(debug_restock_handler))
         .route("/api/v1/debug/status", get(debug_status_handler))
@@ -308,7 +309,7 @@ async fn events_handler(
                 strict: mode == EnforcementMode::Strict,
                 blocked,
                 decision: Some(serde_json::json!(if blocked { "deny" } else { "allow" })),
-                reason: denial_reason(receipt.decision),
+                reason: denial_reason(&receipt.snapshot, receipt.decision),
                 duplicate: receipt.duplicate,
             })
             .into_response()
@@ -322,6 +323,16 @@ async fn mode_handler(
     BoundedJson(request): BoundedJson<ModeRequest>,
 ) -> Response {
     match state.runtime.set_enforcement_mode(request.mode) {
+        Ok(receipt) => mutation_response(receipt),
+        Err(error) => runtime_error_response(error),
+    }
+}
+
+async fn name_handler(
+    State(state): State<AppState>,
+    BoundedJson(request): BoundedJson<NameRequest>,
+) -> Response {
+    match state.runtime.rename(request.name) {
         Ok(receipt) => mutation_response(receipt),
         Err(error) => runtime_error_response(error),
     }
@@ -536,6 +547,11 @@ fn runtime_error_response(error: RuntimeError) -> Response {
             };
             error_response(status, code, error.to_string())
         }
+        RuntimeError::PetName(error) => error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_name",
+            error.to_string(),
+        ),
         RuntimeError::Event(AgentEventError::UnsupportedSchemaVersion(version)) => error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
             "unsupported_event_schema",
@@ -603,25 +619,37 @@ fn enforcement_mode_id(mode: EnforcementMode) -> &'static str {
     }
 }
 
-fn denial_reason(decision: WorkDecision) -> Option<String> {
+fn denial_reason(
+    snapshot: &codegotchi_domain::SimulationSnapshot,
+    decision: WorkDecision,
+) -> Option<String> {
     let WorkDecision::Blocked { reason_code, .. } = decision else {
         return None;
     };
+    let name = &snapshot.name;
     let reason = match reason_code {
         WorkReasonCode::CriticalHunger => {
-            "The pet refuses this action because its hunger is critical. Feed the pet in the CodeGotchi UI, then retry the Codex request afterward."
+            format!(
+                "{name} refuses this action because hunger is critical. Feed {name} in the CodeGotchi UI, then retry the Codex request afterward."
+            )
         }
         WorkReasonCode::CriticalEnergy => {
-            "The pet refuses this action because it is too exhausted to keep working. Give the pet time to rest, then retry the Codex request afterward."
+            format!(
+                "{name} refuses this action because they are too exhausted to keep working. Give {name} time to rest, then retry the Codex request afterward."
+            )
         }
         WorkReasonCode::CriticalCleanliness => {
-            "The pet refuses this action because its cleanliness is critical. Clean the pet in the CodeGotchi UI, then retry the Codex request afterward."
+            format!(
+                "{name} refuses this action because cleanliness is critical. Clean {name} in the CodeGotchi UI, then retry the Codex request afterward."
+            )
         }
         WorkReasonCode::CriticalHappiness => {
-            "The pet refuses this action because it desperately needs attention. Pet it in the CodeGotchi UI, then retry the Codex request afterward."
+            format!(
+                "{name} refuses this action because they desperately need attention. Pet {name} in the CodeGotchi UI, then retry the Codex request afterward."
+            )
         }
     };
-    Some(reason.to_owned())
+    Some(reason)
 }
 
 fn debug_header_is_present(headers: &HeaderMap) -> bool {
@@ -866,9 +894,9 @@ mod tests {
             Some(WorkReasonCode::CriticalHappiness)
         );
         assert_eq!(
-            super::denial_reason(decision).as_deref(),
+            super::denial_reason(&simulation.snapshot(), decision).as_deref(),
             Some(
-                "The pet refuses this action because it desperately needs attention. Pet it in the CodeGotchi UI, then retry the Codex request afterward."
+                "Mochi refuses this action because they desperately need attention. Pet Mochi in the CodeGotchi UI, then retry the Codex request afterward."
             )
         );
     }

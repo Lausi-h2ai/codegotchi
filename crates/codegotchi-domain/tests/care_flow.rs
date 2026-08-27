@@ -202,6 +202,26 @@ fn all_foods_apply_literal_effects_and_consume_one_authoritative_item() {
 }
 
 #[test]
+fn fruit_restores_a_small_amount_of_energy() {
+    let (clock, mut simulation) = simulation_with_inventory(FoodKind::Fruit, 1);
+    clock.advance(Duration::hours(1));
+
+    let before = simulation.current_state();
+    assert_eq!(before.needs.energy(), 50.0);
+
+    simulation
+        .apply_care(&CareCommand::Feed {
+            action_id: Uuid::from_u128(300),
+            food_id: "fruit".to_owned(),
+        })
+        .unwrap();
+
+    let after = simulation.snapshot();
+    assert_eq!(after.needs.energy(), 55.0);
+    assert_eq!(after.needs.energy() - before.needs.energy(), 5.0);
+}
+
+#[test]
 fn care_need_effects_are_exact_at_unclamped_public_baselines() {
     let baseline = start() + Duration::minutes(96);
 

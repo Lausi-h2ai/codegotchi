@@ -11,7 +11,7 @@ codegotchi run -- codex [arguments...]
         +-- Axum server on 127.0.0.1:<ephemeral-port>
         |      |
         |      +-- embedded production React bundle
-        |      +-- authenticated HTTP state/event/care/mode/debug routes
+        |      +-- authenticated HTTP state/event/care/name/mode/debug routes
         |      +-- authenticated WebSocket complete snapshots
         |
         +-- content-addressed persistent additive Codex profile
@@ -34,11 +34,12 @@ channel, MCP adapter, or browser-side simulation in this MVP.
 | `crates/codegotchi-cli/src/codex_hook.rs` | Parses one bounded Codex hook payload, discards raw content, classifies it, and submits a canonical event | Codex ingestion boundary |
 | `web/src` | Renders snapshots and submits authenticated feed/clean actions | No pet-state authority |
 
-Every accepted event or care action is applied under the runtime lock, saved
-before it is broadcast, and assigned an idempotency key. Duplicate event IDs
-and care action IDs return success without applying a second transition. A new
-WebSocket receives one complete `SimulationSnapshot` first, then complete
-authoritative replacements.
+Every accepted event, care action, or name change is applied under the runtime
+lock, saved before it is broadcast, and returned as a complete authoritative
+snapshot. Duplicate event IDs and care action IDs, plus repeated name values,
+return success without applying a second transition. A new WebSocket receives
+one complete `SimulationSnapshot` first, then complete authoritative
+replacements.
 
 ## Launch and lifecycle
 
@@ -73,8 +74,8 @@ browser consumes it, removes the visible fragment with `history.replaceState`,
 and retains it only in same-tab history state so a reload can reconnect. HTTP
 requests use `Authorization: Bearer ...`; the browser WebSocket uses the same
 token as its subprotocol. Static assets and health are not state-changing
-routes; state, event, care, mode, debug, and stream routes require the bearer
-token.
+routes; state, event, care, name, mode, debug, and stream routes require the
+bearer token.
 
 The Codex child inherits `CODEGOTCHI_SESSION_FILE`. Each configured hook runs
 the same binary as `codegotchi hook`, so hooks can find the owning runtime

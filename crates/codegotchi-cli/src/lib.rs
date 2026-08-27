@@ -15,16 +15,16 @@ pub use classify::classify_command;
 pub use codex_hook::{
     HookTransportError, hook_output_for_payload, permission_context_for_hook,
     run_hook_from_environment, runtime_metadata_is_active, send_debug_generate_poop_to_runtime,
-    send_debug_neglect_to_runtime, send_event_to_runtime, send_mode_to_runtime, translate_hook,
-    translate_hook_json,
+    send_debug_neglect_to_runtime, send_event_to_runtime, send_mode_to_runtime,
+    send_name_to_runtime, translate_hook, translate_hook_json,
 };
 pub use codex_profile::{CodexInvocation, PersistentCodexProfile, PersistentCodexProfileGuard};
 pub use launcher::{LaunchRequest, LauncherError, UiMode, ValidatedLaunch, parse_launch_request};
 pub use persistence::{PersistenceError, SQLITE_SCHEMA_VERSION, SqliteStore};
 pub use protocol::{
     CleanRequest, DebugRequest, ErrorEnvelope, EventIngestRequest, EventIngestResponse,
-    FeedRequest, HealthResponse, HookInput, HookOutput, ModeRequest, PermissionContext, PetRequest,
-    RuntimeMetadataV1, SnapshotMutationResponse,
+    FeedRequest, HealthResponse, HookInput, HookOutput, ModeRequest, NameRequest,
+    PermissionContext, PetRequest, RuntimeMetadataV1, SnapshotMutationResponse,
 };
 pub use runtime::{
     AuthoritativeRuntime, EventIngestReceipt, MutationReceipt, RuntimeError, RuntimeInitial,

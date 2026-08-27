@@ -175,12 +175,32 @@ silently reclaimed.
 
 ## Strict mode and guarded demos
 
-Run these commands from the active Codex environment so
+The naming and Strict-mode commands talk to a live CodeGotchi runtime. They do
+not start a runtime on their own. Start CodeGotchi with Codex first:
+
+```sh
+codegotchi run --ui browser -- codex
+```
+
+Then run the commands below from that active Codex environment, where
 `CODEGOTCHI_SESSION_FILE` identifies the live runtime:
 
 ```sh
 codegotchi mode strict
+codegotchi name "Jaya"
 ```
+
+`codegotchi name <name>` updates the active repository's pet and immediately
+broadcasts the new name to the browser room. Names are trimmed, must stay on
+one line, and may contain up to 32 characters. The name is persisted with the
+pet and is included in Strict-mode blocking messages. A successful rename
+prints `name Jaya: persisted and broadcast`; repeating the same name is a
+safe no-op.
+
+If you run the command in an unrelated shell, it cannot find the live runtime
+and reports that `CODEGOTCHI_SESSION_FILE` is missing. Execute it through the
+active Codex environment, or export that runtime's metadata-file path in the
+shell before retrying.
 
 Strict mode escalates as the pet's needs worsen. Mild neglect (hunger ≥ 70,
 energy ≤ 30, cleanliness ≤ 30, or happiness ≤ 30) blocks safe development

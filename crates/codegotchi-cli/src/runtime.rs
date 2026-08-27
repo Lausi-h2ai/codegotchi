@@ -4,8 +4,8 @@ use chrono::{DateTime, Duration, Utc};
 use codegotchi_domain::{
     ActivityKind, AgentEvent, AgentEventError, AgentEventKind, CareCommand, CareError, CareResult,
     CommandCategory, CommandClassification, CommandPurpose, DefaultNeedProgressionStrategy,
-    EnforcementMode, FoodInventory, FoodKind, Pet, PetSettings, PetSimulation, SimulationSnapshot,
-    SnapshotRestoreError, SystemClock, WorkDecision, WorkPermissionPolicy,
+    EnforcementMode, FoodInventory, FoodKind, Pet, PetNameError, PetSettings, PetSimulation,
+    SimulationSnapshot, SnapshotRestoreError, SystemClock, WorkDecision, WorkPermissionPolicy,
 };
 use thiserror::Error;
 use tokio::sync::broadcast;
@@ -54,6 +54,8 @@ pub enum RuntimeError {
     Event(#[from] AgentEventError),
     #[error(transparent)]
     Care(#[from] CareError),
+    #[error(transparent)]
+    PetName(#[from] PetNameError),
     #[error(transparent)]
     Restore(#[from] SnapshotRestoreError),
     #[error("authoritative runtime lock is poisoned")]
@@ -118,6 +120,19 @@ impl AuthoritativeRuntime {
         simulation.current_state_at(progress_at);
         simulation.set_enforcement_mode(mode);
         self.persist_and_broadcast(&mut simulation, before, duplicate)
+    }
+
+    pub fn rename(&self, name: impl Into<String>) -> Result<MutationReceipt, RuntimeError> {
+        let mut simulation = self.lock_simulation()?;
+        let before = simulation.snapshot();
+        let changed = simulation.rename(name)?;
+        if !changed {
+            return Ok(MutationReceipt {
+                snapshot: before,
+                duplicate: true,
+            });
+        }
+        self.persist_and_broadcast(&mut simulation, before, false)
     }
 
     /// Evaluates an optional structured permission context and applies the
@@ -535,6 +550,31 @@ mod tests {
                 .count(codegotchi_domain::FoodKind::Kibble),
             u32::MAX
         );
+    }
+
+    #[test]
+    fn rename_persists_broadcasts_and_reports_same_name_as_a_duplicate() {
+        let start = Utc::now();
+        let store = SqliteStore::open(":memory:").unwrap();
+        let runtime = AuthoritativeRuntime::new(
+            store.clone(),
+            Pet::new(Uuid::from_u128(9006), "Mochi", PetSpecies::Cat, start),
+        )
+        .unwrap();
+        let (_, mut snapshots) = runtime.subscribe().unwrap();
+
+        let renamed = runtime.rename("  Luna  ").expect("valid name should apply");
+
+        assert!(!renamed.duplicate);
+        assert_eq!(renamed.snapshot.name, "Luna");
+        assert_eq!(snapshots.try_recv().unwrap(), renamed.snapshot);
+        assert_eq!(store.load().unwrap().unwrap().name, "Luna");
+
+        let repeated = runtime.rename("Luna").expect("same name is a no-op");
+
+        assert!(repeated.duplicate);
+        assert_eq!(repeated.snapshot, renamed.snapshot);
+        assert!(matches!(snapshots.try_recv(), Err(TryRecvError::Empty)));
     }
 
     #[test]
