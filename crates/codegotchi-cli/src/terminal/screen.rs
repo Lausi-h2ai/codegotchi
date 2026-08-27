@@ -408,6 +408,22 @@ impl CodexScreen {
         }
     }
 
+    /// Returns whether the visible viewport is showing historical output
+    /// instead of the live terminal screen.
+    #[must_use]
+    pub fn is_scrolled_back(&self) -> bool {
+        self.scrollback() > 0
+    }
+
+    /// Returns the visible viewport to the live terminal screen.
+    pub fn scroll_to_live(&mut self) {
+        if self.alternate_screen() {
+            self.alternate_history_offset = 0;
+        } else {
+            self.parser.screen_mut().set_scrollback(0);
+        }
+    }
+
     /// Moves the virtual terminal viewport by a signed number of rows.
     ///
     /// Positive values reveal older output; negative values return toward the

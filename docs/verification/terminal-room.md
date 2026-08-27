@@ -1,4 +1,54 @@
-# Terminal-room release verification ledger
+# Terminal-room verification ledger
+
+## Current verification at HEAD
+
+This section records the current repository status for `HEAD` as of
+2026-08-27.
+
+| Item | Result |
+|---|---|
+| Exact `HEAD` SHA | `d22bc303f5f9c4f4459f59cb3bab7d9f213eff77` |
+| Ubuntu Rust checks | PASS |
+| Web checks, including production Playwright | PASS |
+| macOS workspace tests | PENDING/HANGING |
+
+The product changes below are currently an uncommitted working-tree diff;
+the local rows exercise that diff while the CI rows identify the exact
+repository head.
+
+### Current working-tree verification
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | PASS |
+| `cargo test --workspace` | PASS — 421 passed, 0 failed, 10 ignored |
+| `corepack pnpm test` | PASS — 5 files, 123 tests |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm format:check` | PASS |
+| `corepack pnpm build` | PASS |
+| Production Playwright | PASS — 18 tests |
+
+The real-Codex production path also passed in the private-display run
+[`20260827T094351Z-3120563-verification.txt`](terminal-room/live-codex/20260827-p1-auto-private/20260827T094351Z-3120563-verification.txt).
+Its 23 native captures cover live/history scrollback, stale-click handling,
+paste, focus, care states, and 120×45 → 80×45 → 120×30 → 120×21 → 120×45.
+The same capture matrix was visually inspected for the explicit themes:
+
+- [`auto/private`](terminal-room/live-codex/20260827-p1-auto-private/)
+- [`mono`](terminal-room/live-codex/20260827-p1-mono/)
+- [`soft-green`](terminal-room/live-codex/20260827-p1-soft-green/)
+- [`amber`](terminal-room/live-codex/20260827-p1-amber/)
+- [`night`](terminal-room/live-codex/20260827-p1-night/)
+
+Those secondary theme runs reached the visual/interaction matrix, but their
+unrelated approval or shell-restoration probes were timing-blocked; the
+auto/private run is the passing end-to-end acceptance record.
+
+## Historical 0.1 release evidence
+
+The following sections are preserved as historical evidence for the 0.1
+release and do not describe the current `HEAD`.
 
 Status: **local and real-Codex gates pass; hosted final-SHA run is not
 release-green**.

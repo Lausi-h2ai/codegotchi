@@ -18,6 +18,7 @@ use crate::{
     permission::{EnforcementMode, PetSettings},
     pet::{
         AgentActivityState, AgentOutcome, FoodKind, Pet, PetBehavior, PetNameError, PetNeeds, Poop,
+        normalize_pet_name,
     },
     poop::{DefaultPoopGenerationStrategy, PoopGenerationStrategy},
 };
@@ -900,11 +901,8 @@ fn validate_snapshot(snapshot: &SimulationSnapshot) -> Result<(), SnapshotRestor
             "pet id must not be nil".to_owned(),
         ));
     }
-    if snapshot.name.trim().is_empty() {
-        return Err(SnapshotRestoreError::InvariantViolation(
-            "pet name must not be empty".to_owned(),
-        ));
-    }
+    normalize_pet_name(snapshot.name.as_str())
+        .map_err(|error| SnapshotRestoreError::InvariantViolation(error.to_string()))?;
     if snapshot.attention_sequence == u64::MAX {
         return Err(SnapshotRestoreError::InvariantViolation(
             "attention sequence exhausted".to_owned(),

@@ -108,6 +108,38 @@ fn screen_scrollback_by_works_while_codex_uses_alternate_screen() {
 }
 
 #[test]
+fn screen_reports_historical_view_and_returns_to_live() {
+    let mut screen = CodexScreen::new(3, 20);
+    screen.process(b"\x1b[?1049h\x1b[Hfirst frame");
+    screen.process(b"\x1b[2J\x1b[Hsecond frame");
+    let live = screen.contents();
+
+    assert!(!screen.is_scrolled_back());
+    assert!(screen.scrollback_by(1));
+    assert!(screen.is_scrolled_back());
+    assert_ne!(screen.contents(), live);
+
+    screen.scroll_to_live();
+
+    assert!(!screen.is_scrolled_back());
+    assert_eq!(screen.contents(), live);
+}
+
+#[test]
+fn alternate_history_stays_pinned_when_new_output_arrives() {
+    let mut screen = CodexScreen::new(3, 20);
+    screen.process(b"\x1b[?1049h\x1b[Hfirst frame");
+    screen.process(b"\x1b[2J\x1b[Hsecond frame");
+    assert!(screen.scrollback_by(1));
+    let historical = screen.contents();
+
+    screen.process(b"\x1b[2J\x1b[Hthird frame");
+
+    assert!(screen.is_scrolled_back());
+    assert_eq!(screen.contents(), historical);
+}
+
+#[test]
 fn screen_scrollback_by_collects_alternate_frames_from_one_pty_chunk() {
     let mut screen = CodexScreen::new(3, 20);
     screen

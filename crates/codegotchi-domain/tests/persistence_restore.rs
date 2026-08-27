@@ -60,6 +60,42 @@ fn feed(id: u128, food_id: &str) -> CareCommand {
     }
 }
 
+fn assert_restore_rejects_name(name: String) {
+    let (_clock, simulation) = simulation();
+    let mut snapshot = simulation.snapshot();
+    snapshot.name = name;
+
+    let result = PetSimulation::from_snapshot(
+        snapshot,
+        codegotchi_domain::FakeClock::new(start()),
+        DefaultNeedProgressionStrategy,
+    );
+    let error = match result {
+        Ok(_) => panic!("invalid persisted pet names must be rejected"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(
+        error,
+        codegotchi_domain::SnapshotRestoreError::InvariantViolation(_)
+    ));
+}
+
+#[test]
+fn restore_rejects_empty_pet_names() {
+    assert_restore_rejects_name("   ".to_owned());
+}
+
+#[test]
+fn restore_rejects_overlong_pet_names_by_unicode_character_count() {
+    assert_restore_rejects_name("🐱".repeat(33));
+}
+
+#[test]
+fn restore_rejects_control_characters_in_pet_names() {
+    assert_restore_rejects_name("Mochi\nwith a newline".to_owned());
+}
+
 #[test]
 fn snapshot_json_round_trip_restores_all_continuation_state() {
     let (clock, mut simulation) = simulation();

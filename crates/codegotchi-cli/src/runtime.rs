@@ -82,6 +82,11 @@ impl AuthoritativeRuntime {
             RuntimeInitial::Snapshot(snapshot) => snapshot,
         };
         let loaded_snapshot = store.load_or_initialize(initial_snapshot)?;
+        PetSimulation::from_snapshot(
+            loaded_snapshot.clone(),
+            SystemClock,
+            DefaultNeedProgressionStrategy,
+        )?;
         let mut snapshot = loaded_snapshot;
         let unlimited_inventory = FoodInventory::unlimited();
         if snapshot.inventory != unlimited_inventory {

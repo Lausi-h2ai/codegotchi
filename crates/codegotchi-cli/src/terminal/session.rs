@@ -269,6 +269,7 @@ pub struct TerminalSessionCore {
     presentation: PresentationState,
     terminal_theme: TerminalThemePreset,
     room_options: RoomRenderOptions,
+    historical_mouse_suppressed: bool,
 }
 
 impl TerminalSessionCore {
@@ -301,6 +302,7 @@ impl TerminalSessionCore {
             presentation: PresentationState::new(seed),
             terminal_theme,
             room_options: RoomRenderOptions::for_theme(terminal_theme, RoomAmbience::Day),
+            historical_mouse_suppressed: false,
         }
     }
 
@@ -384,6 +386,7 @@ impl TerminalSessionCore {
         self.layout = choose_layout(Rect::new(0, 0, columns, rows), Some(self.layout.room_mode));
         self.screen
             .resize(self.layout.codex.height, self.layout.codex.width);
+        self.historical_mouse_suppressed = false;
     }
 
     /// Encodes a physical event from the mode state current at this instant.
@@ -922,16 +925,8 @@ where
             SessionWork::Event(event) => match event {
                 Some(Ok(event)) => {
                     let modes = core.screen().input_modes();
-                    let routed_to_room = match &event {
-                        Event::Mouse(mouse) => {
-                            let point = Position::new(mouse.column, mouse.row);
-                            room_input.has_active_capture() || core.layout().room.contains(point)
-                        }
-                        _ => false,
-                    };
-                    let delivered = !routed_to_room && !core.encode_event(&event).is_empty();
-                    let event_receipt = protocol_event_receipt(&event, modes, delivered);
-                    if let Err(error) = handle_event(
+                    let event_for_receipt = event.clone();
+                    match handle_event(
                         compositor
                             .as_mut()
                             .expect("compositor exists while session handles events"),
@@ -943,16 +938,19 @@ where
                         &mut room_input,
                         session_started.elapsed(),
                     ) {
-                        body_error = Some(error);
-                    } else {
-                        if let (Some(receipt), Some(line)) =
-                            (protocol_receipt.as_mut(), event_receipt)
-                        {
-                            receipt.line(&line);
+                        Ok(delivered) => {
+                            let event_receipt =
+                                protocol_event_receipt(&event_for_receipt, modes, delivered);
+                            if let (Some(receipt), Some(line)) =
+                                (protocol_receipt.as_mut(), event_receipt)
+                            {
+                                receipt.line(&line);
+                            }
+                            // Mouse/key events can change the room (drag ghost,
+                            // eating/petted reactions), so redraw after each one.
+                            event_redraw = true;
                         }
-                        // Mouse/key events can change the room (drag ghost,
-                        // eating/petted reactions), so redraw after each one.
-                        event_redraw = true;
+                        Err(error) => body_error = Some(error),
                     }
                 }
                 Some(Err(error)) => body_error = Some(TerminalSessionError::Input(error)),
@@ -1385,26 +1383,47 @@ fn handle_event<B>(
     runtime: Option<&Arc<AuthoritativeRuntime>>,
     room_input: &mut RoomInputSession,
     now: Duration,
-) -> Result<(), TerminalSessionError>
+) -> Result<bool, TerminalSessionError>
 where
     B: RatatuiBackend<Error = io::Error>,
 {
     if let Event::Resize(_, _) = event {
         room_input.cancel();
-        return resize_session(compositor, core, child.as_ref());
+        core.historical_mouse_suppressed = false;
+        resize_session(compositor, core, child.as_ref())?;
+        return Ok(false);
     }
     if matches!(event, Event::FocusLost) {
         // Codex still receives the focus transition, but any room gesture is
         // cancelled before the pointer can be reused after focus returns.
         room_input.cancel();
+        core.historical_mouse_suppressed = false;
+    }
+    if matches!(event, Event::Key(_) | Event::Paste(_)) && core.screen.is_scrolled_back() {
+        core.screen.scroll_to_live();
+        draw_frame(compositor, core, room_input.active_drag())?;
     }
     if let Event::Mouse(mouse) = &event {
+        if core.historical_mouse_suppressed {
+            match mouse.kind {
+                MouseEventKind::Up(_) => {
+                    core.historical_mouse_suppressed = false;
+                    return Ok(false);
+                }
+                MouseEventKind::Down(_) => {
+                    // Treat a new press as a fresh event if an outer terminal
+                    // did not report the release for the consumed click.
+                    core.historical_mouse_suppressed = false;
+                }
+                _ => return Ok(false),
+            }
+        }
         let layout = core.layout();
         let point = Position::new(mouse.column, mouse.row);
         if room_input.has_active_capture() || layout.room.contains(point) {
             let Some(snapshot) = core.snapshot() else {
                 room_input.cancel();
-                return Ok(());
+                return Ok(false);
             };
             let requests =
                 room_input.process(layout.room, snapshot, &core.presentation_frame(), mouse);
@@ -1420,7 +1439,22 @@ where
                     apply_room_request(runtime.as_ref(), request);
                 }
             }
-            return Ok(());
+            return Ok(false);
+        }
+        if core.screen.is_scrolled_back()
+            && layout.codex.contains(point)
+            && matches!(
+                mouse.kind,
+                MouseEventKind::Down(_) | MouseEventKind::Drag(_) | MouseEventKind::Up(_)
+            )
+        {
+            core.screen.scroll_to_live();
+            core.historical_mouse_suppressed = matches!(
+                mouse.kind,
+                MouseEventKind::Down(_) | MouseEventKind::Drag(_)
+            );
+            draw_frame(compositor, core, room_input.active_drag())?;
+            return Ok(false);
         }
         if layout.codex.contains(point)
             && mouse.modifiers.is_empty()
@@ -1433,15 +1467,16 @@ where
             };
             if lines != 0 {
                 core.scroll_codex(lines);
-                return Ok(());
+                return Ok(false);
             }
         }
     }
     let bytes = core.encode_event(&event);
     if bytes.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
-    write_input(writer, &bytes)
+    write_input(writer, &bytes)?;
+    Ok(true)
 }
 
 fn apply_room_request(runtime: &dyn CareGateway, request: RoomCareRequest) {
@@ -2124,6 +2159,149 @@ mod tests {
         assert!(
             writer_bytes.lock().expect("writer lock").is_empty(),
             "local upper scrolling must not reach the Codex PTY"
+        );
+    }
+
+    #[test]
+    fn key_input_returns_to_live_before_forwarding_to_codex() {
+        let compositor_bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut compositor = fixed_compositor(Arc::clone(&compositor_bytes), 80, 24);
+        let writer_bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut core = TerminalSessionCore::new(24, 80);
+        core.process_output(b"\x1b[?1049h\x1b[Hframe-0");
+        for index in 1..40 {
+            let frame = format!("\x1b[2J\x1b[Hframe-{index}");
+            core.process_output(frame.as_bytes());
+        }
+        assert!(core.scroll_codex(1));
+        assert!(core.screen().is_scrolled_back());
+        let mut writer = Some(Box::new(RecordingWriter {
+            bytes: Arc::clone(&writer_bytes),
+        }) as super::PtyWriter);
+        let mut room_input = RoomInputSession::default();
+
+        handle_event(
+            &mut compositor,
+            &mut core,
+            &mut None,
+            &mut writer,
+            Event::Key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('x'),
+                KeyModifiers::NONE,
+            )),
+            None,
+            &mut room_input,
+            Duration::ZERO,
+        )
+        .expect("key input should be handled");
+
+        assert!(!core.screen().is_scrolled_back());
+        assert_eq!(writer_bytes.lock().expect("writer lock").as_slice(), b"x");
+    }
+
+    #[test]
+    fn paste_input_returns_to_live_before_forwarding_to_codex() {
+        let compositor_bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut compositor = fixed_compositor(Arc::clone(&compositor_bytes), 80, 24);
+        let writer_bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut core = TerminalSessionCore::new(24, 80);
+        core.process_output(b"\x1b[?1049h\x1b[Hframe-0");
+        for index in 1..40 {
+            let frame = format!("\x1b[2J\x1b[Hframe-{index}");
+            core.process_output(frame.as_bytes());
+        }
+        assert!(core.scroll_codex(1));
+        let mut writer = Some(Box::new(RecordingWriter {
+            bytes: Arc::clone(&writer_bytes),
+        }) as super::PtyWriter);
+        let mut room_input = RoomInputSession::default();
+
+        handle_event(
+            &mut compositor,
+            &mut core,
+            &mut None,
+            &mut writer,
+            Event::Paste("a\nb".to_owned()),
+            None,
+            &mut room_input,
+            Duration::ZERO,
+        )
+        .expect("paste input should be handled");
+
+        assert!(!core.screen().is_scrolled_back());
+        assert_eq!(
+            writer_bytes.lock().expect("writer lock").as_slice(),
+            b"a\nb"
+        );
+    }
+
+    #[test]
+    fn historical_codex_click_returns_live_and_consumes_the_stale_click() {
+        let mut compositor = fixed_test_compositor(80, 24);
+        let writer_bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut core = TerminalSessionCore::new(24, 80);
+        core.process_output(b"\x1b[?1049h\x1b[Hframe-0");
+        for index in 1..40 {
+            let frame = format!("\x1b[2J\x1b[Hframe-{index}");
+            core.process_output(frame.as_bytes());
+        }
+        assert!(core.scroll_codex(1));
+        core.process_output(b"\x1b[?1000h\x1b[?1006h");
+        assert!(core.screen().is_scrolled_back());
+        let mut writer = Some(Box::new(RecordingWriter {
+            bytes: Arc::clone(&writer_bytes),
+        }) as super::PtyWriter);
+        let mut room_input = RoomInputSession::default();
+        let stale_click = |kind| {
+            Event::Mouse(MouseEvent {
+                kind,
+                column: 5,
+                row: 2,
+                modifiers: KeyModifiers::NONE,
+            })
+        };
+
+        handle_event(
+            &mut compositor,
+            &mut core,
+            &mut None,
+            &mut writer,
+            stale_click(MouseEventKind::Down(MouseButton::Left)),
+            None,
+            &mut room_input,
+            Duration::ZERO,
+        )
+        .expect("stale click should be consumed");
+        handle_event(
+            &mut compositor,
+            &mut core,
+            &mut None,
+            &mut writer,
+            stale_click(MouseEventKind::Up(MouseButton::Left)),
+            None,
+            &mut room_input,
+            Duration::ZERO,
+        )
+        .expect("stale release should be consumed");
+
+        assert!(!core.screen().is_scrolled_back());
+        assert!(writer_bytes.lock().expect("writer lock").is_empty());
+
+        handle_event(
+            &mut compositor,
+            &mut core,
+            &mut None,
+            &mut writer,
+            stale_click(MouseEventKind::Down(MouseButton::Left)),
+            None,
+            &mut room_input,
+            Duration::ZERO,
+        )
+        .expect("live click should be forwarded");
+
+        assert_eq!(
+            writer_bytes.lock().expect("writer lock").as_slice(),
+            b"\x1b[<0;6;3M"
         );
     }
 

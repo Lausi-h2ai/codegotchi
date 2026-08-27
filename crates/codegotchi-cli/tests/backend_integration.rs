@@ -784,6 +784,62 @@ fn legacy_snapshots_without_the_energy_care_fields_gain_ten_energy_drinks() {
 }
 
 #[test]
+fn startup_rejects_invalid_persisted_snapshot_without_rewriting_inventory() {
+    let db = TestDatabase::new();
+    let store = SqliteStore::open(&db.path).unwrap();
+    let initial = AuthoritativeRuntime::new(
+        store,
+        Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, start()),
+    )
+    .unwrap()
+    .snapshot();
+
+    let mut invalid = serde_json::to_value(&initial).unwrap();
+    invalid["name"] = serde_json::Value::String("🐱".repeat(33));
+    invalid["inventory"] = serde_json::json!({
+        "kibble": 3,
+        "treat": 2,
+        "fruit": 1,
+        "energy_drink": 4,
+    });
+    let invalid_json = serde_json::to_string(&invalid).unwrap();
+
+    let connection = Connection::open(&db.path).unwrap();
+    connection
+        .execute(
+            "UPDATE simulation_snapshots SET snapshot_json = ?1
+             WHERE repository_id = 'default'",
+            [&invalid_json],
+        )
+        .unwrap();
+    drop(connection);
+
+    let result = AuthoritativeRuntime::new(
+        SqliteStore::open(&db.path).unwrap(),
+        Pet::new(Uuid::from_u128(1), "Mochi", PetSpecies::Cat, start()),
+    );
+    assert!(matches!(
+        result,
+        Err(codegotchi_cli::RuntimeError::Persistence(
+            codegotchi_cli::PersistenceError::InvalidSnapshot(_)
+        ))
+    ));
+
+    let connection = Connection::open(&db.path).unwrap();
+    let stored_json: String = connection
+        .query_row(
+            "SELECT snapshot_json FROM simulation_snapshots
+             WHERE repository_id = 'default'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored_json, invalid_json);
+    let stored: Value = serde_json::from_str(&stored_json).unwrap();
+    assert_eq!(stored["inventory"]["kibble"], 3);
+}
+
+#[test]
 fn sqlite_reports_corruption_and_preserves_the_previous_row_when_a_save_fails() {
     let db = TestDatabase::new();
     let store = SqliteStore::open(&db.path).unwrap();
