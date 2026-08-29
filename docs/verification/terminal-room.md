@@ -2,38 +2,50 @@
 
 ## Current verification at HEAD
 
-This section records the current repository status for `HEAD` as of
-2026-08-27.
+This section records the current repository status as of 2026-08-29T15:54Z.
+The exact validated product-source `HEAD` is
+`e8425e69beba490caca1ba7be1f6e9d4c339933f`. The ledger and retained live
+evidence are a docs/evidence-only follow-up directly on that committed source;
+no product-source change is an uncommitted working-tree diff.
 
 | Item | Result |
 |---|---|
-| Exact `HEAD` SHA | `d22bc303f5f9c4f4459f59cb3bab7d9f213eff77` |
-| Ubuntu Rust checks | PASS |
-| Web checks, including production Playwright | PASS |
-| macOS workspace tests | PENDING/HANGING |
+| Exact validated product-source `HEAD` SHA | `e8425e69beba490caca1ba7be1f6e9d4c339933f` |
+| Current repository `HEAD` | This ledger/evidence-only update directly on top of the exact source above |
+| Ubuntu Rust checks | PASS — exact-head run [33259716448](https://github.com/Lausi-h2ai/codegotchi/actions/runs/33259716448) |
+| Web checks, including production Playwright | PASS — exact-head run [33259716448](https://github.com/Lausi-h2ai/codegotchi/actions/runs/33259716448) |
+| macOS Rust checks | PENDING/HANGING — exact-head run [33259716448](https://github.com/Lausi-h2ai/codegotchi/actions/runs/33259716448) is still in `cargo test --workspace` after about 39 minutes; formatting and Clippy passed, and the outer PTY smoke has not started |
 
-The product changes below are currently an uncommitted working-tree diff;
-the local rows exercise that diff while the CI rows identify the exact
-repository head.
+The local rows below exercise the committed fixture fix. The hosted rows
+identify the exact product-source commit above; the only follow-up commit is
+documentation/evidence.
 
-### Current working-tree verification
+### Current committed-source verification
 
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | PASS |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | PASS |
-| `cargo test --workspace` | PASS — 421 passed, 0 failed, 10 ignored |
-| `corepack pnpm test` | PASS — 5 files, 123 tests |
-| `corepack pnpm lint` | PASS |
-| `corepack pnpm format:check` | PASS |
-| `corepack pnpm build` | PASS |
-| Production Playwright | PASS — 18 tests |
+| `cargo test --workspace` | PASS — exit 0; all workspace suites passed |
+| Concurrent database-name regression | PASS — 128 concurrent `TestDatabase` values produced unique paths |
 
-The real-Codex production path also passed in the private-display run
-[`20260827T094351Z-3120563-verification.txt`](terminal-room/live-codex/20260827-p1-auto-private/20260827T094351Z-3120563-verification.txt).
-Its 23 native captures cover live/history scrollback, stale-click handling,
-paste, focus, care states, and 120×45 → 80×45 → 120×30 → 120×21 → 120×45.
-The same capture matrix was visually inspected for the explicit themes:
+The macOS diagnosis is now fixed at the proven cause: the pre-fix exact-head
+run recorded the same timestamp-derived database path for two tests and only
+509 unique paths from 512 concurrent attempts. `TestDatabase::new()` now uses
+`Uuid::new_v4()`; the existing `.sqlite`, `-shm`, and `-wal` cleanup remains
+unchanged, and the temporary macOS path instrumentation is gone. No SQLite
+retry/timeout, sleep, serialization, or production persistence change was
+added.
+
+The clean-HEAD real-Codex production path passed against the exact committed
+source in [`20260829T153644Z-3303413-verification.txt`](terminal-room/live-codex/20260829-e8425e6-auto/20260829T153644Z-3303413-verification.txt).
+Its retained captures are in [`20260829-e8425e6-auto/`](terminal-room/live-codex/20260829-e8425e6-auto/).
+They cover live/history scrollback, stale-click handling, mouse delivery,
+selection, paste, focus, approval, care states, shell restoration, and
+120×45 → 80×45 → 120×30 → 120×21 → 120×45. I visually inspected the exact
+auto-theme captures for those states and sizes. The current fixture-only
+change does not alter rendered production code; the prior explicit-theme
+matrix below remains applicable to the unchanged terminal/session behavior:
 
 - [`auto/private`](terminal-room/live-codex/20260827-p1-auto-private/)
 - [`mono`](terminal-room/live-codex/20260827-p1-mono/)
@@ -41,9 +53,10 @@ The same capture matrix was visually inspected for the explicit themes:
 - [`amber`](terminal-room/live-codex/20260827-p1-amber/)
 - [`night`](terminal-room/live-codex/20260827-p1-night/)
 
-Those secondary theme runs reached the visual/interaction matrix, but their
-unrelated approval or shell-restoration probes were timing-blocked; the
-auto/private run is the passing end-to-end acceptance record.
+The exact current report is overall PASS (exit status 0). Its Restoration
+section still records a retained run root because the harness could not prove
+full process-tree termination; the post-run local artifact scan found no
+matching run-owned process, so no cleanup signal was sent.
 
 ## Historical 0.1 release evidence
 
