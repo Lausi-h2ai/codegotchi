@@ -3,7 +3,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{TimeZone, Utc};
 use codegotchi_cli::runtime_metadata::write_metadata;
@@ -26,14 +25,10 @@ struct TestDatabase {
 
 impl TestDatabase {
     fn new() -> Self {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("codegotchi-task-2-{suffix}.sqlite"));
-        #[cfg(target_os = "macos")]
-        eprintln!("backend integration test database path: {}", path.display());
-        Self { path }
+        let suffix = Uuid::new_v4();
+        Self {
+            path: std::env::temp_dir().join(format!("codegotchi-task-2-{suffix}.sqlite")),
+        }
     }
 }
 
