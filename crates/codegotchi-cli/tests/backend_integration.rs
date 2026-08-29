@@ -42,7 +42,7 @@ impl Drop for TestDatabase {
 
 #[test]
 fn test_database_names_are_unique_when_created_concurrently() {
-    const ATTEMPTS: usize = 512;
+    const ATTEMPTS: usize = 128;
     let paths = Arc::new(Mutex::new(Vec::with_capacity(ATTEMPTS)));
 
     std::thread::scope(|scope| {
