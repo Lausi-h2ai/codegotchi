@@ -1441,19 +1441,31 @@ where
             }
             return Ok(false);
         }
-        if core.screen.is_scrolled_back()
-            && layout.codex.contains(point)
-            && matches!(
-                mouse.kind,
-                MouseEventKind::Down(_) | MouseEventKind::Drag(_) | MouseEventKind::Up(_)
-            )
-        {
-            core.screen.scroll_to_live();
-            core.historical_mouse_suppressed = matches!(
-                mouse.kind,
-                MouseEventKind::Down(_) | MouseEventKind::Drag(_)
-            );
-            draw_frame(compositor, core, room_input.active_drag())?;
+        if core.screen.is_scrolled_back() {
+            if layout.codex.contains(point) {
+                match mouse.kind {
+                    MouseEventKind::Down(_) | MouseEventKind::Drag(_) | MouseEventKind::Up(_) => {
+                        core.screen.scroll_to_live();
+                        core.historical_mouse_suppressed = matches!(
+                            mouse.kind,
+                            MouseEventKind::Down(_) | MouseEventKind::Drag(_)
+                        );
+                        draw_frame(compositor, core, room_input.active_drag())?;
+                        return Ok(false);
+                    }
+                    MouseEventKind::ScrollUp => {
+                        core.scroll_codex(3);
+                        return Ok(false);
+                    }
+                    MouseEventKind::ScrollDown => {
+                        core.scroll_codex(-3);
+                        return Ok(false);
+                    }
+                    MouseEventKind::Moved
+                    | MouseEventKind::ScrollLeft
+                    | MouseEventKind::ScrollRight => return Ok(false),
+                }
+            }
             return Ok(false);
         }
         if layout.codex.contains(point)
@@ -2159,6 +2171,71 @@ mod tests {
         assert!(
             writer_bytes.lock().expect("writer lock").is_empty(),
             "local upper scrolling must not reach the Codex PTY"
+        );
+    }
+
+    #[test]
+    fn historical_codex_wheel_and_motion_stay_out_of_live_mouse_tracking() {
+        let mut compositor = fixed_test_compositor(80, 24);
+        let writer_bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut core = TerminalSessionCore::new(24, 80);
+        core.process_output(b"\x1b[?1049h\x1b[Hframe-0");
+        for index in 1..40 {
+            let frame = format!("\x1b[2J\x1b[Hframe-{index}");
+            core.process_output(frame.as_bytes());
+        }
+        let mut writer = Some(Box::new(RecordingWriter {
+            bytes: Arc::clone(&writer_bytes),
+        }) as super::PtyWriter);
+        let mut room_input = RoomInputSession::default();
+
+        handle_event(
+            &mut compositor,
+            &mut core,
+            &mut None,
+            &mut writer,
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: 5,
+                row: 2,
+                modifiers: KeyModifiers::NONE,
+            }),
+            None,
+            &mut room_input,
+            Duration::ZERO,
+        )
+        .expect("initial wheel should enter local history");
+        assert!(core.screen().is_scrolled_back());
+
+        core.process_output(b"\x1b[?1003h\x1b[?1006h");
+        assert_eq!(
+            core.screen().input_modes().mouse_tracking,
+            MouseTrackingMode::AnyMotion
+        );
+
+        for kind in [MouseEventKind::ScrollUp, MouseEventKind::Moved] {
+            handle_event(
+                &mut compositor,
+                &mut core,
+                &mut None,
+                &mut writer,
+                Event::Mouse(MouseEvent {
+                    kind,
+                    column: 5,
+                    row: 2,
+                    modifiers: KeyModifiers::NONE,
+                }),
+                None,
+                &mut room_input,
+                Duration::ZERO,
+            )
+            .expect("historical mouse event should be consumed");
+        }
+
+        assert!(core.screen().is_scrolled_back());
+        assert!(
+            writer_bytes.lock().expect("writer lock").is_empty(),
+            "historical wheel and motion must not reach the live Codex PTY"
         );
     }
 

@@ -1,6 +1,8 @@
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{TimeZone, Utc};
@@ -28,9 +30,10 @@ impl TestDatabase {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        Self {
-            path: std::env::temp_dir().join(format!("codegotchi-task-2-{suffix}.sqlite")),
-        }
+        let path = std::env::temp_dir().join(format!("codegotchi-task-2-{suffix}.sqlite"));
+        #[cfg(target_os = "macos")]
+        eprintln!("backend integration test database path: {}", path.display());
+        Self { path }
     }
 }
 
@@ -40,6 +43,33 @@ impl Drop for TestDatabase {
         let _ = std::fs::remove_file(self.path.with_extension("sqlite-shm"));
         let _ = std::fs::remove_file(self.path.with_extension("sqlite-wal"));
     }
+}
+
+#[test]
+fn test_database_names_are_unique_when_created_concurrently() {
+    const ATTEMPTS: usize = 512;
+    let paths = Arc::new(Mutex::new(Vec::with_capacity(ATTEMPTS)));
+
+    std::thread::scope(|scope| {
+        for _ in 0..ATTEMPTS {
+            let paths = Arc::clone(&paths);
+            scope.spawn(move || {
+                let database = TestDatabase::new();
+                paths
+                    .lock()
+                    .expect("database path lock")
+                    .push(database.path.clone());
+            });
+        }
+    });
+
+    let paths = paths.lock().expect("database path lock");
+    let unique_paths: HashSet<_> = paths.iter().collect();
+    assert_eq!(
+        unique_paths.len(),
+        paths.len(),
+        "concurrent test databases must never share a path"
+    );
 }
 
 fn start() -> chrono::DateTime<Utc> {
