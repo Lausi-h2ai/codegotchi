@@ -5,6 +5,11 @@ simulation, repository-scoped SQLite persistence, authenticated loopback
 server, Codex hook bridge, and launcher lifecycle. The React room is only a
 projection of that authoritative state.
 
+![Mochi blocks a coding request, gets fed, and lets the same command run successfully.](docs/demo/codegotchi-demo.gif)
+
+In Strict mode, feed Mochi to unblock your coding agent. The demo shows a real
+Codex request being blocked and then succeeding after care; waiting is sped up.
+
 ## Install and launch
 
 From a checkout with the embedded production bundle present:
