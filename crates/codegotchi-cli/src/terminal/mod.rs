@@ -1,4 +1,5 @@
 mod behavior;
+mod events;
 mod host;
 mod input;
 mod layout;

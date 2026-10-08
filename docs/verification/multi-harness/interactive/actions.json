@@ -1,0 +1,550 @@
+[
+  {
+    "harness": "pi",
+    "action": "capture",
+    "artifact": "pi-startup.png"
+  },
+  {
+    "harness": "pi",
+    "op": "text",
+    "text": "CG_INPUT_EDIT_OX"
+  },
+  {
+    "harness": "pi",
+    "op": "key",
+    "keys": [
+      "Left"
+    ]
+  },
+  {
+    "harness": "pi",
+    "op": "text",
+    "text": "K"
+  },
+  {
+    "harness": "pi",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "pi",
+    "action": "capture",
+    "artifact": "pi-edited.png"
+  },
+  {
+    "harness": "pi",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 4
+  },
+  {
+    "harness": "pi",
+    "action": "capture",
+    "artifact": "pi-response.png"
+  },
+  {
+    "harness": "pi",
+    "op": "paste",
+    "text": "CG_PASTE_LINE_ONE\nCG_PASTE_LINE_TWO"
+  },
+  {
+    "harness": "pi",
+    "action": "capture",
+    "artifact": "pi-paste.png"
+  },
+  {
+    "harness": "pi",
+    "action": "capture",
+    "artifact": "pi-compact-composer.png"
+  },
+  {
+    "harness": "pi",
+    "action": "capture",
+    "artifact": "pi-minimal-composer.png"
+  },
+  {
+    "harness": "pi",
+    "action": "capture",
+    "artifact": "pi-narrow-composer.png"
+  },
+  {
+    "harness": "pi",
+    "action": "capture",
+    "artifact": "pi-full-composer.png"
+  },
+  {
+    "harness": "pi",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 4
+  },
+  {
+    "harness": "pi",
+    "action": "capture",
+    "artifact": "pi-paste-response.png"
+  },
+  {
+    "harness": "pi",
+    "op": "text",
+    "text": "CG_STRICT_PROBE"
+  },
+  {
+    "harness": "pi",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 4
+  },
+  {
+    "harness": "pi",
+    "action": "capture",
+    "artifact": "pi-strict-response.png"
+  },
+  {
+    "harness": "pi",
+    "op": "text",
+    "text": "/quit"
+  },
+  {
+    "harness": "pi",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-startup.png"
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "CG_INPUT_EDIT_OX"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Left"
+    ]
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "K"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-edited.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 4
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-response.png"
+  },
+  {
+    "harness": "omp",
+    "op": "paste",
+    "text": "CG_PASTE_LINE_ONE\nCG_PASTE_LINE_TWO"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-paste.png"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-compact-composer.png"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-minimal-composer.png"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-narrow-composer.png"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-full-composer.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 4
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-paste-response.png"
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "CG_STRICT_PROBE"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 4
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-strict-response.png"
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "/quit"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-startup.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Down",
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-onboarding-2.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Up",
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-onboarding-3.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-onboarding-4.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Down",
+      "Return"
+    ],
+    "wait": 3
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-ready.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "CG_INPUT_EDIT_OX"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Left"
+    ]
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "K"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-edited.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 6
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-response.png"
+  },
+  {
+    "harness": "claude",
+    "op": "paste",
+    "text": "CG_PASTE_LINE_ONE\nCG_PASTE_LINE_TWO"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-paste.png"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-compact-composer.png"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-minimal-composer.png"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-narrow-composer.png"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-full-composer.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 5
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-paste-response.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "CG_STRICT_PROBE"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 5
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-strict-response.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "/exit"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-startup.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 3
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-ready.png"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-ready-later.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "CG_INPUT_EDIT_OX"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Left"
+    ]
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "K"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-edited.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 6
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-response.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "paste",
+    "text": "CG_PASTE_LINE_ONE\nCG_PASTE_LINE_TWO"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-paste.png"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-compact-composer.png"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-minimal-composer.png"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-narrow-composer.png"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-full-composer.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 6
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-paste-response.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "CG_STRICT_PROBE"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 6
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-strict-response.png"
+  }
+]

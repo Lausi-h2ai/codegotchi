@@ -1,0 +1,374 @@
+[
+  {
+    "harness": "claude",
+    "op": "start",
+    "ui": "terminal"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-startup.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "onboarding-3"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-onboarding-3.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Up",
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "onboarding-6"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-onboarding-6.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "onboarding-9"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-onboarding-9.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Down",
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "onboarding-12"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-onboarding-12.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "CG_APPROVAL: run the requested shell command once"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "native-approval-prompt"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-native-approval-prompt.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "approval-result"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-approval-result.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "CG_LONG_RESPONSE: stream a long answer"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "long-response-streaming"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-long-response-streaming.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Escape"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "after-interrupt"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-after-interrupt.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "CG_INTERRUPT_RESUME: continue after cancellation"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "interrupt-resumed"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-interrupt-resumed.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "CG_TURN_1: sustained session turn 1"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "sustained-turn-1"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-sustained-turn-1.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "CG_TURN_2: sustained session turn 2"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "sustained-turn-2"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-sustained-turn-2.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "CG_TURN_3: sustained session turn 3"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "sustained-turn-3"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-sustained-turn-3.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "CG_TURN_4: sustained session turn 4"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "sustained-turn-4"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-sustained-turn-4.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "CG_TURN_5: sustained session turn 5"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "sustained-turn-5"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-sustained-turn-5.png"
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "before-resume"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-before-resume.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "/exit"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "op": "start",
+    "ui": "terminal",
+    "resume": true,
+    "sessionId": "11e76f79-6f9f-45f5-bacc-e4a72ab71e9c"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-resumed-startup.png"
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "resumed-startup"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-resumed-startup.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "CG_RESUME_CHECK: what approval marker was created earlier?"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "failed"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-failed.png"
+  }
+]

@@ -1,0 +1,710 @@
+{
+  "date": "2026-10-08",
+  "binarySha256": "81951d30ed537935f2fad76446c64294156dee392fa274a7f17ab92f0d9d53a6",
+  "inspections": [
+    {
+      "directory": "final-matrix/dark-auto",
+      "sheet": "pi-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native composer, prompts, tool/denial text remain inside upper pane; room is monochrome. Existing sprite/room-label/furniture overlap visible, particularly Compact.",
+      "sha256": "72435effeda1fa325a268fdf0e85fe445b51593cee8ad9198fade271919c9bd2"
+    },
+    {
+      "directory": "final-matrix/dark-auto",
+      "sheet": "pi-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native composer, prompts, tool/denial text remain inside upper pane; room is monochrome. Existing sprite/room-label/furniture overlap visible, particularly Compact.",
+      "sha256": "545505d3c88b029bf57d915b6ae4f788766c551dc0ddb473e81cb751bdf48bb4"
+    },
+    {
+      "directory": "final-matrix/dark-auto",
+      "sheet": "omp-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native composer, prompts, tool/denial text remain inside upper pane; room is monochrome. Existing sprite/room-label/furniture overlap visible, particularly Compact.",
+      "sha256": "0c9ef726ca046d38489448299e57a7f9c99889f1a8b18575f84a28daa6a72268"
+    },
+    {
+      "directory": "final-matrix/dark-auto",
+      "sheet": "omp-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native composer, prompts, tool/denial text remain inside upper pane; room is monochrome. Existing sprite/room-label/furniture overlap visible, particularly Compact.",
+      "sha256": "394096ef1246128cea5e52b6e621feb0e25b1518aa77df9d8336f84f981325a4"
+    },
+    {
+      "directory": "final-matrix/dark-auto",
+      "sheet": "claude-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native composer/history and expanded Strict hook denial readable; compact room labels/furniture can overlap sprite.",
+      "sha256": "89a0bda74d24b2edc6e3d6f422c001f11393a1a7465a7228983117077c179adb"
+    },
+    {
+      "directory": "final-matrix/dark-auto",
+      "sheet": "claude-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native composer/history and expanded Strict hook denial readable; compact room labels/furniture can overlap sprite.",
+      "sha256": "790110e6f48994edbe93256e887b8876deaa666cd0eaf4fccb58f63e2b6e8b35"
+    },
+    {
+      "directory": "final-matrix/dark-auto",
+      "sheet": "hermes-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native prompts and output readable in dark terminal. Hermes collapses tool denial details; behavioral result confirms denial. Existing room sprite overlap visible.",
+      "sha256": "97e91fac2a78437c82e73da18b4b5aa43499abbeefb2e4236b4de03d221005d7"
+    },
+    {
+      "directory": "final-matrix/dark-auto",
+      "sheet": "hermes-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native prompts and output readable in dark terminal. Hermes collapses tool denial details; behavioral result confirms denial. Existing room sprite overlap visible.",
+      "sha256": "bc902274dd917433a0b6ca9cc3af4955a7019c81ac4a7de6b0a58f4e4cc309d4"
+    },
+    {
+      "directory": "final-matrix-light/light-auto",
+      "sheet": "pi-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native light palette has readable dark prompts, tool commands/results and denials; no upper-pane collision. Auto room is white with black sprite; existing room sprite/furniture/label overlap remains.",
+      "sha256": "8e93486d17218ae6c0b64e06cfdbf204335d5cddbd9b04470793d26e2b511977"
+    },
+    {
+      "directory": "final-matrix-light/light-auto",
+      "sheet": "pi-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native light palette has readable dark prompts, tool commands/results and denials; no upper-pane collision. Auto room is white with black sprite; existing room sprite/furniture/label overlap remains.",
+      "sha256": "28bb08d09b903e613c762966b624eac2783797ab319ec3655e747a5e068aaa20"
+    },
+    {
+      "directory": "final-matrix-light/light-auto",
+      "sheet": "omp-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native light palette has readable dark prompts, tool commands/results and denials; no upper-pane collision. Auto room is white with black sprite; existing room sprite/furniture/label overlap remains.",
+      "sha256": "3cca5988c82f7b1ee22851d474ce00117e80794f5966ea3333d9e48293e9672a"
+    },
+    {
+      "directory": "final-matrix-light/light-auto",
+      "sheet": "omp-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native light palette has readable dark prompts, tool commands/results and denials; no upper-pane collision. Auto room is white with black sprite; existing room sprite/furniture/label overlap remains.",
+      "sha256": "e15f17901ff2fe4545ad1cf170d649b133f95b9c140e1480de34c7a16ace1b05"
+    },
+    {
+      "directory": "final-matrix-light/light-auto",
+      "sheet": "claude-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Light native composer and expanded red Strict denial readable; room sprite can overlap its own furniture/labels.",
+      "sha256": "33ad2190536df96c616b890bf2a5657dc0bcbaf5c7111feab4e02563bb9c0604"
+    },
+    {
+      "directory": "final-matrix-light/light-auto",
+      "sheet": "claude-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Light native composer and expanded red Strict denial readable; room sprite can overlap its own furniture/labels.",
+      "sha256": "c5409dc3198580604c75aecf2a5c284ff37f46ea7632364e7684c13054bd9f23"
+    },
+    {
+      "directory": "final-matrix-light/light-auto",
+      "sheet": "hermes-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Main black composer/tool text is readable. Native yellow logo, headings and tips have poor contrast on white, matching the retained direct baseline. This is a visual finding, not a clean visual pass. Room sprite/labels/furniture overlap remains.",
+      "sha256": "835481ced5f51a9d284d0f5cc5b821a0ee5ae2f8b112ff6a0ef5a34a75364f18"
+    },
+    {
+      "directory": "final-matrix-light/light-auto",
+      "sheet": "hermes-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Main black composer/tool text is readable. Native yellow logo, headings and tips have poor contrast on white, matching the retained direct baseline. This is a visual finding, not a clean visual pass. Room sprite/labels/furniture overlap remains.",
+      "sha256": "8621d7993e6b97783ca2a059fb04b1898ae2f8de4ac6107c2351b5e3f28800e9"
+    },
+    {
+      "directory": "final-native-sessions",
+      "sheet": "pi-session-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Tool result, streamed output, Operation aborted, follow-up, twelve sustained turns and resumed context all visible/readable; room returns to WaitingOrBlocked after Escape. Existing room sprite/furniture overlap remains.",
+      "sha256": "bdc581a6f5d4abe6461e4596fb1b095440672312f1169887ab0b86d2b9d00711"
+    },
+    {
+      "directory": "final-native-sessions",
+      "sheet": "claude-session-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native approval dialog, streaming, Interrupted text, follow-up, sustained turns and resumed conversation readable. Thinking state incorrectly persists after Escape until follow-up. Existing room sprite/furniture overlap remains.",
+      "sha256": "bdcefad2274f290591092b1f3b4b4970b06adf9d3204e6da51e4b832bc01525e"
+    },
+    {
+      "directory": "final-matrix/dark-mono",
+      "sheet": "pi-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark prompts, commands, multiline composer and denial text readable at every shown size/state. Mono affects room only; existing room sprite overlap remains.",
+      "sha256": "0442bfa44f0b812ae6f19e5a3502e16acd5ab370b12cdebc446df5e921d0cf7a"
+    },
+    {
+      "directory": "final-matrix/dark-mono",
+      "sheet": "pi-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark prompts, commands, multiline composer and denial text readable at every shown size/state. Mono affects room only; existing room sprite overlap remains.",
+      "sha256": "241c5b07d269c76ad2a818faf29703413e6286ca423a826e8e24d84f7ab7e190"
+    },
+    {
+      "directory": "final-matrix/dark-mono",
+      "sheet": "omp-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark prompts, commands, multiline composer and denial text readable at every shown size/state. Mono affects room only; existing room sprite overlap remains.",
+      "sha256": "6f92bbd1ec59bda5bc7b46c1e683f8eff7125ed28eca709f42e63a84c1e396d8"
+    },
+    {
+      "directory": "final-matrix/dark-mono",
+      "sheet": "omp-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark prompts, commands, multiline composer and denial text readable at every shown size/state. Mono affects room only; existing room sprite overlap remains.",
+      "sha256": "a82743aa5fe0a4af735f4726922bc074c3e73b4c1383de33c565c9dc9e585fe7"
+    },
+    {
+      "directory": "final-matrix/dark-mono",
+      "sheet": "claude-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark input/history/tool response remains readable; Claude expanded denial readable, Hermes tool details collapse. Mono room does not recolor native UI. Existing room sprite overlap remains.",
+      "sha256": "342b65a14ee3366ca2bc210bf5e0cf27e41b37a40c20df14dd73881c363d0693"
+    },
+    {
+      "directory": "final-matrix/dark-mono",
+      "sheet": "claude-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark input/history/tool response remains readable; Claude expanded denial readable, Hermes tool details collapse. Mono room does not recolor native UI. Existing room sprite overlap remains.",
+      "sha256": "e7dda7493574a8a00300d39ae22800874a47db2c2061946a0638a3f085b9f5e8"
+    },
+    {
+      "directory": "final-matrix/dark-mono",
+      "sheet": "hermes-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark input/history/tool response remains readable; Claude expanded denial readable, Hermes tool details collapse. Mono room does not recolor native UI. Existing room sprite overlap remains.",
+      "sha256": "265f7b1c68066c3bc87467386d041caefa93a7b37ed172f3bf008606dce1f496"
+    },
+    {
+      "directory": "final-matrix/dark-mono",
+      "sheet": "hermes-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark input/history/tool response remains readable; Claude expanded denial readable, Hermes tool details collapse. Mono room does not recolor native UI. Existing room sprite overlap remains.",
+      "sha256": "ea1894cbd1ab9534ad9f4be71978ed7b29e02a5f95ce722c7ecd9b0b1cea3c4a"
+    },
+    {
+      "directory": "final-matrix-light/light-mono",
+      "sheet": "pi-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "White native CLI and dark Mono room remain independent. Native edit/paste/tool/denial text readable at all shown sizes/states; room overlap remains.",
+      "sha256": "96355949da314d6cb0224f29cb89dcb7a2a8d69108b74a1634ffa50c6a0a7828"
+    },
+    {
+      "directory": "final-matrix-light/light-mono",
+      "sheet": "pi-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "White native CLI and dark Mono room remain independent. Native edit/paste/tool/denial text readable at all shown sizes/states; room overlap remains.",
+      "sha256": "95a0ba3c54557676c9f5c466f8d18d685b678dfcae8df2b5715dbc3065f1ba54"
+    },
+    {
+      "directory": "final-matrix-light/light-mono",
+      "sheet": "omp-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "White native CLI and dark Mono room remain independent. Native edit/paste/tool/denial text readable at all shown sizes/states; room overlap remains.",
+      "sha256": "c848b081aea79d9f40ff7ae38dea7ccd2d9eca563e08768373f5aa785999bab4"
+    },
+    {
+      "directory": "final-matrix-light/light-mono",
+      "sheet": "omp-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "White native CLI and dark Mono room remain independent. Native edit/paste/tool/denial text readable at all shown sizes/states; room overlap remains.",
+      "sha256": "31eb050e779eeda349536e0add85401b7f85395eed8e1880059b533608210a59"
+    },
+    {
+      "directory": "final-matrix-light/light-mono",
+      "sheet": "claude-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Light native input/history/expanded red denial readable. Dark Mono room stays separate. Existing room sprite overlap remains.",
+      "sha256": "6e6e51d4cf3c727edb30ce49557ff50ea1f838867f098bb8e81e95db673c95a2"
+    },
+    {
+      "directory": "final-matrix-light/light-mono",
+      "sheet": "claude-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Light native input/history/expanded red denial readable. Dark Mono room stays separate. Existing room sprite overlap remains.",
+      "sha256": "89f2db6226b7246cd1398392dcfcc7c53ca668bd841048af991ae75894e83e8a"
+    },
+    {
+      "directory": "final-matrix-light/light-mono",
+      "sheet": "hermes-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Main input/tool text readable; native yellow on white remains low contrast. Dark Mono room stays separate. Existing room sprite overlap remains.",
+      "sha256": "0a9672471bb338a864d3e98afc9834064ed097133525b88b6524539ced7980e0"
+    },
+    {
+      "directory": "final-matrix-light/light-mono",
+      "sheet": "hermes-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Main input/tool text readable; native yellow on white remains low contrast. Dark Mono room stays separate. Existing room sprite overlap remains.",
+      "sha256": "ff0e86c8b1fb74a28ee704c6900c95b85f0c05eccf41639569b322564e0ddd7a"
+    },
+    {
+      "directory": "final-matrix/dark-soft-green",
+      "sheet": "pi-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Green room preset remains separate from native dark CLI. Composer, tool output and denials readable across all cells; existing room sprite overlaps remain.",
+      "sha256": "c24108a4f302520d3b2bc1238976665bbd64b058e3444dd7037374e1d627cdf4"
+    },
+    {
+      "directory": "final-matrix/dark-soft-green",
+      "sheet": "pi-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Green room preset remains separate from native dark CLI. Composer, tool output and denials readable across all cells; existing room sprite overlaps remain.",
+      "sha256": "f2ebaf6d895f199453355fb432a5274e4cb86c3bfe32f9f62b15cf43231c67c7"
+    },
+    {
+      "directory": "final-matrix/dark-soft-green",
+      "sheet": "omp-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Green room preset remains separate from native dark CLI. Composer, tool output and denials readable across all cells; existing room sprite overlaps remain.",
+      "sha256": "ec3856af68240aaf3d1f18a2b5ac8f42a39b650fd3e8aab1f5b897eab96ee15a"
+    },
+    {
+      "directory": "final-matrix/dark-soft-green",
+      "sheet": "omp-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Green room preset remains separate from native dark CLI. Composer, tool output and denials readable across all cells; existing room sprite overlaps remain.",
+      "sha256": "62e6104c0651146a0f880a0cfe9755deff4833e40b292c63900ff45f41bfec2c"
+    },
+    {
+      "directory": "final-matrix/dark-soft-green",
+      "sheet": "claude-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark CLI keeps its colors; green room is distinct. Native input/history/tool output readable; Claude expanded denial visible, Hermes details collapsed. Existing room sprite overlap remains.",
+      "sha256": "e5c90af502e2983b1f85dce1e635b9024dad52411b42310d90df29ea7e864650"
+    },
+    {
+      "directory": "final-matrix/dark-soft-green",
+      "sheet": "claude-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark CLI keeps its colors; green room is distinct. Native input/history/tool output readable; Claude expanded denial visible, Hermes details collapsed. Existing room sprite overlap remains.",
+      "sha256": "21d974b2fad1bf5b36780fb6179e4086b2db16346d5691c16063cddf68d59cd4"
+    },
+    {
+      "directory": "final-matrix/dark-soft-green",
+      "sheet": "hermes-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark CLI keeps its colors; green room is distinct. Native input/history/tool output readable; Claude expanded denial visible, Hermes details collapsed. Existing room sprite overlap remains.",
+      "sha256": "a390ee4c03e1bd4b562448ada5994e9e5d2847a2e61b77b29dc99f6eed45baf8"
+    },
+    {
+      "directory": "final-matrix/dark-soft-green",
+      "sheet": "hermes-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark CLI keeps its colors; green room is distinct. Native input/history/tool output readable; Claude expanded denial visible, Hermes details collapsed. Existing room sprite overlap remains.",
+      "sha256": "c62b9eb210ea464a083d3044379ec33277719d6800c3d03ab22ed203d67940c8"
+    },
+    {
+      "directory": "final-matrix-light/light-soft-green",
+      "sheet": "pi-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Dark green room stays independent of white native UI. Native composer/tool/denial text readable at each size/state. Room controls readable except existing sprite overlaps.",
+      "sha256": "7542b70a42324f3f4e7cafbd2c2988dd181fac1edc9c3975fb541fa0e359215b"
+    },
+    {
+      "directory": "final-matrix-light/light-soft-green",
+      "sheet": "pi-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Dark green room stays independent of white native UI. Native composer/tool/denial text readable at each size/state. Room controls readable except existing sprite overlaps.",
+      "sha256": "684e116f2b0e7da16c6c4af16feca3b651da15e53a7a86299460b8a1a56806e3"
+    },
+    {
+      "directory": "final-matrix-light/light-soft-green",
+      "sheet": "omp-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Dark green room stays independent of white native UI. Native composer/tool/denial text readable at each size/state. Room controls readable except existing sprite overlaps.",
+      "sha256": "1342ca0f2e767e0c675b4a7c4e638eaac7c26572735cecef637c50be6ef32685"
+    },
+    {
+      "directory": "final-matrix-light/light-soft-green",
+      "sheet": "omp-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Dark green room stays independent of white native UI. Native composer/tool/denial text readable at each size/state. Room controls readable except existing sprite overlaps.",
+      "sha256": "d3508d661aa0032d6c030414aed62389be56775418c42788eca55603f41c360e"
+    },
+    {
+      "directory": "final-matrix-light/light-soft-green",
+      "sheet": "claude-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native white UI and green room independent; input/history/expanded Strict denial readable at every shown size/state. Existing sprite overlap remains.",
+      "sha256": "7dfc6cc2ac0526927376d3b802668934a8f8216519f166836c58fbf4aae698ef"
+    },
+    {
+      "directory": "final-matrix-light/light-soft-green",
+      "sheet": "claude-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native white UI and green room independent; input/history/expanded Strict denial readable at every shown size/state. Existing sprite overlap remains.",
+      "sha256": "9251b72d89c28e1b13dc52ddcdcc848cddf52118eeb17fa5494ae56aaef0d823"
+    },
+    {
+      "directory": "final-matrix-light/light-soft-green",
+      "sheet": "hermes-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Black composer/tool text readable, native yellow headings/tips faint on white. Green room stays independent; existing sprite overlap remains.",
+      "sha256": "d50994304225ee4abd1ddf995b943a04dbc54662740eb4d9a9d5896dd6151f7c"
+    },
+    {
+      "directory": "final-matrix-light/light-soft-green",
+      "sheet": "hermes-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Black composer/tool text readable, native yellow headings/tips faint on white. Green room stays independent; existing sprite overlap remains.",
+      "sha256": "a574ccb18c702b349838ac87932fc64a01615f00b8242c6734ebeddcb9ec0bb8"
+    },
+    {
+      "directory": "final-matrix/dark-amber",
+      "sheet": "pi-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark text and controls readable; amber room retains its palette. Existing pet/furniture/status overlap appears in some room frames.",
+      "sha256": "f5c1ce399c73061345b289e963f35e055e9af0237db7730f070874d5214cbc9b"
+    },
+    {
+      "directory": "final-matrix/dark-amber",
+      "sheet": "pi-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark text and controls readable; amber room retains its palette. Existing pet/furniture/status overlap appears in some room frames.",
+      "sha256": "d119a7a35a59827a5645154460516ff0f9af693b52a2a086ab1ba8b27c922b26"
+    },
+    {
+      "directory": "final-matrix/dark-amber",
+      "sheet": "omp-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark text and controls readable; amber room retains its palette. Existing pet/furniture/status overlap appears in some room frames.",
+      "sha256": "540ded5d3d3c74f987a2611a256f95de91bdb50a353e13642b54cb8d8050e8ce"
+    },
+    {
+      "directory": "final-matrix/dark-amber",
+      "sheet": "omp-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark text and controls readable; amber room retains its palette. Existing pet/furniture/status overlap appears in some room frames.",
+      "sha256": "e24c462989c1bd032162b7e67802cee2906ef923a27ac80515857f7091612d8f"
+    },
+    {
+      "directory": "final-matrix/dark-amber",
+      "sheet": "claude-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native composer, multiline input and output readable; amber room retained. Existing pet/furniture/status overlap; Hermes compact tool summary and Claude collapsed detail require behavioral receipts.",
+      "sha256": "7a248fb917782cafc2e29705a394e48e8c56163de4836163f13f19f13668c8b1"
+    },
+    {
+      "directory": "final-matrix/dark-amber",
+      "sheet": "claude-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native composer, multiline input and output readable; amber room retained. Existing pet/furniture/status overlap; Hermes compact tool summary and Claude collapsed detail require behavioral receipts.",
+      "sha256": "0dc0fabb498d46470f7054d47611a058b9b7e63b0c27bec7be64a6c6e303bd0e"
+    },
+    {
+      "directory": "final-matrix/dark-amber",
+      "sheet": "hermes-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native composer, multiline input and output readable; amber room retained. Existing pet/furniture/status overlap; Hermes compact tool summary and Claude collapsed detail require behavioral receipts.",
+      "sha256": "536e3defb71f0d66c52e566ded282f553a08c3f82982d97647e01051a419f8e7"
+    },
+    {
+      "directory": "final-matrix/dark-amber",
+      "sheet": "hermes-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native composer, multiline input and output readable; amber room retained. Existing pet/furniture/status overlap; Hermes compact tool summary and Claude collapsed detail require behavioral receipts.",
+      "sha256": "372fa9d3098d90e3b20ec95f687e3df2453dfc4ae111171bf20d251d7a0eb860"
+    },
+    {
+      "directory": "final-matrix-light/light-amber",
+      "sheet": "pi-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native white pane has legible dark prompt/output/denial text; amber room independent. Room sprite covers some furniture/status/needs frames. Minimal care improves hunger; energy stays exhausted and native denial remains legible.",
+      "sha256": "98971a1ec03844107fa08dc040d162f1b11b35b60016b4a3cab96268586b0326"
+    },
+    {
+      "directory": "final-matrix-light/light-amber",
+      "sheet": "pi-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native white pane has legible dark prompt/output/denial text; amber room independent. Room sprite covers some furniture/status/needs frames. Minimal care improves hunger; energy stays exhausted and native denial remains legible.",
+      "sha256": "1e61f5f1d91ce997b306d27d4fff8490edcc5d7a10c65a41ccab83bff2688ed3"
+    },
+    {
+      "directory": "final-matrix-light/light-amber",
+      "sheet": "omp-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native white pane has legible dark prompt/output/denial text; amber room independent. Room sprite covers some furniture/status/needs frames. Minimal care improves hunger; energy stays exhausted and native denial remains legible.",
+      "sha256": "dcec60fe2ad80fe283ad887c8d82e9c22aacc3e6bfd633e423dd59e96c0b9c18"
+    },
+    {
+      "directory": "final-matrix-light/light-amber",
+      "sheet": "omp-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native white pane has legible dark prompt/output/denial text; amber room independent. Room sprite covers some furniture/status/needs frames. Minimal care improves hunger; energy stays exhausted and native denial remains legible.",
+      "sha256": "c2cf99cebc68b33161273bdadca71bafbcbc6c1ff67d05abcefc22bf539816a1"
+    },
+    {
+      "directory": "final-matrix-light/light-amber",
+      "sheet": "claude-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native black composer/output and expanded red denial readable; amber room retained; existing sprite/furniture/status overlap.",
+      "sha256": "2a2e61d644f6f6127167319fa66c7bbdcf0dab1300681e707c8478aac719a9f5"
+    },
+    {
+      "directory": "final-matrix-light/light-amber",
+      "sheet": "claude-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native black composer/output and expanded red denial readable; amber room retained; existing sprite/furniture/status overlap.",
+      "sha256": "9baec8b289f1677245bdc491ba2123ed4a1ed7b5623731da1477f9fbb28eec38"
+    },
+    {
+      "directory": "final-matrix-light/light-amber",
+      "sheet": "hermes-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native black composer/tool text readable; yellow logo, tips and headings are faint on white (also in direct baseline). Amber room retained; existing sprite overlaps.",
+      "sha256": "2580eef6196fe1b1d0a1814db0aa012be0504467daf278eadcea0d5f3319ace4"
+    },
+    {
+      "directory": "final-matrix-light/light-amber",
+      "sheet": "hermes-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native black composer/tool text readable; yellow logo, tips and headings are faint on white (also in direct baseline). Amber room retained; existing sprite overlaps.",
+      "sha256": "010c622c7032cf5883b9181523f04d149380b6b7042d4ef2d261c90af88edf6a"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "hermes-reviewed-tool-settled.png",
+      "allCellsInspected": true,
+      "notes": "Real native first-run flow, Full dark; composer/output legible, room separate. Hermes tool details collapsed; backend/model result receipts verify denial. Existing room sprite/furniture overlap.",
+      "sha256": "aab6b4ed6184c81c773bdca4cb3553a37609d47587dd3fe051bc9524d122a35f"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "hermes-reviewed-strict-response.png",
+      "allCellsInspected": true,
+      "notes": "Real native first-run flow, Full dark; composer/output legible, room separate. Hermes tool details collapsed; backend/model result receipts verify denial. Existing room sprite/furniture overlap.",
+      "sha256": "29fe61ceadace011e03c2ea2de3b0913a0a36ddece2fe863d86f2fc74eca66bb"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "omp-setup-complete.png",
+      "allCellsInspected": true,
+      "notes": "Real native first-run flow, Full dark; composer/output legible, room separate. Hermes tool details collapsed; backend/model result receipts verify denial. Existing room sprite/furniture overlap.",
+      "sha256": "c41fce5e18f456ba8e71b170b2ab5b49f31def108e03c8f1b4841a1ed4b67bd9"
+    },
+    {
+      "directory": "final-matrix-night-retry/dark-night",
+      "sheet": "pi-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark pane commands, multiline composer and denials legible; Pi secondary gray text muted. Night blue room retained; existing sprite covers furniture/status/needs in some frames.",
+      "sha256": "39ccbda19a411a13d735618b794628ebbc7d571dc5484642f9b139ff715b9d6b"
+    },
+    {
+      "directory": "final-matrix-night-retry/dark-night",
+      "sheet": "pi-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark pane commands, multiline composer and denials legible; Pi secondary gray text muted. Night blue room retained; existing sprite covers furniture/status/needs in some frames.",
+      "sha256": "585872dc7a871f843f4831e8233ed119fee0ab2c0ac94f57f7ebbcf488a4c2be"
+    },
+    {
+      "directory": "final-matrix-night-retry/dark-night",
+      "sheet": "omp-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark pane commands, multiline composer and denials legible; Pi secondary gray text muted. Night blue room retained; existing sprite covers furniture/status/needs in some frames.",
+      "sha256": "dfe49d7b3897b39cb4e4a8c46a2d4725658fcfaf6cbf451ff960d7590a0dcc9c"
+    },
+    {
+      "directory": "final-matrix-night-retry/dark-night",
+      "sheet": "omp-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark pane commands, multiline composer and denials legible; Pi secondary gray text muted. Night blue room retained; existing sprite covers furniture/status/needs in some frames.",
+      "sha256": "91008aca64bb84b527707099d62b04aede3f9add5f83f670f90fb3f4fe00b0bf"
+    },
+    {
+      "directory": "final-matrix-night-retry/dark-night",
+      "sheet": "claude-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark composer/output readable; night room remains blue without palette bleed. Existing sprite overlaps room furniture/status; tool denials verified from native result receipts.",
+      "sha256": "8c1321615f73fadd3642a8fb46abda9db85af1f24bda22e94b6524d0a9379dbc"
+    },
+    {
+      "directory": "final-matrix-night-retry/dark-night",
+      "sheet": "claude-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark composer/output readable; night room remains blue without palette bleed. Existing sprite overlaps room furniture/status; tool denials verified from native result receipts.",
+      "sha256": "d7af710cd570688eb1ca011e670a879a3ac5432e4e6d5b32b20d49900169009e"
+    },
+    {
+      "directory": "final-matrix-night-retry/dark-night",
+      "sheet": "hermes-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark composer/output readable; night room remains blue without palette bleed. Existing sprite overlaps room furniture/status; tool denials verified from native result receipts.",
+      "sha256": "53a6b172328aa60e573cbe02d7e5606c75650773c10ea50a3529d052b76fce67"
+    },
+    {
+      "directory": "final-matrix-night-retry/dark-night",
+      "sheet": "hermes-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native dark composer/output readable; night room remains blue without palette bleed. Existing sprite overlaps room furniture/status; tool denials verified from native result receipts.",
+      "sha256": "7ee320c4ab9be57acccb87012f8e6cc2c99d1158e4915688eb97e978a7283a41"
+    },
+    {
+      "directory": "final-matrix-light/light-night",
+      "sheet": "pi-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native light pane dark input/output/denials readable at every cell; explicit night room blue independent of white outer terminal. Existing room pet overlap in compact and some full/narrow states.",
+      "sha256": "61da86529ae2388cfadfafdf32289153b45c105fd75140daa4e90605fa9be292"
+    },
+    {
+      "directory": "final-matrix-light/light-night",
+      "sheet": "pi-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native light pane dark input/output/denials readable at every cell; explicit night room blue independent of white outer terminal. Existing room pet overlap in compact and some full/narrow states.",
+      "sha256": "1326fbc3d168f38414a66a6a2675e24094195ce51464f95de95efcbe00a178a2"
+    },
+    {
+      "directory": "final-matrix-light/light-night",
+      "sheet": "omp-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native light pane dark input/output/denials readable at every cell; explicit night room blue independent of white outer terminal. Existing room pet overlap in compact and some full/narrow states.",
+      "sha256": "25cd1b410cacf34f52439e20521e75e5f7d406121ac045b430f3920b789f122f"
+    },
+    {
+      "directory": "final-matrix-light/light-night",
+      "sheet": "omp-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native light pane dark input/output/denials readable at every cell; explicit night room blue independent of white outer terminal. Existing room pet overlap in compact and some full/narrow states.",
+      "sha256": "20355c8ead46e8b4cc1b50e7d3d8d826e28dda471b1ef2f8b039b6b55162d899"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "hermes-no-hooks-startup.png",
+      "allCellsInspected": true,
+      "notes": "Native telemetry choices legible in Full dark; no hook review prompts in this configuration.",
+      "sha256": "326f8ec3e963239a29d868b9a7b67cdaaa52e71a810e6eaf78da113a538a7170"
+    },
+    {
+      "directory": "final-matrix-light/light-night",
+      "sheet": "claude-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native black input/output and expanded red denial readable; night room remains blue. Existing room sprite overlap.",
+      "sha256": "90ccad778dbb721ecb756d4281ff5f13007cd4996c367cc0778ea8ca1e0024fd"
+    },
+    {
+      "directory": "final-matrix-light/light-night",
+      "sheet": "claude-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Native black input/output and expanded red denial readable; night room remains blue. Existing room sprite overlap.",
+      "sha256": "fac2db7a368543cac7c759f1ec7a27b9131de93515c2d73f9accf0610f2f47b1"
+    },
+    {
+      "directory": "final-matrix-light/light-night",
+      "sheet": "hermes-layouts-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Black native input/output readable, yellow native logo/headings/tips faint on white as in direct baseline. Night room remains blue. Existing sprite overlap and collapsed tool summaries.",
+      "sha256": "1f51890ed4e42309f75d9cadeebce76d896ff8a3b35b4ace9cf81eb337701b7e"
+    },
+    {
+      "directory": "final-matrix-light/light-night",
+      "sheet": "hermes-states-sheet.png",
+      "allCellsInspected": true,
+      "notes": "Black native input/output readable, yellow native logo/headings/tips faint on white as in direct baseline. Night room remains blue. Existing sprite overlap and collapsed tool summaries.",
+      "sha256": "19823502154bfa05a3cbb89c7e31403b6077b1938cbafa7dbc6ce31a59c8f838"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "omp-startup.png",
+      "allCellsInspected": true,
+      "notes": "Manually inspected earlier in this audit before context compaction. Full dark native controls/choices/command visible and keyboard exercised. OMP glyph preview has missing Nerd Font glyphs; Unicode selected. Existing room sprite overlap.",
+      "sha256": "c257291802dbac8e60fd70c1f20933988955c71508fdc43e7cafefa9952bcce1"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "omp-setup-2.png",
+      "allCellsInspected": true,
+      "notes": "Manually inspected earlier in this audit before context compaction. Full dark native controls/choices/command visible and keyboard exercised. OMP glyph preview has missing Nerd Font glyphs; Unicode selected. Existing room sprite overlap.",
+      "sha256": "bfee28234751feda40d87bd71b8360b946ba386ead7240e86a45e063964c1312"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "omp-setup-3.png",
+      "allCellsInspected": true,
+      "notes": "Manually inspected earlier in this audit before context compaction. Full dark native controls/choices/command visible and keyboard exercised. OMP glyph preview has missing Nerd Font glyphs; Unicode selected. Existing room sprite overlap.",
+      "sha256": "ed8f9cd3bfc26629fa85faf8c6d1ab4d2e5f621832dc9464e4638025078e0854"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "omp-setup-4.png",
+      "allCellsInspected": true,
+      "notes": "Manually inspected earlier in this audit before context compaction. Full dark native controls/choices/command visible and keyboard exercised. OMP glyph preview has missing Nerd Font glyphs; Unicode selected. Existing room sprite overlap.",
+      "sha256": "40650ac16306cdb43a7738b11a4a8a5a357638eb89747a7b6213b20a6edcbc4e"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "omp-setup-5.png",
+      "allCellsInspected": true,
+      "notes": "Manually inspected earlier in this audit before context compaction. Full dark native controls/choices/command visible and keyboard exercised. OMP glyph preview has missing Nerd Font glyphs; Unicode selected. Existing room sprite overlap.",
+      "sha256": "745d8b4aba7462e048e27eee1bcfa0c0fffe675d142dd561f17827d895e5b272"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "omp-onboarding-tool-response.png",
+      "allCellsInspected": true,
+      "notes": "Manually inspected earlier in this audit before context compaction. Full dark native controls/choices/command visible and keyboard exercised. OMP glyph preview has missing Nerd Font glyphs; Unicode selected. Existing room sprite overlap.",
+      "sha256": "b23d53779c274e639bdaf922566173ad2427c71dff9fc163f8e35ba892f11b80"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "hermes-hook-review-1.png",
+      "allCellsInspected": true,
+      "notes": "Manually inspected earlier in this audit before context compaction. Full dark native controls/choices/command visible and keyboard exercised. OMP glyph preview has missing Nerd Font glyphs; Unicode selected. Existing room sprite overlap.",
+      "sha256": "83db5ad82fd2a5bba89ff247652e0c0d5dc1c95a06aaaeb8db1080f3d563f25a"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "hermes-hook-review-2.png",
+      "allCellsInspected": true,
+      "notes": "Manually inspected earlier in this audit before context compaction. Full dark native controls/choices/command visible and keyboard exercised. OMP glyph preview has missing Nerd Font glyphs; Unicode selected. Existing room sprite overlap.",
+      "sha256": "30e2b8494da75d1299054445dd42d5f41083649276c6359288c9defa6bef10f1"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "hermes-hook-review-3.png",
+      "allCellsInspected": true,
+      "notes": "Manually inspected earlier in this audit before context compaction. Full dark native controls/choices/command visible and keyboard exercised. OMP glyph preview has missing Nerd Font glyphs; Unicode selected. Existing room sprite overlap.",
+      "sha256": "5147b38fa6f07c657808bf33471ce8d2ce6a358760f22fe6b959b58ecfe48c66"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "hermes-hook-review-4.png",
+      "allCellsInspected": true,
+      "notes": "Manually inspected earlier in this audit before context compaction. Full dark native controls/choices/command visible and keyboard exercised. OMP glyph preview has missing Nerd Font glyphs; Unicode selected. Existing room sprite overlap.",
+      "sha256": "73867206b820b4e2e09b490bec5c15b3bb3e9f22b7309bd1fff32aef8e35a1e6"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "hermes-telemetry-review.png",
+      "allCellsInspected": true,
+      "notes": "Manually inspected earlier in this audit before context compaction. Full dark native controls/choices/command visible and keyboard exercised. OMP glyph preview has missing Nerd Font glyphs; Unicode selected. Existing room sprite overlap.",
+      "sha256": "e0bcad08452a37983df29dfc149847f459b2e5b10167c859302c37eb48dd4874"
+    },
+    {
+      "directory": "final-onboarding",
+      "sheet": "hermes-no-hooks-strict.png",
+      "allCellsInspected": true,
+      "notes": "Native command/output legible, room remains Calm despite actual shell work. With no configured hooks, Strict probe executes (sentinel exists), authoritative activity Idle/events0. Expected documented limitation confirmed; some pet overlap with care/needs.",
+      "sha256": "6a28ba137ee578c1d682b923b5fc4edddac0eaaf90e1aa91bd1762b72c223dc0"
+    }
+  ],
+  "matrixInspectionComplete": true,
+  "complete": true,
+  "scope": "80 matrix sheets / 400 cells plus native-session and onboarding images; completeness refers to inspection, not absence of defects",
+  "remainingFindings": [
+    "Claude Thinking may persist after Escape until follow-up",
+    "Native Hermes yellow text faint on white",
+    "Existing pet overlaps room furniture/status/care/needs"
+  ],
+  "coverageGaps": [
+    "Authenticated Claude/OMP/Hermes models",
+    "Authenticated Pi on final binary",
+    "Other platforms/emulators/native CLI themes",
+    "OMP/Hermes extended interrupt/resume",
+    "Other sizes/backgrounds for extra native-session/onboarding flows",
+    "New browser visual coverage"
+  ],
+  "matrixSheetCount": 80,
+  "matrixCellCount": 400
+}

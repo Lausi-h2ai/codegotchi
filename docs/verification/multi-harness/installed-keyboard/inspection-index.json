@@ -1,0 +1,242 @@
+[
+  {
+    "harness": "pi",
+    "artifact": "pi-full-edited.png",
+    "inspectionSheet": "pi-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "pi",
+    "artifact": "pi-compact-edited.png",
+    "inspectionSheet": "pi-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "pi",
+    "artifact": "pi-minimal-edited.png",
+    "inspectionSheet": "pi-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "pi",
+    "artifact": "pi-narrow-edited.png",
+    "inspectionSheet": "pi-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "pi",
+    "artifact": "pi-edited.png",
+    "inspectionSheet": "pi-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "pi",
+    "artifact": "pi-response.png",
+    "inspectionSheet": "pi-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "pi",
+    "artifact": "pi-history.png",
+    "inspectionSheet": "pi-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "pi",
+    "artifact": "pi-strict-response.png",
+    "inspectionSheet": "pi-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "pi",
+    "artifact": "pi-care-after.png",
+    "inspectionSheet": "pi-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "pi",
+    "artifact": "pi-care-keyboard-response.png",
+    "inspectionSheet": "pi-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "omp",
+    "artifact": "omp-full-edited.png",
+    "inspectionSheet": "omp-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "omp",
+    "artifact": "omp-compact-edited.png",
+    "inspectionSheet": "omp-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "omp",
+    "artifact": "omp-minimal-edited.png",
+    "inspectionSheet": "omp-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "omp",
+    "artifact": "omp-narrow-edited.png",
+    "inspectionSheet": "omp-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "omp",
+    "artifact": "omp-edited.png",
+    "inspectionSheet": "omp-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "omp",
+    "artifact": "omp-response.png",
+    "inspectionSheet": "omp-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "omp",
+    "artifact": "omp-history.png",
+    "inspectionSheet": "omp-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "omp",
+    "artifact": "omp-strict-response.png",
+    "inspectionSheet": "omp-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "omp",
+    "artifact": "omp-care-after.png",
+    "inspectionSheet": "omp-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "omp",
+    "artifact": "omp-care-keyboard-response.png",
+    "inspectionSheet": "omp-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "claude",
+    "artifact": "claude-full-edited.png",
+    "inspectionSheet": "claude-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "claude",
+    "artifact": "claude-compact-edited.png",
+    "inspectionSheet": "claude-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "claude",
+    "artifact": "claude-minimal-edited.png",
+    "inspectionSheet": "claude-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "claude",
+    "artifact": "claude-narrow-edited.png",
+    "inspectionSheet": "claude-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "claude",
+    "artifact": "claude-edited.png",
+    "inspectionSheet": "claude-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "claude",
+    "artifact": "claude-response.png",
+    "inspectionSheet": "claude-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "claude",
+    "artifact": "claude-history.png",
+    "inspectionSheet": "claude-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "claude",
+    "artifact": "claude-strict-response.png",
+    "inspectionSheet": "claude-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "claude",
+    "artifact": "claude-care-after.png",
+    "inspectionSheet": "claude-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "claude",
+    "artifact": "claude-care-keyboard-response.png",
+    "inspectionSheet": "claude-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "hermes",
+    "artifact": "hermes-full-edited.png",
+    "inspectionSheet": "hermes-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "hermes",
+    "artifact": "hermes-compact-edited.png",
+    "inspectionSheet": "hermes-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "hermes",
+    "artifact": "hermes-minimal-edited.png",
+    "inspectionSheet": "hermes-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "hermes",
+    "artifact": "hermes-narrow-edited.png",
+    "inspectionSheet": "hermes-layouts-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "hermes",
+    "artifact": "hermes-edited.png",
+    "inspectionSheet": "hermes-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "hermes",
+    "artifact": "hermes-response.png",
+    "inspectionSheet": "hermes-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "hermes",
+    "artifact": "hermes-history.png",
+    "inspectionSheet": "hermes-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "hermes",
+    "artifact": "hermes-strict-response.png",
+    "inspectionSheet": "hermes-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "hermes",
+    "artifact": "hermes-care-after.png",
+    "inspectionSheet": "hermes-states-sheet.png",
+    "manuallyInspected": true
+  },
+  {
+    "harness": "hermes",
+    "artifact": "hermes-care-keyboard-response.png",
+    "inspectionSheet": "hermes-states-sheet.png",
+    "manuallyInspected": true
+  }
+]

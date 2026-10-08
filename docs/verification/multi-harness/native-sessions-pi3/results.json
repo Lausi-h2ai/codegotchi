@@ -1,0 +1,29 @@
+[
+  {
+    "harness": "pi",
+    "ui": "terminal",
+    "background": "dark",
+    "model": "scripted loopback; no authenticated provider request",
+    "nativeApproval": "not_applicable_pi_has_no_native_permission_popups",
+    "approvalPromptCaptured": false,
+    "approvalResultSeen": null,
+    "interruption": {
+      "longResponseStarted": true,
+      "longResponseInterrupted": true,
+      "longResponseCompletedAtEscape": false,
+      "physicalEscapeSent": true
+    },
+    "sustainedTurnsBeforeResume": 5,
+    "sustainedTurnsAfterResume": 6,
+    "resumeContextSeen": true,
+    "resumeSessionId": null,
+    "requestCount": 11,
+    "workPoints": 15,
+    "eventCount": 25,
+    "firstExitCode": 0,
+    "secondExitCode": 0,
+    "runtimeCleaned": true,
+    "serverErrors": [],
+    "passed": true
+  }
+]

@@ -1,0 +1,30 @@
+[
+  {
+    "harness": "claude",
+    "ui": "terminal",
+    "background": "dark",
+    "model": "scripted loopback; no authenticated provider request",
+    "nativeApproval": "approved_with_native_prompt",
+    "approvalPromptCaptured": true,
+    "approvalResultSeen": true,
+    "interruption": {
+      "longResponseStarted": true,
+      "longResponseInterrupted": true,
+      "longResponseCompletedAtEscape": false,
+      "physicalEscapeSent": true,
+      "persistedAbortedAssistantResponse": false
+    },
+    "sustainedTurnsBeforeResume": 7,
+    "sustainedTurnsAfterResume": 8,
+    "resumeContextSeen": true,
+    "resumeSessionId": "ca1f918f-8c04-447b-ac1b-f72d7e4d4d48",
+    "requestCount": 15,
+    "workPoints": 15,
+    "eventCount": 24,
+    "firstExitCode": 0,
+    "secondExitCode": 0,
+    "runtimeCleaned": true,
+    "serverErrors": [],
+    "passed": false
+  }
+]

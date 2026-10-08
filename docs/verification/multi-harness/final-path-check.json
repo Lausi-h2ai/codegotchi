@@ -1,0 +1,28 @@
+{
+  "binary": "/home/laurent/.cargo/bin/codegotchi",
+  "binarySha256": "81951d30ed537935f2fad76446c64294156dee392fa274a7f17ab92f0d9d53a6",
+  "results": [
+    {
+      "harness": "pi",
+      "pathExecutable": "/mnt/c/nvm4w/nodejs/pi"
+    },
+    {
+      "harness": "claude",
+      "pathExecutable": null,
+      "exitCode": 2,
+      "error": "codegotchi: agent `claude` was not found in PATH; set CODEGOTCHI_REAL_CLAUDE to its executable path"
+    },
+    {
+      "harness": "omp",
+      "pathExecutable": null,
+      "exitCode": 2,
+      "error": "codegotchi: agent `omp` was not found in PATH; set CODEGOTCHI_REAL_OMP to its executable path"
+    },
+    {
+      "harness": "hermes",
+      "pathExecutable": null,
+      "exitCode": 2,
+      "error": "codegotchi: agent `hermes` was not found in PATH; set CODEGOTCHI_REAL_HERMES to its executable path"
+    }
+  ]
+}

@@ -6,12 +6,11 @@ use std::path::Path;
 use codegotchi_domain::{EnforcementMode, normalize_pet_name};
 
 use crate::codex_hook::{
-    CODEGOTCHI_SESSION_FILE, HookTransportError, run_hook_from_environment,
-    runtime_metadata_is_active, send_debug_generate_poop_to_runtime, send_debug_neglect_to_runtime,
+    CODEGOTCHI_SESSION_FILE, HookTransportError, runtime_metadata_is_active,
+    send_debug_generate_poop_to_runtime, send_debug_neglect_to_runtime,
     send_debug_restock_to_runtime, send_mode_to_runtime, send_name_to_runtime,
 };
 use crate::launcher;
-use crate::protocol::HookOutput;
 use crate::runtime_metadata::read_metadata;
 
 pub use crate::launcher::{LaunchRequest, UiMode, parse_launch_request};
@@ -36,15 +35,39 @@ pub fn run(arguments: impl Iterator<Item = String>) -> Result<(), CliError> {
 
 pub fn run_os(mut arguments: impl Iterator<Item = OsString>) -> Result<i32, CliError> {
     match arguments.next().as_deref() {
-        Some(command) if command == OsStr::new("hook") && arguments.next().is_none() => {
-            let output = run_hook_from_environment();
-            print_hook_output(&output)
-                .map(|()| 0)
-                .map_err(|error| CliError(error.to_string()))
+        Some(command) if command == OsStr::new("hook") => {
+            let harness = match arguments.next() {
+                None => crate::harness::Harness::Codex,
+                Some(value) => crate::harness::Harness::parse(&value)
+                    .ok_or_else(|| CliError("hook expects codex|pi|claude|omp|hermes".into()))?,
+            };
+            if arguments.next().is_some() {
+                return Err(CliError("hook accepts at most one harness name".into()));
+            }
+            let output = crate::codex_hook::run_hook_for_harness(harness);
+            let value = crate::harness_hook::output_value(harness, &output);
+            let mut stdout = std::io::stdout().lock();
+            serde_json::to_writer(&mut stdout, &value)
+                .map_err(|error| CliError(error.to_string()))?;
+            stdout
+                .write_all(b"\n")
+                .map_err(|error| CliError(error.to_string()))?;
+            Ok(0)
         }
-        Some(command) if command == OsStr::new("hook") => Err(CliError(String::from(
-            "the hook command takes no arguments",
-        ))),
+        Some(command) if command == OsStr::new("integration") => {
+            if arguments.next().as_deref() != Some(OsStr::new("hermes"))
+                || arguments.next().is_some()
+            {
+                return Err(CliError(
+                    "use `codegotchi integration hermes` to print the Hermes hook configuration"
+                        .into(),
+                ));
+            }
+            let executable =
+                std::env::current_exe().map_err(|error| CliError(error.to_string()))?;
+            print!("{}", crate::harness::hermes_hook_configuration(&executable));
+            Ok(0)
+        }
         Some(command) if command == OsStr::new("mode") => {
             run_mode(arguments.map(|argument| argument.to_string_lossy().into_owned())).map(|_| 0)
         }
@@ -226,11 +249,4 @@ fn mode_name(mode: EnforcementMode) -> &'static str {
         EnforcementMode::Gentle => "gentle",
         EnforcementMode::Strict => "strict",
     }
-}
-
-fn print_hook_output(output: &HookOutput) -> Result<(), std::io::Error> {
-    let stdout = std::io::stdout();
-    let mut stdout = stdout.lock();
-    serde_json::to_writer(&mut stdout, output).map_err(std::io::Error::other)?;
-    stdout.write_all(b"\n")
 }

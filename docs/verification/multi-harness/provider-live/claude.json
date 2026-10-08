@@ -1,0 +1,7 @@
+{
+  "auth_method": "none",
+  "auth_status_logged_in": false,
+  "harness": "claude",
+  "reason": "ANTHROPIC_API_KEY is not set and no valid Claude OAuth credentials were supplied",
+  "status": "blocked"
+}

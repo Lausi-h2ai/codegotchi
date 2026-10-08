@@ -1,0 +1,467 @@
+[
+  {
+    "harness": "omp",
+    "op": "start",
+    "skip_setup": false
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-startup.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Escape"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "setup-2"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-setup-2.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "setup-3"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-setup-3.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Down",
+      "Up",
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "setup-4"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-setup-4.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Down",
+      "Up",
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "setup-5"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-setup-5.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Up",
+      "Return"
+    ],
+    "wait": 3
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "setup-complete"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-setup-complete.png"
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "CG_ONBOARDING_OMP"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 3
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "onboarding-response"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-onboarding-response.png"
+  },
+  {
+    "harness": "omp",
+    "op": "state"
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "CG_INPUT_EDIT_OK"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 3
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "onboarding-tool-response"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-onboarding-tool-response.png"
+  },
+  {
+    "harness": "omp",
+    "op": "state"
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "/quit"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "omp",
+    "op": "save"
+  },
+  {
+    "harness": "hermes",
+    "op": "start",
+    "hermes_hooks": "review"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-startup.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "y"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "hook-review-2"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-hook-review-2.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "y"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "hook-review-3"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-hook-review-3.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "y"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "hook-review-4"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-hook-review-4.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "y"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "telemetry-review"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-telemetry-review.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 12
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "CG_INPUT_EDIT_OK"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 3
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "reviewed-tool-response"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-reviewed-tool-response.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "state"
+  },
+  {
+    "harness": "hermes",
+    "op": "wait",
+    "seconds": 4
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "reviewed-tool-settled"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-reviewed-tool-settled.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "state"
+  },
+  {
+    "harness": "hermes",
+    "op": "strict"
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "CG_STRICT_PROBE"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 4
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "reviewed-strict-response"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-reviewed-strict-response.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "state"
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "/exit"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "hermes",
+    "op": "save"
+  },
+  {
+    "harness": "hermes",
+    "op": "start",
+    "hermes_hooks": "none"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-startup.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "no-hooks-startup"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-no-hooks-startup.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 12
+  },
+  {
+    "harness": "hermes",
+    "op": "strict"
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "CG_STRICT_PROBE"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 4
+  },
+  {
+    "harness": "hermes",
+    "op": "wait",
+    "seconds": 4
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "no-hooks-strict"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-no-hooks-strict.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "state"
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "/exit"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "hermes",
+    "op": "save"
+  },
+  {
+    "harness": "hermes",
+    "op": "quit"
+  }
+]

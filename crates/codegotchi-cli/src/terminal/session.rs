@@ -37,7 +37,9 @@ use crate::CodexInvocation;
 use crate::runtime::{AuthoritativeRuntime, RuntimeError};
 
 use super::behavior::{PresentationFrame, PresentationState};
+use super::events::TerminalEventStream;
 use super::pty::PtyWriter;
+use super::screen::TerminalBackground;
 use super::{
     CareGateway, CodexInputModes, CodexScreen, CrosstermTerminal, PtyCodexChild, PtyCodexError,
     RoomAmbience, RoomCareRequest, RoomInputSession, RoomRenderOptions, TerminalBackend,
@@ -102,6 +104,12 @@ pub type TerminalSessionEventFuture<'a> =
 
 pub trait TerminalSessionEventSource {
     fn next(&mut self) -> TerminalSessionEventFuture<'_>;
+
+    /// Returns the latest measured outer-terminal RGB when this event source
+    /// owns a physical terminal probe.
+    fn terminal_background(&self) -> Option<(u16, u16, u16)> {
+        None
+    }
 }
 
 impl TerminalSessionEventSource for EventStream {
@@ -306,6 +314,13 @@ impl TerminalSessionCore {
         }
     }
 
+    /// Installs the measured outer-terminal background used for child OSC 11
+    /// replies. The room palette remains controlled by the selected theme;
+    /// this value only crosses the hosted PTY protocol boundary.
+    pub(crate) fn set_terminal_background(&mut self, background: TerminalBackground) {
+        self.screen.set_terminal_background(background);
+    }
+
     /// Returns the selected terminal theme.
     #[must_use]
     pub const fn terminal_theme(&self) -> TerminalThemePreset {
@@ -438,7 +453,25 @@ pub async fn run_terminal_session(
     invocation: &CodexInvocation,
     signals: TerminalSessionSignalReceiver,
 ) -> Result<portable_pty::ExitStatus, TerminalSessionError> {
-    run_terminal_session_with_events(invocation, signals, EventStream::new(), None).await
+    let mut guard = TerminalGuard::enter(CrosstermTerminal::new())
+        .map_err(TerminalSessionError::Initialization)?;
+    let mut events = TerminalEventStream::new();
+    let background = events
+        .probe_background(guard.writer_mut())
+        .await
+        .map_err(TerminalSessionError::Input)?;
+    let body = run_session_after_entry(
+        &mut guard,
+        invocation,
+        signals,
+        &mut events,
+        None,
+        Some(background),
+        TerminalThemePreset::Auto,
+        || Ok(()),
+    )
+    .await;
+    finish_guard(&mut guard, body)
 }
 
 /// Runs the real terminal session with an injected event source.
@@ -464,6 +497,7 @@ where
         signals,
         &mut events,
         runtime,
+        None,
         TerminalThemePreset::Auto,
         || Ok(()),
     )
@@ -520,7 +554,14 @@ where
             });
         }
     };
-    let mut events = EventStream::new();
+    let mut events = TerminalEventStream::new();
+    let background = match events.probe_background(guard.writer_mut()).await {
+        Ok(background) => background,
+        Err(error) => {
+            return finish_guard(&mut guard, Err(TerminalSessionError::Input(error)))
+                .map_err(TerminalSessionStartError::Session);
+        }
+    };
     let body = run_session_after_entry(
         &mut guard,
         invocation,
@@ -529,6 +570,7 @@ where
             .expect("terminal signal receiver is moved after successful entry"),
         &mut events,
         runtime,
+        Some(background),
         terminal_theme,
         before_spawn,
     )
@@ -764,12 +806,14 @@ async fn next_session_work(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_session_after_entry<F>(
     guard: &mut TerminalGuard<CrosstermTerminal>,
     invocation: &CodexInvocation,
     signals: TerminalSessionSignalReceiver,
     events: &mut impl TerminalSessionEventSource,
     runtime: Option<Arc<AuthoritativeRuntime>>,
+    terminal_background: Option<TerminalBackground>,
     terminal_theme: TerminalThemePreset,
     before_spawn: F,
 ) -> Result<portable_pty::ExitStatus, TerminalSessionError>
@@ -786,6 +830,9 @@ where
         DEFAULT_BEHAVIOR_SEED,
         terminal_theme,
     );
+    if let Some(background) = terminal_background {
+        core.set_terminal_background(background);
+    }
     // Normalize the virtual screen and pane split to the Codex rectangle
     // before the child exists, so the spawned PTY, the virtual screen, and
     // the rendered upper pane always agree on dimensions. Without this the
@@ -1020,6 +1067,9 @@ where
                 Ok(None) => {}
                 Err(error) => body_error = Some(error),
             },
+        }
+        if let Some((red, green, blue)) = events.terminal_background() {
+            core.set_terminal_background(TerminalBackground::from_components(red, green, blue));
         }
         if body_error.is_none() {
             if let Some(receipt) = protocol_receipt.as_mut() {

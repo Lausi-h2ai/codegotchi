@@ -1,0 +1,82 @@
+[
+  {
+    "harness": "pi",
+    "scenario": "decorative",
+    "requests": 2,
+    "toolResultSeen": true,
+    "exitCode": 0,
+    "sentinelExists": true,
+    "completed": true,
+    "passed": true
+  },
+  {
+    "harness": "pi",
+    "scenario": "strict",
+    "requests": 2,
+    "toolResultSeen": true,
+    "exitCode": 0,
+    "sentinelExists": false,
+    "completed": true,
+    "passed": true
+  },
+  {
+    "harness": "omp",
+    "scenario": "decorative",
+    "requests": 2,
+    "toolResultSeen": true,
+    "exitCode": 0,
+    "sentinelExists": true,
+    "completed": true,
+    "passed": true
+  },
+  {
+    "harness": "omp",
+    "scenario": "strict",
+    "requests": 2,
+    "toolResultSeen": true,
+    "exitCode": 0,
+    "sentinelExists": false,
+    "completed": true,
+    "passed": true
+  },
+  {
+    "harness": "claude",
+    "scenario": "decorative",
+    "requests": 2,
+    "toolResultSeen": true,
+    "exitCode": 0,
+    "sentinelExists": true,
+    "completed": true,
+    "passed": true
+  },
+  {
+    "harness": "claude",
+    "scenario": "strict",
+    "requests": 2,
+    "toolResultSeen": true,
+    "exitCode": 0,
+    "sentinelExists": false,
+    "completed": true,
+    "passed": true
+  },
+  {
+    "harness": "hermes",
+    "scenario": "decorative",
+    "requests": 5,
+    "toolResultSeen": true,
+    "exitCode": 0,
+    "sentinelExists": true,
+    "completed": true,
+    "passed": true
+  },
+  {
+    "harness": "hermes",
+    "scenario": "strict",
+    "requests": 5,
+    "toolResultSeen": true,
+    "exitCode": 0,
+    "sentinelExists": false,
+    "completed": true,
+    "passed": true
+  }
+]

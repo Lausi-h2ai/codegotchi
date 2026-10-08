@@ -1,0 +1,28 @@
+[
+  {
+    "harness": "omp",
+    "layout": "full",
+    "artifact": "actual-omp-full.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "compact",
+    "artifact": "actual-omp-compact.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "minimal",
+    "artifact": "actual-omp-minimal.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "narrow-full",
+    "artifact": "actual-omp-narrow-full.png"
+  },
+  {
+    "harness": "omp",
+    "activity": "Idle",
+    "sessionCount": 1,
+    "eventCount": 1
+  }
+]

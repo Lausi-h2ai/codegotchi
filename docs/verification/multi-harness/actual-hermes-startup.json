@@ -1,0 +1,28 @@
+[
+  {
+    "harness": "hermes",
+    "layout": "full",
+    "artifact": "actual-hermes-full.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "compact",
+    "artifact": "actual-hermes-compact.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "minimal",
+    "artifact": "actual-hermes-minimal.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "narrow-full",
+    "artifact": "actual-hermes-narrow-full.png"
+  },
+  {
+    "harness": "hermes",
+    "activity": "Idle",
+    "sessionCount": 0,
+    "eventCount": 0
+  }
+]

@@ -1,0 +1,21 @@
+{
+  "binary_sha256": "9220dcd6c4c2d56f803bac0d8c8b5ac1b027c700dc03965a16b00d5509123fcc",
+  "claude_auth": {
+    "available": false,
+    "oauth_reason": "no .credentials.json source supplied",
+    "reason": "ANTHROPIC_API_KEY is not set and no valid Claude OAuth credentials were supplied"
+  },
+  "output_directory": "/home/laurent/codegotchi/docs/verification/multi-harness/provider-live",
+  "pi_auth": {
+    "auth_type": "oauth",
+    "available": true,
+    "expires_utc": "2026-10-07T18:57:52.965000+00:00",
+    "provider": "openai-codex",
+    "reason": null,
+    "remaining_seconds": 4953.7,
+    "source": "/home/laurent/.pi/agent/auth.json",
+    "source_unchanged": true
+  },
+  "private_tmpfs": "/dev/shm/codegotchi-provider-live-kuhn6dhu",
+  "verified_utc": "2026-10-07T17:35:19.209036+00:00"
+}

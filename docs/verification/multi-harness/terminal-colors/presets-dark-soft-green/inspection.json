@@ -1,0 +1,32 @@
+{
+  "binarySha256": "9220dcd6c4c2d56f803bac0d8c8b5ac1b027c700dc03965a16b00d5509123fcc",
+  "date": "2026-10-07",
+  "reviewer": "parent agent",
+  "manualInspectionCompleted": true,
+  "everyCellInspected": true,
+  "sheets": [
+    {
+      "sheet": "omp-layouts-sheet.png",
+      "sources": [
+        "omp-full-edited.png",
+        "omp-compact-edited.png",
+        "omp-minimal-edited.png",
+        "omp-narrow-edited.png"
+      ]
+    },
+    {
+      "sheet": "omp-states-sheet.png",
+      "sources": [
+        "omp-edited.png",
+        "omp-response.png",
+        "omp-history.png",
+        "omp-strict-response.png",
+        "omp-care-after.png",
+        "omp-care-keyboard-response.png"
+      ]
+    }
+  ],
+  "notes": [
+    "Native composer stays in upper pane; known animated pet/room overlap is documented separately."
+  ]
+}

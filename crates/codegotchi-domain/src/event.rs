@@ -12,6 +12,9 @@ pub const AGENT_EVENT_SCHEMA_VERSION: u16 = 1;
 pub enum EventSource {
     Codex,
     ClaudeCode,
+    Pi,
+    OhMyPi,
+    Hermes,
     #[default]
     Generic,
 }

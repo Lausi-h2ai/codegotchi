@@ -1,0 +1,16 @@
+{
+  "harness": "hermes",
+  "binarySha256": "81951d30ed537935f2fad76446c64294156dee392fa274a7f17ab92f0d9d53a6",
+  "scope": "Full dark, scripted local model, disposable home",
+  "configuredHooks": false,
+  "realKeyboardPrompt": "CG_STRICT_PROBE",
+  "strictModeAndCriticalNeeds": true,
+  "toolDenied": false,
+  "sentinelContents": "CG_STRICT_PROBE",
+  "activity": "Idle",
+  "workPoints": 0,
+  "eventCount": 0,
+  "normalExitCode": 0,
+  "runtimeCleaned": true,
+  "expectedMissingHooksLimitationConfirmed": true
+}

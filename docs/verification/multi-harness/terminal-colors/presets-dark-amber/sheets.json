@@ -1,0 +1,25 @@
+{
+  "requiresManualInspection": true,
+  "sheets": [
+    {
+      "sheet": "omp-layouts-sheet.png",
+      "sources": [
+        "omp-full-edited.png",
+        "omp-compact-edited.png",
+        "omp-minimal-edited.png",
+        "omp-narrow-edited.png"
+      ]
+    },
+    {
+      "sheet": "omp-states-sheet.png",
+      "sources": [
+        "omp-edited.png",
+        "omp-response.png",
+        "omp-history.png",
+        "omp-strict-response.png",
+        "omp-care-after.png",
+        "omp-care-keyboard-response.png"
+      ]
+    }
+  ]
+}

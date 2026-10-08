@@ -273,7 +273,7 @@ fn exact_wrapper_is_transparent_and_persists_profile_but_cleans_metadata() {
 fn validation_rejects_malformed_shape_self_and_all_profile_conflicts_before_mutation() {
     let cases = [
         (vec!["run", "codex"], "separator `--`"),
-        (vec!["run", "--", "claude"], "unsupported agent"),
+        (vec!["run", "--", "unknown-agent"], "unsupported agent"),
         (vec!["run", "--", "codex", "-p"], "profile"),
         (vec!["run", "--", "codex", "--profile"], "profile"),
         (vec!["run", "--", "codex", "--profile=other"], "profile"),

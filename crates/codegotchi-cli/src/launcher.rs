@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 use crate::PersistentCodexProfile;
 use crate::cli::CODEGOTCHI_ENABLE_DEBUG;
+use crate::harness::{Harness, SessionIntegration};
 use crate::persistence::SqliteStore;
 use crate::protocol::RuntimeMetadataV1;
 use crate::runtime::AuthoritativeRuntime;
@@ -167,7 +168,8 @@ impl LauncherError {
 
 #[derive(Debug)]
 pub struct ValidatedLaunch {
-    pub codex_path: PathBuf,
+    pub harness: Harness,
+    pub agent_path: PathBuf,
     pub codegotchi_executable: PathBuf,
     pub ui_mode: UiMode,
     pub terminal_theme: TerminalThemePreset,
@@ -184,9 +186,10 @@ pub enum UiMode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LaunchRequest {
+    pub harness: Harness,
     pub ui_mode: UiMode,
     pub terminal_theme: TerminalThemePreset,
-    pub trailing_codex_arguments: Vec<OsString>,
+    pub trailing_arguments: Vec<OsString>,
 }
 
 /// The inherited child wait path can consume either the installed launcher
@@ -278,17 +281,18 @@ pub fn validate(
     let arguments = arguments.into_iter().collect::<Vec<_>>();
     let request = parse_launch_request(&arguments)?;
     let codegotchi_executable = current_codegotchi_executable()?;
-    let codex_path = resolve_codex(&codegotchi_executable)?;
+    let agent_path = resolve_agent(request.harness, &codegotchi_executable)?;
     Ok(ValidatedLaunch {
-        codex_path,
+        harness: request.harness,
+        agent_path,
         codegotchi_executable,
         ui_mode: request.ui_mode,
         terminal_theme: request.terminal_theme,
-        trailing_arguments: request.trailing_codex_arguments,
+        trailing_arguments: request.trailing_arguments,
     })
 }
 
-/// Runs one Codex child and returns its numeric exit status.
+/// Runs one harness child and returns its numeric exit status.
 pub fn run(arguments: impl IntoIterator<Item = OsString>) -> Result<i32, LauncherError> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -407,28 +411,34 @@ fn os_string_from_bytes(bytes: &[u8]) -> OsString {
 
 async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
     let validated = validate(arguments)?;
-    let trailing_codex_arguments = load_codex_arguments(&validated.trailing_arguments)?;
+    let trailing_arguments = if validated.harness == Harness::Codex {
+        load_codex_arguments(&validated.trailing_arguments)?
+    } else {
+        validated.trailing_arguments.clone()
+    };
     let mut signals = SignalController::install()?;
     if let Some(signal) = signals.try_setup_termination().await {
         return Ok(signal.exit_status());
     }
-    let paths = resolve_launch_paths()?;
+    let paths = resolve_launch_paths(validated.harness)?;
     if let Some(signal) = signals.try_setup_termination().await {
         return Ok(signal.exit_status());
     }
 
     ensure_private_directory(&paths.state_directory)?;
-    fs::create_dir_all(&paths.codex_home).map_err(|error| {
-        LauncherError::message(format!(
-            "could not create CODEX_HOME at {}: {error}",
-            paths.codex_home.display()
-        ))
-    })?;
-    if !paths.codex_home.is_dir() {
-        return Err(LauncherError::message(format!(
-            "CODEX_HOME is not a directory: {}",
-            paths.codex_home.display()
-        )));
+    if validated.harness == Harness::Codex {
+        fs::create_dir_all(&paths.codex_home).map_err(|error| {
+            LauncherError::message(format!(
+                "could not create CODEX_HOME at {}: {error}",
+                paths.codex_home.display()
+            ))
+        })?;
+        if !paths.codex_home.is_dir() {
+            return Err(LauncherError::message(format!(
+                "CODEX_HOME is not a directory: {}",
+                paths.codex_home.display()
+            )));
+        }
     }
 
     let store = SqliteStore::open_for_repository(&paths.database, paths.repository_id.clone())
@@ -499,41 +509,63 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
         return Ok(signal.exit_status());
     }
 
-    let hook_command = format!("{} hook", shell_quote(&validated.codegotchi_executable));
-    let profile = match PersistentCodexProfile::ensure(
-        &paths.codex_home,
-        owned_metadata.path(),
-        &hook_command,
-    ) {
-        Ok(profile) => profile,
-        Err(error) => {
-            let _ = owned_metadata.cleanup();
-            let _ = server.shutdown().await;
-            return Err(LauncherError::message(format!(
-                "could not ensure the persistent Codex profile: {error}"
-            )));
-        }
+    let profile = if validated.harness == Harness::Codex {
+        let hook_command = format!("{} hook", shell_quote(&validated.codegotchi_executable));
+        Some(
+            PersistentCodexProfile::ensure(&paths.codex_home, owned_metadata.path(), &hook_command)
+                .map_err(|error| {
+                    LauncherError::message(format!(
+                        "could not ensure the persistent Codex profile: {error}"
+                    ))
+                })?,
+        )
+    } else {
+        None
     };
-    if let Some(signal) = signals.try_setup_termination().await {
-        let _ = owned_metadata.cleanup();
-        let _ = server.shutdown().await;
-        return Ok(signal.exit_status());
-    }
-
-    let profile_guard = match profile.acquire_spawn_guard() {
-        Ok(guard) => guard,
-        Err(error) => {
-            let _ = owned_metadata.cleanup();
-            let _ = server.shutdown().await;
-            return Err(LauncherError::message(format!(
+    let profile_guard = profile
+        .as_ref()
+        .map(PersistentCodexProfile::acquire_spawn_guard)
+        .transpose()
+        .map_err(|error| {
+            LauncherError::message(format!(
                 "could not acquire the persistent Codex profile before spawn: {error}"
-            )));
-        }
+            ))
+        })?;
+    let integration = if profile_guard.is_none() {
+        Some(
+            SessionIntegration::prepare(
+                validated.harness,
+                &validated.agent_path,
+                &validated.codegotchi_executable,
+                &trailing_arguments,
+                owned_metadata.path(),
+                &paths.runtime_directory,
+            )
+            .map_err(|error| {
+                LauncherError::message(format!(
+                    "could not prepare {} integration: {error}",
+                    validated.harness.command()
+                ))
+            })?,
+        )
+    } else {
+        None
     };
-    let invocation = profile_guard.invocation(&validated.codex_path, &trailing_codex_arguments);
+    let invocation = if let Some(guard) = &profile_guard {
+        guard.invocation(&validated.agent_path, &trailing_arguments)
+    } else {
+        integration
+            .as_ref()
+            .expect("non-Codex integration")
+            .invocation
+            .clone()
+    };
+    if validated.harness == Harness::Hermes {
+        eprintln!(
+            "CodeGotchi: Hermes activity and Strict mode require the hooks printed by `codegotchi integration hermes` to be configured and approved in Hermes."
+        );
+    }
     if let Some(signal) = signals.try_setup_termination().await {
-        drop(profile_guard);
-        drop(profile);
         let _ = owned_metadata.cleanup();
         let _ = server.shutdown().await;
         return Ok(signal.exit_status());
@@ -562,9 +594,9 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
         },
         |source| {
             run_inherited_session(
-                &profile_guard,
+                profile_guard.as_ref(),
                 &invocation,
-                &validated.codex_path,
+                &validated.agent_path,
                 source,
             )
         },
@@ -583,8 +615,8 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
                         Some(room_runtime),
                         validated.terminal_theme,
                         || {
-                            profile_guard
-                                .verify_before_spawn()
+                            profile_guard.as_ref().map(|guard| guard.verify_before_spawn()).transpose()
+                                .map(|_| ())
                                 .map_err(|error| {
                                     TerminalSessionError::Input(io::Error::other(format!(
                                         "could not verify the persistent Codex profile before spawn: {error}"
@@ -613,32 +645,33 @@ async fn run_async(arguments: Vec<OsString>) -> Result<i32, LauncherError> {
     }
     drop(profile_guard);
     drop(profile);
+    drop(integration);
     let metadata_cleanup = owned_metadata.cleanup();
     let server_cleanup = server.shutdown().await;
     wait_for_browser(browser_wait).await;
 
     if let Err(error) = metadata_cleanup {
         return Err(LauncherError::message(format!(
-            "Codex exited, but CodeGotchi could not remove owned metadata: {error}"
+            "agent exited, but CodeGotchi could not remove owned metadata: {error}"
         )));
     }
     if let Err(error) = server_cleanup {
         return Err(LauncherError::message(format!(
-            "Codex exited, but CodeGotchi server shutdown failed: {error}"
+            "agent exited, but CodeGotchi server shutdown failed: {error}"
         )));
     }
     route_result.map_err(|error| match error {
         RouteError::Inherited(error) => error,
         RouteError::Terminal(error) => {
-            LauncherError::message(format!("Codex terminal session failed: {error}"))
+            LauncherError::message(format!("agent terminal session failed: {error}"))
         }
     })
 }
 
 async fn run_inherited_session(
-    profile_guard: &crate::PersistentCodexProfileGuard<'_>,
+    profile_guard: Option<&crate::PersistentCodexProfileGuard<'_>>,
     invocation: &crate::CodexInvocation,
-    codex_path: &Path,
+    agent_path: &Path,
     signals: InheritedSignalSource,
 ) -> Result<i32, LauncherError> {
     let mut child_command = invocation.std_command();
@@ -654,15 +687,17 @@ async fn run_inherited_session(
     }
 
     // Keep the profile guard alive through this exact inherited spawn.
-    profile_guard.verify_before_spawn().map_err(|error| {
+    if let Some(guard) = profile_guard {
+        guard.verify_before_spawn().map_err(|error| {
+            LauncherError::message(format!(
+                "could not verify the persistent Codex profile before spawn: {error}"
+            ))
+        })?;
+    }
+    let child = child_command.spawn().map_err(|error| {
         LauncherError::message(format!(
-            "could not verify the persistent Codex profile before spawn: {error}"
-        ))
-    })?;
-    let child = profile_guard.spawn(&mut child_command).map_err(|error| {
-        LauncherError::message(format!(
-            "could not spawn Codex at {}: {error}",
-            codex_path.display()
+            "could not spawn agent at {}: {error}",
+            agent_path.display()
         ))
     })?;
 
@@ -772,7 +807,7 @@ where
     I: IntoIterator<Item = A>,
     A: AsRef<OsStr>,
 {
-    const SUPPORTED_FORM: &str = "supported command form: `codegotchi run [--ui auto|terminal|browser|both] [--terminal-theme auto|mono|soft-green|amber|night] -- codex [arguments...]`";
+    const SUPPORTED_FORM: &str = "supported command form: `codegotchi run [--ui auto|terminal|browser|both] [--terminal-theme auto|mono|soft-green|amber|night] -- codex|pi|claude|omp|hermes [arguments...]`";
 
     let arguments = arguments
         .into_iter()
@@ -887,24 +922,23 @@ where
         )));
     }
 
-    if arguments.get(separator_index + 1).map(OsString::as_os_str) != Some(OsStr::new("codex")) {
-        let agent = arguments
-            .get(separator_index + 1)
-            .map(|argument| argument.to_string_lossy())
-            .unwrap_or_else(|| "<missing>".into());
-        return Err(LauncherError::message(format!(
-            "unsupported agent `{agent}`; the only supported agent is `codex`; {SUPPORTED_FORM}"
-        )));
-    }
+    let agent = arguments
+        .get(separator_index + 1)
+        .map(OsString::as_os_str)
+        .unwrap_or(OsStr::new("<missing>"));
+    let harness = Harness::parse(agent).ok_or_else(|| LauncherError::message(format!(
+        "unsupported agent `{}`; supported agents are codex|pi|claude|omp|hermes; {SUPPORTED_FORM}", agent.to_string_lossy()
+    )))?;
 
-    let trailing_codex_arguments = arguments
+    let trailing_arguments = arguments
         .iter()
         .skip(separator_index + 2)
         .cloned()
         .collect::<Vec<_>>();
-    if let Some(conflict) = trailing_codex_arguments
-        .iter()
-        .find(|argument| is_profile_conflict(argument))
+    if harness == Harness::Codex
+        && let Some(conflict) = trailing_arguments
+            .iter()
+            .find(|argument| is_profile_conflict(argument))
     {
         return Err(LauncherError::message(format!(
             "Codex argument `{}` conflicts with CodeGotchi's generated additive profile; remove `-p`/`--profile` because CodeGotchi injects its own profile",
@@ -913,9 +947,10 @@ where
     }
 
     Ok(LaunchRequest {
+        harness,
         ui_mode,
         terminal_theme,
-        trailing_codex_arguments,
+        trailing_arguments,
     })
 }
 
@@ -970,15 +1005,16 @@ fn current_codegotchi_executable() -> Result<PathBuf, LauncherError> {
     })
 }
 
-fn resolve_codex(codegotchi_executable: &Path) -> Result<PathBuf, LauncherError> {
-    let override_value = env::var_os("CODEGOTCHI_REAL_CODEX");
+fn resolve_agent(harness: Harness, codegotchi_executable: &Path) -> Result<PathBuf, LauncherError> {
+    let override_key = harness.executable_override();
+    let override_value = env::var_os(override_key);
     let requested = override_value
         .clone()
-        .unwrap_or_else(|| OsString::from("codex"));
+        .unwrap_or_else(|| OsString::from(harness.command()));
     if requested.is_empty() {
-        return Err(LauncherError::message(
-            "CODEGOTCHI_REAL_CODEX is empty; set it to an executable Codex path or unset it to use PATH",
-        ));
+        return Err(LauncherError::message(format!(
+            "{override_key} is empty; set it to an executable path or unset it to use PATH"
+        )));
     }
 
     let requested_path = Path::new(&requested);
@@ -987,11 +1023,14 @@ fn resolve_codex(codegotchi_executable: &Path) -> Result<PathBuf, LauncherError>
             .parent()
             .is_some_and(|parent| !parent.as_os_str().is_empty());
     if override_value.is_some() && has_path_separator {
-        return resolve_candidate(requested_path, codegotchi_executable, true);
+        return resolve_candidate(requested_path, codegotchi_executable, harness);
     }
 
     let path = env::var_os("PATH").ok_or_else(|| {
-        LauncherError::message("could not locate Codex: PATH is not set and CODEGOTCHI_REAL_CODEX is not an executable path")
+        LauncherError::message(format!(
+            "could not locate {}: PATH is not set and {override_key} is not an executable path",
+            harness.command()
+        ))
     })?;
     let mut saw_non_executable = false;
     for directory in env::split_paths(&path) {
@@ -1004,7 +1043,7 @@ fn resolve_codex(codegotchi_executable: &Path) -> Result<PathBuf, LauncherError>
         if !candidate.exists() {
             continue;
         }
-        match resolve_candidate(&candidate, codegotchi_executable, false) {
+        match resolve_candidate(&candidate, codegotchi_executable, harness) {
             Ok(path) => return Ok(path),
             Err(error) if error.to_string().contains("not executable") => {
                 saw_non_executable = true;
@@ -1014,12 +1053,12 @@ fn resolve_codex(codegotchi_executable: &Path) -> Result<PathBuf, LauncherError>
     }
     if saw_non_executable {
         return Err(LauncherError::message(format!(
-            "Codex candidate `{}` was found in PATH but is not executable",
+            "agent candidate `{}` was found in PATH but is not executable",
             requested.to_string_lossy()
         )));
     }
     Err(LauncherError::message(format!(
-        "Codex `{}` was not found in PATH; set CODEGOTCHI_REAL_CODEX to its executable path",
+        "agent `{}` was not found in PATH; set {override_key} to its executable path",
         requested.to_string_lossy()
     )))
 }
@@ -1027,40 +1066,45 @@ fn resolve_codex(codegotchi_executable: &Path) -> Result<PathBuf, LauncherError>
 fn resolve_candidate(
     candidate: &Path,
     codegotchi_executable: &Path,
-    explicit: bool,
+    harness: Harness,
 ) -> Result<PathBuf, LauncherError> {
+    let label = if harness == Harness::Codex {
+        "Codex"
+    } else {
+        harness.command()
+    };
+    let override_key = harness.executable_override();
     let canonical = match fs::canonicalize(candidate) {
         Ok(path) => path,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Err(LauncherError::message(format!(
-                "Codex candidate {} was not found",
+                "{label} candidate {} was not found",
                 candidate.display()
             )));
         }
         Err(error) => {
             return Err(LauncherError::message(format!(
-                "could not resolve Codex candidate {}: {error}",
+                "could not resolve {label} candidate {}: {error}",
                 candidate.display()
             )));
         }
     };
     if canonical == codegotchi_executable {
-        return Err(LauncherError::message(
-            "CODEGOTCHI_REAL_CODEX resolves to the running CodeGotchi executable; choose the real Codex binary",
-        ));
+        return Err(LauncherError::message(format!(
+            "{override_key} resolves to the running CodeGotchi executable; choose the real {label} binary"
+        )));
     }
     let metadata = fs::metadata(&canonical).map_err(|error| {
         LauncherError::message(format!(
-            "could not inspect Codex candidate {}: {error}",
+            "could not inspect {label} candidate {}: {error}",
             canonical.display()
         ))
     })?;
     if !is_executable_file(&metadata) {
-        let message = format!("Codex candidate {} is not executable", candidate.display());
-        if explicit {
-            return Err(LauncherError::message(message));
-        }
-        return Err(LauncherError::message(message));
+        return Err(LauncherError::message(format!(
+            "{label} candidate {} is not executable",
+            candidate.display()
+        )));
     }
     Ok(canonical)
 }
@@ -1085,7 +1129,7 @@ struct LaunchPaths {
     codex_home: PathBuf,
 }
 
-fn resolve_launch_paths() -> Result<LaunchPaths, LauncherError> {
+fn resolve_launch_paths(harness: Harness) -> Result<LaunchPaths, LauncherError> {
     let current_directory = env::current_dir().map_err(|error| {
         LauncherError::message(format!("could not read the current directory: {error}"))
     })?;
@@ -1114,15 +1158,19 @@ fn resolve_launch_paths() -> Result<LaunchPaths, LauncherError> {
         .filter(|path| !path.is_empty())
         .map(|path| PathBuf::from(path).join(RUNTIME_DIRECTORY_NAME))
         .unwrap_or_else(|| state_directory.clone());
-    let codex_home = env::var_os("CODEX_HOME")
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| home.as_ref().map(|home| home.join(".codex")))
-        .ok_or_else(|| {
-            LauncherError::message(
-                "HOME is required when CODEX_HOME is not set for the Codex profile",
-            )
-        })?;
+    let codex_home = if harness == Harness::Codex {
+        env::var_os("CODEX_HOME")
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| home.as_ref().map(|home| home.join(".codex")))
+            .ok_or_else(|| {
+                LauncherError::message(
+                    "HOME is required when CODEX_HOME is not set for the Codex profile",
+                )
+            })?
+    } else {
+        PathBuf::new()
+    };
     Ok(LaunchPaths {
         repository_root,
         repository_id,
@@ -1785,9 +1833,10 @@ mod tests {
         assert_eq!(
             parsed,
             LaunchRequest {
+                harness: crate::harness::Harness::Codex,
                 ui_mode: UiMode::Terminal,
                 terminal_theme: TerminalThemePreset::Auto,
-                trailing_codex_arguments: os(&["--model", "gpt-5.6"]),
+                trailing_arguments: os(&["--model", "gpt-5.6"]),
             }
         );
     }
@@ -1798,7 +1847,7 @@ mod tests {
 
         assert_eq!(parsed.ui_mode, UiMode::Auto);
         assert_eq!(parsed.terminal_theme, TerminalThemePreset::Auto);
-        assert_eq!(parsed.trailing_codex_arguments, os(&["--search"]));
+        assert_eq!(parsed.trailing_arguments, os(&["--search"]));
     }
 
     #[test]
@@ -1806,11 +1855,11 @@ mod tests {
         let parsed = parse_launch_request(os(&["--", "codex", "--ui", "browser"])).unwrap();
 
         assert_eq!(parsed.ui_mode, UiMode::Auto);
-        assert_eq!(parsed.trailing_codex_arguments, os(&["--ui", "browser"]));
+        assert_eq!(parsed.trailing_arguments, os(&["--ui", "browser"]));
 
         let equals_form = parse_launch_request(os(&["--", "codex", "--ui=browser"])).unwrap();
         assert_eq!(equals_form.ui_mode, UiMode::Auto);
-        assert_eq!(equals_form.trailing_codex_arguments, os(&["--ui=browser"]));
+        assert_eq!(equals_form.trailing_arguments, os(&["--ui=browser"]));
     }
 
     #[test]
@@ -1831,7 +1880,7 @@ mod tests {
         let parsed = parse_launch_request(os(&["--ui=browser", "--", "codex"])).unwrap();
 
         assert_eq!(parsed.ui_mode, UiMode::Browser);
-        assert!(parsed.trailing_codex_arguments.is_empty());
+        assert!(parsed.trailing_arguments.is_empty());
     }
 
     #[test]
@@ -1856,7 +1905,7 @@ mod tests {
             .unwrap_or_else(|error| panic!("--terminal-theme {option}: {error}"));
             assert_eq!(parsed.ui_mode, UiMode::Both);
             assert_eq!(parsed.terminal_theme, expected);
-            assert_eq!(parsed.trailing_codex_arguments, os(&["--ui", "browser"]));
+            assert_eq!(parsed.trailing_arguments, os(&["--ui", "browser"]));
 
             let equals = parse_launch_request([
                 OsString::from(format!("--terminal-theme={option}")),
@@ -1966,8 +2015,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_or_non_codex_agent() {
-        for arguments in [os(&["--"]), os(&["--", "claude"])] {
+    fn rejects_missing_or_unknown_agent() {
+        for arguments in [os(&["--"]), os(&["--", "unknown-agent"])] {
             let error = parse_launch_request(arguments).unwrap_err().to_string();
 
             assert!(error.contains("unsupported agent"), "{error}");

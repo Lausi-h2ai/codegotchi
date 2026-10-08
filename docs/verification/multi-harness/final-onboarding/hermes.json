@@ -1,0 +1,24 @@
+{
+  "harness": "hermes",
+  "binarySha256": "81951d30ed537935f2fad76446c64294156dee392fa274a7f17ab92f0d9d53a6",
+  "scope": "Full, dark xterm, local model, disposable home",
+  "syntheticAllowlist": false,
+  "nativeHookCommandsManuallyInspected": true,
+  "keyboardApprovedHooks": [
+    "on_session_start",
+    "on_session_end",
+    "pre_tool_call",
+    "post_tool_call"
+  ],
+  "telemetry": "No thanks selected with Return",
+  "promptExact": "CG_INPUT_EDIT_OK",
+  "sentinelContents": "CG_INPUT_EDIT_OK",
+  "strictDenialInNativeToolResult": true,
+  "strictSentinelAbsent": true,
+  "workPoints": 11,
+  "eventCount": 8,
+  "activityAfterTurns": "WaitingForUser",
+  "normalExitCode": 0,
+  "runtimeCleaned": true,
+  "passed": true
+}

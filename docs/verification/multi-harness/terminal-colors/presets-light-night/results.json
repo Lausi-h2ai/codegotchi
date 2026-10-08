@@ -1,0 +1,22 @@
+[
+  {
+    "harness": "omp",
+    "binarySha256": "9220dcd6c4c2d56f803bac0d8c8b5ac1b027c700dc03965a16b00d5509123fcc",
+    "ui": "both",
+    "background": "light",
+    "terminalTheme": "night",
+    "editedPromptExact": true,
+    "multilinePasteExact": true,
+    "editingAtAllSizes": true,
+    "focusReturn": true,
+    "strictDenialInNativeToolResult": true,
+    "strictSentinelAbsent": true,
+    "foodDragChangedAuthoritativeState": true,
+    "keyboardAfterCare": true,
+    "normalExitCode": 0,
+    "runtimeCleaned": true,
+    "workPoints": 24,
+    "events": 15,
+    "passed": true
+  }
+]

@@ -598,7 +598,9 @@ async fn authenticated_loopback_http_is_authoritative_and_replay_safe() {
 async fn debug_neglect_drains_energy_and_a_nap_recovers_it_without_freezing_the_clock() {
     let db = TestDatabase::new();
     let runtime = runtime(&db);
-    let server = RunningServer::start(runtime.clone(), TOKEN).await.unwrap();
+    let server = RunningServer::start_with_debug(runtime.clone(), TOKEN)
+        .await
+        .unwrap();
 
     let neglect = debug_request(&server, TOKEN, "/api/v1/debug/neglect").await;
     assert_eq!(neglect.status, 200);
@@ -658,7 +660,9 @@ async fn debug_neglect_drains_energy_and_a_nap_recovers_it_without_freezing_the_
 async fn debug_restock_restores_the_unlimited_inventory_and_persists() {
     let db = TestDatabase::new();
     let runtime = runtime(&db);
-    let server = RunningServer::start(runtime.clone(), TOKEN).await.unwrap();
+    let server = RunningServer::start_with_debug(runtime.clone(), TOKEN)
+        .await
+        .unwrap();
 
     // Consume a few items through the normal care path first.
     for action in [30_u128, 31, 32, 33] {
@@ -711,14 +715,24 @@ async fn debug_restock_restores_the_unlimited_inventory_and_persists() {
 }
 
 #[tokio::test]
-async fn debug_restock_without_the_guard_header_is_forbidden() {
+async fn request_headers_cannot_enable_debug_actions_on_a_normal_server() {
     let db = TestDatabase::new();
     let runtime = runtime(&db);
     let server = RunningServer::start(runtime, TOKEN).await.unwrap();
 
-    let response = request(&server, "POST", "/api/v1/debug/restock", Some(TOKEN), b"{}").await;
-    assert_eq!(response.status, 403);
-    assert_eq!(response.body["error"]["code"], "debug_disabled");
+    for route in [
+        "/api/v1/debug/restock",
+        "/api/v1/debug/neglect",
+        "/api/v1/debug/generate-poop",
+    ] {
+        let response = request(&server, "POST", route, Some(TOKEN), b"{}").await;
+        assert_eq!(response.status, 403, "{route}");
+        assert_eq!(response.body["error"]["code"], "debug_disabled");
+
+        let spoofed = debug_request(&server, TOKEN, route).await;
+        assert_eq!(spoofed.status, 403, "{route} with legacy debug header");
+        assert_eq!(spoofed.body["error"]["code"], "debug_disabled");
+    }
 
     server.shutdown().await.unwrap();
 }

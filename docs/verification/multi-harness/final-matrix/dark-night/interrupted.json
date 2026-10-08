@@ -1,0 +1,6 @@
+{
+  "artifactDirectory": "final-matrix/dark-night",
+  "exitCode": 143,
+  "status": "Interrupted by SIGTERM before complete results; no reported assertion failure. Cause not established. Partial artifacts excluded from acceptance count. Full isolated retry passed.",
+  "retryDirectory": "final-matrix-night-retry/dark-night"
+}

@@ -213,7 +213,7 @@ async fn strict_denial_is_verified_fail_open_and_recoverable_through_normal_care
     )
     .expect("runtime starts");
     let (_, tick_receiver) = mpsc::unbounded_channel();
-    let server = RunningServer::start_with_maintenance_trigger(
+    let server = RunningServer::start_with_debug_and_maintenance_trigger(
         runtime.clone(),
         "task-4-strict-token",
         tick_receiver,

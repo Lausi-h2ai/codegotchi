@@ -1,0 +1,14 @@
+{
+  "harness": "omp",
+  "binarySha256": "81951d30ed537935f2fad76446c64294156dee392fa274a7f17ab92f0d9d53a6",
+  "firstUseSetupBypassed": false,
+  "providerLoginSkippedWithEscape": true,
+  "allFiveSetupStepsTraversedWithPhysicalKeys": true,
+  "glyphMode": "unicode",
+  "composer": "Status Band",
+  "nativeTheme": "Match terminal",
+  "exactSentinelContents": "CG_INPUT_EDIT_OK",
+  "runtimeCleaned": true,
+  "scope": "dark full-size setup with local model; provider OAuth is not covered",
+  "normalExitCode": 0
+}

@@ -7,3 +7,12 @@
 /.superpowers/
 .DS_Store
 *:Zone.Identifier
+__pycache__/
+
+# Local marketing, video, and demo output.
+/artifacts/
+
+# Generated verification captures; keep the small JSON/Markdown summaries.
+/docs/verification/multi-harness/**/*.png
+/docs/verification/multi-harness/**/*.log
+/docs/verification/multi-harness/**/*.txt

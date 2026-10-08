@@ -1,0 +1,506 @@
+[
+  {
+    "harness": "pi",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "idle",
+    "activity": "•IdleWandering / walking",
+    "artifact": "browser-pi-desktop-idle.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "idle",
+    "activity": "•IdleWandering / walking",
+    "artifact": "browser-pi-mobile-idle.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "thinking",
+    "activity": "⌁ThinkingWorking",
+    "artifact": "browser-pi-desktop-thinking.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "thinking",
+    "activity": "⌁ThinkingWorking",
+    "artifact": "browser-pi-mobile-thinking.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "working",
+    "activity": "⌁TestingWorking",
+    "artifact": "browser-pi-desktop-working.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "working",
+    "activity": "⌁TestingWorking",
+    "artifact": "browser-pi-mobile-working.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "success",
+    "activity": "✦CelebratingCelebrating",
+    "artifact": "browser-pi-desktop-success.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "success",
+    "activity": "✦CelebratingCelebrating",
+    "artifact": "browser-pi-mobile-success.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "failure",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-pi-desktop-failure.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "failure",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-pi-mobile-failure.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "waiting",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-pi-desktop-waiting.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "waiting",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-pi-mobile-waiting.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "blocked",
+    "activity": "!RefusingUpset",
+    "artifact": "browser-pi-desktop-blocked.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "blocked",
+    "activity": "!RefusingUpset",
+    "artifact": "browser-pi-mobile-blocked.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "idle",
+    "activity": "•IdleWandering / walking",
+    "artifact": "browser-claude-desktop-idle.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "idle",
+    "activity": "•IdleWandering / walking",
+    "artifact": "browser-claude-mobile-idle.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "thinking",
+    "activity": "⌁ThinkingWorking",
+    "artifact": "browser-claude-desktop-thinking.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "thinking",
+    "activity": "⌁ThinkingWorking",
+    "artifact": "browser-claude-mobile-thinking.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "working",
+    "activity": "⌁TestingWorking",
+    "artifact": "browser-claude-desktop-working.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "working",
+    "activity": "⌁TestingWorking",
+    "artifact": "browser-claude-mobile-working.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "success",
+    "activity": "✦CelebratingCelebrating",
+    "artifact": "browser-claude-desktop-success.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "success",
+    "activity": "✦CelebratingCelebrating",
+    "artifact": "browser-claude-mobile-success.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "failure",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-claude-desktop-failure.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "failure",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-claude-mobile-failure.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "waiting",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-claude-desktop-waiting.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "waiting",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-claude-mobile-waiting.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "blocked",
+    "activity": "!RefusingUpset",
+    "artifact": "browser-claude-desktop-blocked.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "blocked",
+    "activity": "!RefusingUpset",
+    "artifact": "browser-claude-mobile-blocked.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "idle",
+    "activity": "•IdleWandering / walking",
+    "artifact": "browser-omp-desktop-idle.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "idle",
+    "activity": "•IdleWandering / walking",
+    "artifact": "browser-omp-mobile-idle.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "thinking",
+    "activity": "⌁ThinkingWorking",
+    "artifact": "browser-omp-desktop-thinking.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "thinking",
+    "activity": "⌁ThinkingWorking",
+    "artifact": "browser-omp-mobile-thinking.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "working",
+    "activity": "⌁TestingWorking",
+    "artifact": "browser-omp-desktop-working.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "working",
+    "activity": "⌁TestingWorking",
+    "artifact": "browser-omp-mobile-working.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "success",
+    "activity": "✦CelebratingCelebrating",
+    "artifact": "browser-omp-desktop-success.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "success",
+    "activity": "✦CelebratingCelebrating",
+    "artifact": "browser-omp-mobile-success.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "failure",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-omp-desktop-failure.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "failure",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-omp-mobile-failure.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "waiting",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-omp-desktop-waiting.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "waiting",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-omp-mobile-waiting.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "blocked",
+    "activity": "!RefusingUpset",
+    "artifact": "browser-omp-desktop-blocked.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "blocked",
+    "activity": "!RefusingUpset",
+    "artifact": "browser-omp-mobile-blocked.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "idle",
+    "activity": "•IdleWandering / walking",
+    "artifact": "browser-hermes-desktop-idle.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "idle",
+    "activity": "•IdleWandering / walking",
+    "artifact": "browser-hermes-mobile-idle.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "thinking",
+    "activity": "⌁ThinkingWorking",
+    "artifact": "browser-hermes-desktop-thinking.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "thinking",
+    "activity": "⌁ThinkingWorking",
+    "artifact": "browser-hermes-mobile-thinking.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "working",
+    "activity": "⌁TestingWorking",
+    "artifact": "browser-hermes-desktop-working.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "working",
+    "activity": "⌁TestingWorking",
+    "artifact": "browser-hermes-mobile-working.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "success",
+    "activity": "✦CelebratingCelebrating",
+    "artifact": "browser-hermes-desktop-success.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "success",
+    "activity": "✦CelebratingCelebrating",
+    "artifact": "browser-hermes-mobile-success.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "failure",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-hermes-desktop-failure.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "failure",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-hermes-mobile-failure.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "waiting",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-hermes-desktop-waiting.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "waiting",
+    "activity": "!UpsetUpset",
+    "artifact": "browser-hermes-mobile-waiting.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "desktop",
+    "width": 1280,
+    "height": 900,
+    "state": "blocked",
+    "activity": "!RefusingUpset",
+    "artifact": "browser-hermes-desktop-blocked.png"
+  },
+  {
+    "harness": "hermes",
+    "layout": "mobile",
+    "width": 390,
+    "height": 844,
+    "state": "blocked",
+    "activity": "!RefusingUpset",
+    "artifact": "browser-hermes-mobile-blocked.png"
+  }
+]

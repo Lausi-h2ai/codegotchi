@@ -1,0 +1,85 @@
+{
+  "requiresManualInspection": true,
+  "sheets": [
+    {
+      "sheet": "pi-layouts-sheet.png",
+      "sources": [
+        "pi-full-edited.png",
+        "pi-compact-edited.png",
+        "pi-minimal-edited.png",
+        "pi-narrow-edited.png"
+      ]
+    },
+    {
+      "sheet": "pi-states-sheet.png",
+      "sources": [
+        "pi-edited.png",
+        "pi-response.png",
+        "pi-history.png",
+        "pi-strict-response.png",
+        "pi-care-after.png",
+        "pi-care-keyboard-response.png"
+      ]
+    },
+    {
+      "sheet": "omp-layouts-sheet.png",
+      "sources": [
+        "omp-full-edited.png",
+        "omp-compact-edited.png",
+        "omp-minimal-edited.png",
+        "omp-narrow-edited.png"
+      ]
+    },
+    {
+      "sheet": "omp-states-sheet.png",
+      "sources": [
+        "omp-edited.png",
+        "omp-response.png",
+        "omp-history.png",
+        "omp-strict-response.png",
+        "omp-care-after.png",
+        "omp-care-keyboard-response.png"
+      ]
+    },
+    {
+      "sheet": "claude-layouts-sheet.png",
+      "sources": [
+        "claude-full-edited.png",
+        "claude-compact-edited.png",
+        "claude-minimal-edited.png",
+        "claude-narrow-edited.png"
+      ]
+    },
+    {
+      "sheet": "claude-states-sheet.png",
+      "sources": [
+        "claude-edited.png",
+        "claude-response.png",
+        "claude-history.png",
+        "claude-strict-response.png",
+        "claude-care-after.png",
+        "claude-care-keyboard-response.png"
+      ]
+    },
+    {
+      "sheet": "hermes-layouts-sheet.png",
+      "sources": [
+        "hermes-full-edited.png",
+        "hermes-compact-edited.png",
+        "hermes-minimal-edited.png",
+        "hermes-narrow-edited.png"
+      ]
+    },
+    {
+      "sheet": "hermes-states-sheet.png",
+      "sources": [
+        "hermes-edited.png",
+        "hermes-response.png",
+        "hermes-history.png",
+        "hermes-strict-response.png",
+        "hermes-care-after.png",
+        "hermes-care-keyboard-response.png"
+      ]
+    }
+  ]
+}

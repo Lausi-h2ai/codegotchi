@@ -1,0 +1,359 @@
+[
+  {
+    "harness": "omp",
+    "op": "start",
+    "ui": "both"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-startup.png"
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "CG_INPUT_EDIT_OX"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Left"
+    ]
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "K"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "edited"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-edited.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "response"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-response.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Up"
+    ]
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "history"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-history.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Down"
+    ]
+  },
+  {
+    "harness": "omp",
+    "op": "paste",
+    "text": "CG_PASTE_LINE_ONE\nCG_PASTE_LINE_TWO"
+  },
+  {
+    "harness": "omp",
+    "op": "resize",
+    "cols": 100,
+    "rows": 30,
+    "name": "compact-composer"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-compact-composer.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "O"
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "compact-edited"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-compact-edited.png"
+  },
+  {
+    "harness": "omp",
+    "op": "resize",
+    "cols": 80,
+    "rows": 21,
+    "name": "minimal-composer"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-minimal-composer.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "O"
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "minimal-edited"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-minimal-edited.png"
+  },
+  {
+    "harness": "omp",
+    "op": "resize",
+    "cols": 64,
+    "rows": 45,
+    "name": "narrow-composer"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-narrow-composer.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "O"
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "narrow-edited"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-narrow-edited.png"
+  },
+  {
+    "harness": "omp",
+    "op": "resize",
+    "cols": 120,
+    "rows": 45,
+    "name": "full-composer"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-full-composer.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "O"
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "full-edited"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-full-edited.png"
+  },
+  {
+    "harness": "omp",
+    "op": "focus"
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "focus-return"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-focus-return.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "paste-response"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-paste-response.png"
+  },
+  {
+    "harness": "omp",
+    "op": "strict"
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "CG_STRICT_PROBE"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "strict-response"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-strict-response.png"
+  },
+  {
+    "harness": "omp",
+    "op": "resize",
+    "cols": 80,
+    "rows": 21,
+    "name": "care-before"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-care-before.png"
+  },
+  {
+    "harness": "omp",
+    "op": "feed",
+    "col": 11,
+    "row": 19,
+    "cols": 80,
+    "rows": 21
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "care-after"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-care-after.png"
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "CG_CARE_PROBE"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "care-keyboard-response"
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-care-keyboard-response.png"
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "/quit"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  }
+]

@@ -3,6 +3,8 @@ pub mod classify;
 pub mod cli;
 pub mod codex_hook;
 pub mod codex_profile;
+pub mod harness;
+pub mod harness_hook;
 pub mod launcher;
 pub mod persistence;
 pub mod protocol;
@@ -18,6 +20,7 @@ pub use codex_hook::{
     send_debug_neglect_to_runtime, send_event_to_runtime, send_mode_to_runtime,
     send_name_to_runtime, translate_hook, translate_hook_json,
 };
+pub use codex_profile::CodexInvocation as AgentInvocation;
 pub use codex_profile::{CodexInvocation, PersistentCodexProfile, PersistentCodexProfileGuard};
 pub use launcher::{LaunchRequest, LauncherError, UiMode, ValidatedLaunch, parse_launch_request};
 pub use persistence::{PersistenceError, SQLITE_SCHEMA_VERSION, SqliteStore};

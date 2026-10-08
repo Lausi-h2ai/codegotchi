@@ -142,6 +142,7 @@ fn launch(environment: &TestEnvironment, label: &str) -> RunningLauncher {
         .env("PATH", "/usr/local/bin:/usr/bin:/bin")
         .env("CODEGOTCHI_REAL_CODEX", fake_codex())
         .env("CODEGOTCHI_BROWSER", "none")
+        .env("CODEGOTCHI_ENABLE_DEBUG", "1")
         .env("FAKE_CODEX_LOG", &environment.log)
         .env("FAKE_STDIN_FILE", &stdin_path)
         .env("FAKE_READY_FILE", &ready_path)

@@ -1,0 +1,25 @@
+[
+  {
+    "harness": "pi",
+    "ui": "both",
+    "background": "dark",
+    "editedPromptExact": true,
+    "multilinePasteExact": true,
+    "editingAtAllSizes": true,
+    "focusReturn": true,
+    "strictDenialInNativeToolResult": true,
+    "strictSentinelAbsent": true,
+    "foodDragChangedAuthoritativeState": true,
+    "keyboardAfterCare": true,
+    "normalExitCode": 0,
+    "runtimeCleaned": true,
+    "workPoints": 24,
+    "events": 15,
+    "passed": true
+  },
+  {
+    "harness": "omp",
+    "passed": false,
+    "error": "CalledProcessError: Command '['import', '-window', '6291468', '/home/laurent/codegotchi/docs/verification/multi-harness/keyboard/omp-startup.png']' returned non-zero exit status 15."
+  }
+]

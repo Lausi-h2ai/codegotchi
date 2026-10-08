@@ -46,6 +46,68 @@ const MAX_ALTERNATE_SCREEN_HISTORY: usize = 128;
 const MAX_TRACKED_SEQUENCE: usize = 128;
 const MAX_PENDING_QUERY_RESPONSES: usize = 32;
 
+/// The physical terminal background cached by the hosted input adapter.
+///
+/// The child PTY is not connected directly to the user's terminal, so an
+/// OSC 11 query from a hosted CLI has to be answered by the compositor. Keep
+/// the components at the terminal's four-hex-digit precision; this is the
+/// representation used by xterm-compatible OSC 11 replies.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct TerminalBackground {
+    red: u16,
+    green: u16,
+    blue: u16,
+}
+
+impl TerminalBackground {
+    pub(crate) const DARK: Self = Self {
+        red: 0,
+        green: 0,
+        blue: 0,
+    };
+
+    pub(crate) fn osc11_reply(self) -> Vec<u8> {
+        format!(
+            "\x1b]11;rgb:{:04x}/{:04x}/{:04x}\x1b\\",
+            self.red, self.green, self.blue
+        )
+        .into_bytes()
+    }
+
+    pub(crate) fn from_rgb_components(red: &[u8], green: &[u8], blue: &[u8]) -> Option<Self> {
+        Some(Self {
+            red: parse_hex_component(red)?,
+            green: parse_hex_component(green)?,
+            blue: parse_hex_component(blue)?,
+        })
+    }
+
+    pub(crate) const fn components(self) -> (u16, u16, u16) {
+        (self.red, self.green, self.blue)
+    }
+
+    pub(crate) const fn from_components(red: u16, green: u16, blue: u16) -> Self {
+        Self { red, green, blue }
+    }
+}
+
+fn parse_hex_component(component: &[u8]) -> Option<u16> {
+    if component.is_empty() || component.len() > 4 {
+        return None;
+    }
+    let value = component.iter().try_fold(0u32, |value, byte| {
+        let digit = match byte {
+            b'0'..=b'9' => byte - b'0',
+            b'a'..=b'f' => byte - b'a' + 10,
+            b'A'..=b'F' => byte - b'A' + 10,
+            _ => return None,
+        };
+        Some(value.saturating_mul(16).saturating_add(u32::from(digit)))
+    })?;
+    let denominator = (1u32 << (component.len() * 4)).saturating_sub(1);
+    Some((u64::from(value) * u64::from(u16::MAX) / u64::from(denominator)) as u16)
+}
+
 #[derive(Clone, Copy, Debug)]
 enum TrackerState {
     Ground,
@@ -152,6 +214,7 @@ impl FocusTracker {
 #[derive(Debug, Default)]
 struct TerminalQueryCallbacks {
     responses: VecDeque<Vec<u8>>,
+    background: Option<TerminalBackground>,
 }
 
 impl TerminalQueryCallbacks {
@@ -192,6 +255,12 @@ impl Callbacks for TerminalQueryCallbacks {
             self.push(format!("\x1b[{};{}R", row + 1, column + 1).into_bytes());
         } else if c == 'c' && (params.is_empty() || (params.len() == 1 && params[0] == [0])) {
             self.push(b"\x1b[?1;2c".to_vec());
+        }
+    }
+
+    fn unhandled_osc(&mut self, _screen: &mut vt100::Screen, params: &[&[u8]]) {
+        if let (Some(background), [b"11", b"?"]) = (self.background, params) {
+            self.push(background.osc11_reply());
         }
     }
 }
@@ -273,12 +342,20 @@ impl CodexScreen {
                 rows.max(1),
                 cols.max(1),
                 scrollback.min(MAX_SCROLLBACK),
-                TerminalQueryCallbacks::default(),
+                TerminalQueryCallbacks {
+                    responses: VecDeque::new(),
+                    background: None,
+                },
             ),
             focus_tracker: FocusTracker::default(),
             alternate_history: VecDeque::new(),
             alternate_history_offset: 0,
         }
+    }
+
+    /// Updates the cached physical background used for child OSC 11 replies.
+    pub(crate) fn set_terminal_background(&mut self, background: TerminalBackground) {
+        self.parser.callbacks_mut().background = Some(background);
     }
 
     /// Feeds an arbitrary PTY output chunk to both the VT parser and the
@@ -537,5 +614,33 @@ impl From<MouseProtocolEncoding> for MouseEncoding {
             MouseProtocolEncoding::Utf8 => Self::Utf8,
             MouseProtocolEncoding::Sgr => Self::Sgr,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CodexScreen, TerminalBackground};
+
+    #[test]
+    fn hosted_screen_answers_split_osc11_queries_with_measured_background() {
+        let mut screen = CodexScreen::new(4, 20);
+        screen.set_terminal_background(
+            TerminalBackground::from_rgb_components(b"ffff", b"ffff", b"ffff")
+                .expect("valid RGB components"),
+        );
+        assert!(screen.process(b"\x1b]11;?").is_empty());
+        assert_eq!(screen.process(b"\x07"), b"\x1b]11;rgb:ffff/ffff/ffff\x1b\\");
+    }
+
+    #[test]
+    fn osc_color_components_expand_to_full_terminal_precision() {
+        assert_eq!(
+            TerminalBackground::from_rgb_components(b"f", b"80", b"abc"),
+            Some(TerminalBackground {
+                red: 0xffff,
+                green: 0x8080,
+                blue: 0xabca,
+            })
+        );
     }
 }

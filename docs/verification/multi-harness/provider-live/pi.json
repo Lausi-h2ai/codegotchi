@@ -1,0 +1,40 @@
+{
+  "actions": [
+    "live_turn_1",
+    "native_tool_request",
+    "native_tool_permission_not_applicable",
+    "interruption_request",
+    "follow_up_after_interrupt",
+    "long_session_turn_2",
+    "long_session_turn_3",
+    "long_session_turn_4",
+    "native_continue_resume"
+  ],
+  "frames": [
+    "pi-startup.png",
+    "pi-turn-1.png",
+    "pi-tool-result.png",
+    "pi-interrupted.png",
+    "pi-after-interruption.png",
+    "pi-long-session.png",
+    "pi-resumed.png"
+  ],
+  "harness": "pi",
+  "initial_transcript_sha256": "18a0ec9dcc40cf2cc6a1e2972ba04452c2bd67fdf3ca8a1245304bcb735834b0",
+  "interruption_abort_indication": true,
+  "interruption_backend_activity": "thinking",
+  "interruption_kept_process_alive": true,
+  "interruption_sent": true,
+  "interruption_stream_observed": true,
+  "minimum_native_tool_result": true,
+  "minimum_provider_conversation": true,
+  "model": "gpt-5.5",
+  "native_permission_approval_sent": false,
+  "native_permission_prompt_observed": false,
+  "native_permission_status": "not_applicable",
+  "process_exit_code": 0,
+  "resume_exit_code": 0,
+  "shared_session_id": true,
+  "status": "passed",
+  "transcript_sha256": "6f8f3eaa52ac23f7546c553e7903eade51e84ed373110e0624a3394219ece05a"
+}

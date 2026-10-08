@@ -1,0 +1,80 @@
+[
+  {
+    "harness": "pi",
+    "layout": "full",
+    "artifact": "actual-pi-full.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "compact",
+    "artifact": "actual-pi-compact.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "minimal",
+    "artifact": "actual-pi-minimal.png"
+  },
+  {
+    "harness": "pi",
+    "layout": "narrow-full",
+    "artifact": "actual-pi-narrow-full.png"
+  },
+  {
+    "harness": "pi",
+    "activity": "Idle",
+    "sessionCount": 1,
+    "eventCount": 1
+  },
+  {
+    "harness": "claude",
+    "layout": "full",
+    "artifact": "actual-claude-full.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "compact",
+    "artifact": "actual-claude-compact.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "minimal",
+    "artifact": "actual-claude-minimal.png"
+  },
+  {
+    "harness": "claude",
+    "layout": "narrow-full",
+    "artifact": "actual-claude-narrow-full.png"
+  },
+  {
+    "harness": "claude",
+    "activity": "Idle",
+    "sessionCount": 0,
+    "eventCount": 0
+  },
+  {
+    "harness": "omp",
+    "layout": "full",
+    "artifact": "actual-omp-full.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "compact",
+    "artifact": "actual-omp-compact.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "minimal",
+    "artifact": "actual-omp-minimal.png"
+  },
+  {
+    "harness": "omp",
+    "layout": "narrow-full",
+    "artifact": "actual-omp-narrow-full.png"
+  },
+  {
+    "harness": "omp",
+    "activity": "Idle",
+    "sessionCount": 1,
+    "eventCount": 1
+  }
+]

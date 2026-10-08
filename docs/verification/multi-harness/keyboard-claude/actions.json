@@ -1,0 +1,447 @@
+[
+  {
+    "harness": "claude",
+    "op": "start",
+    "ui": "both"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-startup.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "onboarding-3"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-onboarding-3.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Up",
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "onboarding-6"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-onboarding-6.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "onboarding-9"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-onboarding-9.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Down",
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "onboarding-12"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-onboarding-12.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "CG_INPUT_EDIT_OX"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Left"
+    ]
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "K"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "edited"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-edited.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "response"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-response.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Up"
+    ]
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "history"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-history.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Down"
+    ]
+  },
+  {
+    "harness": "claude",
+    "op": "paste",
+    "text": "CG_PASTE_LINE_ONE\nCG_PASTE_LINE_TWO"
+  },
+  {
+    "harness": "claude",
+    "op": "resize",
+    "cols": 100,
+    "rows": 30,
+    "name": "compact-composer"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-compact-composer.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "O"
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "compact-edited"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-compact-edited.png"
+  },
+  {
+    "harness": "claude",
+    "op": "resize",
+    "cols": 80,
+    "rows": 21,
+    "name": "minimal-composer"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-minimal-composer.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "O"
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "minimal-edited"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-minimal-edited.png"
+  },
+  {
+    "harness": "claude",
+    "op": "resize",
+    "cols": 64,
+    "rows": 45,
+    "name": "narrow-composer"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-narrow-composer.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "O"
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "narrow-edited"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-narrow-edited.png"
+  },
+  {
+    "harness": "claude",
+    "op": "resize",
+    "cols": 120,
+    "rows": 45,
+    "name": "full-composer"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-full-composer.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "O"
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "full-edited"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-full-edited.png"
+  },
+  {
+    "harness": "claude",
+    "op": "focus"
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "focus-return"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-focus-return.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "paste-response"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-paste-response.png"
+  },
+  {
+    "harness": "claude",
+    "op": "strict"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "CG_STRICT_PROBE"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "ctrl+o"
+    ]
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "strict-response"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-strict-response.png"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "ctrl+o"
+    ]
+  },
+  {
+    "harness": "claude",
+    "op": "resize",
+    "cols": 80,
+    "rows": 21,
+    "name": "care-before"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-care-before.png"
+  },
+  {
+    "harness": "claude",
+    "op": "feed",
+    "col": 11,
+    "row": 19,
+    "cols": 80,
+    "rows": 21
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "care-after"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-care-after.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "CG_CARE_PROBE"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "claude",
+    "op": "capture",
+    "name": "care-keyboard-response"
+  },
+  {
+    "harness": "claude",
+    "action": "capture",
+    "artifact": "claude-care-keyboard-response.png"
+  },
+  {
+    "harness": "claude",
+    "op": "text",
+    "text": "/exit"
+  },
+  {
+    "harness": "claude",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  }
+]

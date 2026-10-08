@@ -1,0 +1,120 @@
+[
+  {
+    "harness": "pi",
+    "ui": "terminal",
+    "background": "dark",
+    "binarySha256": "9220dcd6c4c2d56f803bac0d8c8b5ac1b027c700dc03965a16b00d5509123fcc",
+    "elapsedSeconds": 47.65,
+    "model": "scripted loopback; no authenticated provider request",
+    "nativeApproval": "not_applicable_pi_has_no_native_permission_popups",
+    "approvalPromptCaptured": false,
+    "approvalResultSeen": null,
+    "interruption": {
+      "longResponseStarted": true,
+      "longResponseInterrupted": true,
+      "longResponseCompletedAtEscape": false,
+      "physicalEscapeSent": true,
+      "persistedAbortedAssistantResponse": true,
+      "backendAfterEscape": {
+        "activity": "WaitingForUser",
+        "eventCount": 7,
+        "workPoints": 7
+      },
+      "backendAfterFollowup": {
+        "activity": "WaitingForUser",
+        "eventCount": 9,
+        "workPoints": 8
+      },
+      "nativeStopHookSettled": true,
+      "nativeStopHookCoverageGap": null
+    },
+    "sustainedTurnsRequested": 12,
+    "sustainedTurnsBeforeResume": 12,
+    "sustainedTurnsAfterResume": 13,
+    "acknowledgedTurnMarkers": [
+      "CG_TURN_1",
+      "CG_TURN_10",
+      "CG_TURN_11",
+      "CG_TURN_12",
+      "CG_TURN_13",
+      "CG_TURN_2",
+      "CG_TURN_3",
+      "CG_TURN_4",
+      "CG_TURN_5",
+      "CG_TURN_6",
+      "CG_TURN_7",
+      "CG_TURN_8",
+      "CG_TURN_9"
+    ],
+    "resumeContextSeen": true,
+    "resumeSessionId": null,
+    "requestCount": 18,
+    "workPoints": 22,
+    "eventCount": 39,
+    "firstExitCode": 0,
+    "secondExitCode": 0,
+    "runtimeCleaned": true,
+    "serverErrors": [],
+    "passed": true
+  },
+  {
+    "harness": "claude",
+    "ui": "terminal",
+    "background": "dark",
+    "binarySha256": "9220dcd6c4c2d56f803bac0d8c8b5ac1b027c700dc03965a16b00d5509123fcc",
+    "elapsedSeconds": 72.63,
+    "model": "scripted loopback; no authenticated provider request",
+    "nativeApproval": "approved_with_native_prompt",
+    "approvalPromptCaptured": true,
+    "approvalResultSeen": true,
+    "interruption": {
+      "longResponseStarted": true,
+      "longResponseInterrupted": true,
+      "longResponseCompletedAtEscape": false,
+      "physicalEscapeSent": true,
+      "persistedAbortedAssistantResponse": true,
+      "backendAfterEscape": {
+        "activity": {
+          "Active": "thinking"
+        },
+        "eventCount": 6,
+        "workPoints": 7
+      },
+      "backendAfterFollowup": {
+        "activity": "WaitingForUser",
+        "eventCount": 8,
+        "workPoints": 8
+      },
+      "nativeStopHookSettled": false,
+      "nativeStopHookCoverageGap": "The harness abort record is real, but CodeGotchi activity remained {\"Active\": \"thinking\"} until the follow-up; the native interrupt has no directly observed stop hook in this probe."
+    },
+    "sustainedTurnsRequested": 12,
+    "sustainedTurnsBeforeResume": 12,
+    "sustainedTurnsAfterResume": 13,
+    "acknowledgedTurnMarkers": [
+      "CG_TURN_1",
+      "CG_TURN_10",
+      "CG_TURN_11",
+      "CG_TURN_12",
+      "CG_TURN_13",
+      "CG_TURN_2",
+      "CG_TURN_3",
+      "CG_TURN_4",
+      "CG_TURN_5",
+      "CG_TURN_6",
+      "CG_TURN_7",
+      "CG_TURN_8",
+      "CG_TURN_9"
+    ],
+    "resumeContextSeen": true,
+    "resumeSessionId": "4876f55b-11a8-4ded-9c1e-1ebd333ea791",
+    "requestCount": 29,
+    "workPoints": 22,
+    "eventCount": 38,
+    "firstExitCode": 0,
+    "secondExitCode": 0,
+    "runtimeCleaned": true,
+    "serverErrors": [],
+    "passed": true
+  }
+]

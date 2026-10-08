@@ -144,6 +144,10 @@ pub fn hook_output_for_payload(payload: &[u8], metadata: &RuntimeMetadataV1) -> 
 }
 
 pub fn run_hook_from_environment() -> HookOutput {
+    run_hook_for_harness(crate::harness::Harness::Codex)
+}
+
+pub fn run_hook_for_harness(harness: crate::harness::Harness) -> HookOutput {
     let payload = match read_bounded_stdin() {
         Ok(payload) => payload,
         Err(_) => return HookOutput::allow(),
@@ -163,15 +167,34 @@ pub fn run_hook_from_environment() -> HookOutput {
     if !runtime_metadata_is_active(&metadata) {
         return HookOutput::allow();
     }
-    let input = match HookInput::from_json(&payload) {
-        Ok(input) => input,
-        Err(_) => return HookOutput::allow(),
+    let input = match crate::harness_hook::parse_input(harness, &payload) {
+        Some(input) => input,
+        None => return HookOutput::allow(),
     };
-    let event = match translate_hook(&input, &metadata) {
+    let event = match crate::harness_hook::translate_input(harness, &input, &metadata) {
         Some(event) => event,
         None => return HookOutput::allow(),
     };
-    let request = match permission_context_for_hook(&input) {
+    if harness == crate::harness::Harness::Hermes {
+        // Hermes emits conversation hooks, not a distinct process-session start.
+        // Register once using a replay-safe ID before applying any turn/tool work.
+        let mut start = event.clone();
+        start.id = Uuid::new_v5(
+            &Uuid::NAMESPACE_URL,
+            format!(
+                "hermes-session|{}|{}",
+                metadata.runtime_id, event.session_id
+            )
+            .as_bytes(),
+        );
+        start.kind = AgentEventKind::SessionStarted;
+        start.activity = Some(ActivityKind::Idle);
+        start.metadata = EventMetadata::default();
+        if send_event_to_runtime(&metadata, &EventIngestRequest::new(start)).is_err() {
+            return HookOutput::allow();
+        }
+    }
+    let request = match crate::harness_hook::permission_context(harness, &input) {
         Some(permission) => EventIngestRequest {
             event,
             permission: Some(permission),

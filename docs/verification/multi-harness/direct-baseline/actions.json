@@ -1,0 +1,107 @@
+[
+  {
+    "harness": "omp",
+    "op": "start",
+    "direct": true
+  },
+  {
+    "harness": "omp",
+    "action": "capture",
+    "artifact": "omp-startup.png"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Escape"
+    ],
+    "wait": 3
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "CG_DIRECT_CONTRAST"
+  },
+  {
+    "harness": "omp",
+    "op": "capture",
+    "name": "composer"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "ctrl+u"
+    ]
+  },
+  {
+    "harness": "omp",
+    "op": "text",
+    "text": "/quit"
+  },
+  {
+    "harness": "omp",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 2
+  },
+  {
+    "harness": "hermes",
+    "op": "start",
+    "direct": true
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-startup.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 8
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "CG_DIRECT_CONTRAST"
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "composer"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-composer.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "ctrl+u"
+    ]
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "/exit"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 3
+  },
+  {
+    "harness": "hermes",
+    "op": "quit"
+  }
+]

@@ -7,7 +7,6 @@ use axum::extract::{
     FromRequest, Request, State, WebSocketUpgrade,
     ws::{Message, WebSocket},
 };
-use axum::http::HeaderMap;
 use axum::http::{StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -103,6 +102,22 @@ impl RunningServer {
             runtime,
             bearer_token.into(),
             false,
+            MaintenanceSchedule::Trigger(ticks),
+        )
+        .await
+    }
+
+    /// Test support for guarded debug actions without wall-clock maintenance.
+    #[doc(hidden)]
+    pub async fn start_with_debug_and_maintenance_trigger(
+        runtime: Arc<AuthoritativeRuntime>,
+        bearer_token: impl Into<String>,
+        ticks: mpsc::UnboundedReceiver<()>,
+    ) -> Result<Self, ServerError> {
+        Self::start_with_options(
+            runtime,
+            bearer_token.into(),
+            true,
             MaintenanceSchedule::Trigger(ticks),
         )
         .await
@@ -339,11 +354,10 @@ async fn name_handler(
 }
 
 async fn debug_neglect_handler(
-    headers: HeaderMap,
     State(state): State<AppState>,
     BoundedJson(_request): BoundedJson<DebugRequest>,
 ) -> Response {
-    if !debug_header_is_present(&headers) {
+    if !state.debug_enabled {
         return error_response(
             StatusCode::FORBIDDEN,
             "debug_disabled",
@@ -357,11 +371,10 @@ async fn debug_neglect_handler(
 }
 
 async fn debug_restock_handler(
-    headers: HeaderMap,
     State(state): State<AppState>,
     BoundedJson(_request): BoundedJson<DebugRequest>,
 ) -> Response {
-    if !debug_header_is_present(&headers) {
+    if !state.debug_enabled {
         return error_response(
             StatusCode::FORBIDDEN,
             "debug_disabled",
@@ -381,11 +394,10 @@ async fn debug_status_handler(State(state): State<AppState>) -> Json<DebugStatus
 }
 
 async fn debug_generate_poop_handler(
-    headers: HeaderMap,
     State(state): State<AppState>,
     BoundedJson(_request): BoundedJson<DebugRequest>,
 ) -> Response {
-    if !debug_header_is_present(&headers) {
+    if !state.debug_enabled {
         return error_response(
             StatusCode::FORBIDDEN,
             "debug_disabled",
@@ -650,13 +662,6 @@ fn denial_reason(
         }
     };
     Some(reason)
-}
-
-fn debug_header_is_present(headers: &HeaderMap) -> bool {
-    headers
-        .get("x-codegotchi-debug")
-        .and_then(|value| value.to_str().ok())
-        == Some("1")
 }
 
 fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {

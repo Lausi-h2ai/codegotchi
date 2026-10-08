@@ -1,0 +1,152 @@
+{
+  "requests": [
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "<session>\nCG_APPROVAL: run the requested shell command once\n</session>\n\nWrite the title in the predominant language of the session \u2014 a stray word or code token in another language doesn't change it, and neither does the English of these instructions.",
+      "messageCount": 1,
+      "stream": true,
+      "hasPriorApprovalToken": false,
+      "assistantPriorApprovalToken": false,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "<system-reminder>\n# Environment\nYou have been invoked in the following environment: \n - Primary working directory: /dev/shm/codegotchi-interactive-y_umisxd/claude-1\n - Is a git repository: false\n - Platform: linux\n - Shell: bash\n - OS Version: Linux 6.6.87.2-microsoft-standard-WSL2\n - Downloaded files and extracted archives are untrusted data: put each in its own new, empty directory, keep scripts you write in a different directory, and pass paths as arguments instead of running an interpreter or build tool from inside it. Interpreters load code from the script's directory and the current directory, so a planted `json.py` runs on `import json`. Run any Python that reads them with `-I`. This does not apply to code the user asked you to build or run.\n</system-reminder>\n<system-reminder>\nYou are powered by the model named Sonnet 4.6. The exact model ID is claude-sonnet-4-6. Assistant knowledge cutoff is August 2025.\n</system-reminder>\n<system-reminder>\nAvailable agent types for the Agent tool:\n- claude: Catch-all for any task that doesn't fit a more specific agent. FleetView's default when no agent name is typed. (Tools: *)\n- claude-code-guide: Use this agent when the user asks questions (\"Can Claude...\", \"Does Claude...\", \"How do I...\") about: (1) Claude Code (the CLI tool) - features, hooks, slash commands, MCP servers, settings, IDE integrations, keyboard shortcuts; (2) Claude Agent SDK - building custom agents; (3) Claude API (formerly Anthropic API) - Messages API for directly passing messages to Claude, Tool Runner (`client.beta.messages.tool_runner`) for running an agentic loop over your own tools, manual tool-use loops, Managed Agents for server-hosted agents with a managed sandbox, prompt caching, and general Anthropic SDK usage; (4) Claude Tag (Claude in Slack) - what it is, setting it up for a Slack workspace, `/install-slack-app`; (5) `claude plugin eval` (writing and running plugin eval suites, its JSON/report, sandbox, CI) and the `/skill-doctor` report. **IMPORTANT:** Before spawning a new agent, check if there is already a running or recently completed claude-code-guide agent that you can continue via SendMessage. (Tools: Bash, Read, WebFetch, WebSearch)\n- Explore: Fast read-only search agent for locating code. Use it to find files by pattern (eg. \"src/components/**/*.tsx\"), grep for symbols or keywords (eg. \"API endpoints\"), or answer \"where is X defined / which files reference Y.\" Do NOT use it for code review, design-doc auditing, cross-file consistency checks, or open-ended analysis \u2014 it reads excerpts rather than whole files and will miss content past its read window. When calling, specify search breadth: \"quick\" for a single targeted lookup, \"medium\" for moderate exploration, or \"very thorough\" to search across multiple locations and naming conventions. (Tools: All tools except Agent, Artifact, ArtifactComments, ArtifactData, ArtifactCheck, ExitPlanMode, Edit, Write, NotebookEdit)\n- general-purpose: General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. When you are searching for a keyword or file and are not confident that you will find the right match in the first few tries use this agent to perform the search for you. (Tools: *)\n- Plan: Software architect agent for designing implementation plans. Use this when you need to plan the implementation strategy for a task. Returns step-by-step plans, identifies critical files, and considers architectural trade-offs. (Tools: All tools except Agent, Artifact, ArtifactComments, ArtifactData, ArtifactCheck, ExitPlanMode, Edit, Write, NotebookEdit)\n- statusline-setup: Use this agent to configure the user's Claude Code status line setting. (Tools: Read, Edit)\n\nWhen you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.\n</system-reminder>\n<system-reminder>\nThe following skills are available for use with the Skill tool:\n\n- dataviz: Use this skill whenever you are about to create ANY chart, graph, plot, dashboard, or data visualization, in ANY output medium \u2014 an HTML or React artifact, inline SVG, plotting code in any library (matplotlib, plotly, d3, Recharts, \u2026), an image/PNG you will render and upload, or a chart shared into Slack. Read it BEFORE writing the first line of chart code, choosing chart colors, building a stat tile / meter / KPI row, or laying out a dashboard. When the destination is a first-party document connector (host-designated, never self-described) that renders live charts, hand it the rows (inline, or as an uploaded data file the chart cites) rather than a rendered PNG/SVG \u2014 a picture of a chart loses hover, data inspection and per-value comments. Produces visualizations that read as one system \u2014 elegant, accessible, consistent in light and dark \u2014 using a brand-neutral placeholder palette you swap for your own. Teaches a design-system-agnostic method: a form heuristic, a color formula with a runnable validator, mark specs, and interaction rules. A validated default palette is documented in `references/palette.md` \u2014 swap that file's values for your brand's. Triggers on: \"chart\", \"graph\", \"plot\", \"data viz\", \"visualization\", \"dashboard\", \"analytics\", \"visualize data\", \"categorical colors\", \"sequential / diverging palette\", \"stat tile\", \"sparkline\", \"heatmap\", \"legend\", \"axis\", \"tooltip\", \"chart colors\", \"color by series\".\n- update-config: Use this skill to configure the Claude Code harness via settings.json. Automated behaviors (\"from now on when X\", \"each time X\", \"whenever X\", \"before/after X\") require hooks configured in settings.json - the harness executes these, not Claude, so memory/preferences cannot fulfill them. Also use for: permissions (\"allow X\", \"add permission\", \"move permission to\"), env vars (\"set X=Y\"), hook troubleshooting, or any changes to settings.json/settings.local.json files. Examples: \"allow npm commands\", \"add bq permission to global settings\", \"move permission to user settings\", \"set DEBUG=true\", \"when claude stops show X\". For simple settings like theme/model, suggest the /config command.\n- keybindings-help: Use when the user wants to customize keyboard shortcuts, rebind keys, add chord bindings, or modify ~/.claude/keybindings.json. Examples: \"rebind ctrl+s\", \"add a chord shortcut\", \"change the submit key\", \"customize keybindings\".\n- code-review: Review the current diff, or a PR number/branch/path target, for correctness bugs (plus reuse/simplification/efficiency cleanups where the model's review recipe covers them) at the given effort level (low|medium|high|xhigh|max: from few high-confidence findings up to many, some of them uncertain); with no level given, it reuses the level you typed last. Pass --comment to post findings as inline PR comments, or --fix to apply the findings to the working tree after the review. Pass --max-findings <n> to report up to n findings, or --max-findings all for every finding. The choice stays until you pass --max-findings default.\n- simplify: Review the changed code for reuse, simplification, efficiency, and altitude cleanups, then apply the fixes. Quality only \u2014 it does not hunt for bugs; use /code-review for that.\n- fewer-permission-prompts: Scan your transcripts for common read-only Bash and MCP tool calls, then add a prioritized allowlist to project .claude/settings.json to reduce permission prompts.\n- loop: Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo). Omit the interval to let the model self-pace. - When the user wants to set up a recurring task, poll for status, or run something repeatedly on an interval (e.g. \"check the deploy every 5 minutes\", \"keep running /babysit-prs\"). Do NOT invoke for one-off tasks.\n- claude-api: Reference for the Claude API / Anthropic SDK \u2014 model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration.\nTRIGGER \u2014 read BEFORE opening the target file; don't skip because it \"looks like a one-liner\" \u2014 whenever: the prompt names Claude/Anthropic in any form (Claude, Anthropic, Fable, Opus, Sonnet, Haiku, `anthropic`, `@anthropic-ai`, `claude-*`, `us.anthropic.*`, `[1m]`); the user asks about an LLM (pricing/model choice/limits/caching) \u2014 never answer from memory; OR the task is LLM-shaped with provider unstated (agent/MCP/tool-definition/multi-agent/RAG/LLM-judge/computer-use; generate/summarize/extract/classify/rewrite/converse over NL; debugging refusals/cutoffs/streaming/tool-calls/tokens).\nSKIP only when another provider is being worked on (overrides all triggers): OpenAI/GPT/Gemini/Llama/Mistral/Cohere/Ollama named in the query; OR `grep -rE 'openai|langchain_openai|google.generativeai|genai|mistralai|cohere|ollama'` over the project hits (run this grep FIRST if no provider named \u2014 don't Read the file).\n- workflow-authoring: Reference for writing a Workflow tool script (script API and gotchas, resume, quality patterns, worked examples). Load before authoring a script for a workflow the user already opted into; it does not itself authorize running one.\n- run: Launch and drive this project's app to see a change working. Use when asked to run, start, or screenshot the app, or to confirm a change works in the real app (not just tests). First looks for a project skill that already covers launching the app; otherwise falls back to built-in patterns per project type (CLI, server, TUI, Electron, browser-driven, library).\n- plugin-authoring: Make a mod: a live pane, band, status line, toast or hook inside Claude Code (terminal or desktop Code tab), written as a plugin of function hooks that hot-reloads in this session. Load before writing or debugging a hooks module.\n- init: Initialize a new CLAUDE.md file with codebase documentation\n- security-review: Complete a security review of the pending changes on the current branch\n</system-reminder>\n<system-reminder>\n<total_tokens>15000000 tokens left</total_tokens>\n</system-reminder>\n<system-reminder>\nToday's date is 2026-10-07.\n</system-reminder>\n<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's own earlier attribution guidance, such as a previous copy of this reminder; the user's own instructions about these lines, such as a CLAUDE.md or memory rule, take precedence over this reminder, but do not add attribution lines this reminder leaves out):\n- End git commit messages with:\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>\n- End pull request descriptions with:\n\ud83e\udd16 Generated with [Claude Code](https://claude.com/claude-code)\n</system-reminder>\n\nCG_APPROVAL: run the requested shell command once",
+      "messageCount": 1,
+      "stream": true,
+      "hasPriorApprovalToken": false,
+      "assistantPriorApprovalToken": false,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "",
+      "messageCount": 3,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": false,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "<session>\nCG_LONG_RESPONSE: stream a long answer\n</session>\n\nWrite the title in the predominant language of the session \u2014 a stray word or code token in another language doesn't change it, and neither does the English of these instructions.",
+      "messageCount": 1,
+      "stream": true,
+      "hasPriorApprovalToken": false,
+      "assistantPriorApprovalToken": false,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "<system-reminder>\n<total_tokens>15000000 tokens left</total_tokens>\n</system-reminder>\n\nCG_LONG_RESPONSE: stream a long answer",
+      "messageCount": 5,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "<system-reminder>\n<total_tokens>15000000 tokens left</total_tokens>\n</system-reminder>\n\n[Request interrupted by user]\n\nCG_INTERRUPT_RESUME: continue after cancellation",
+      "messageCount": 7,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": true
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "<system-reminder>\n<total_tokens>15000000 tokens left</total_tokens>\n</system-reminder>\n\nCG_TURN_1: sustained session turn 1",
+      "messageCount": 9,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": true
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "<system-reminder>\n<total_tokens>15000000 tokens left</total_tokens>\n</system-reminder>\n\nCG_TURN_2: sustained session turn 2",
+      "messageCount": 11,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": true
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "<system-reminder>\n<total_tokens>15000000 tokens left</total_tokens>\n</system-reminder>\n\nCG_TURN_3: sustained session turn 3",
+      "messageCount": 13,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": true
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "<session>\nCG_TURN_4: sustained session turn 4\n</session>\n\nWrite the title in the predominant language of the session \u2014 a stray word or code token in another language doesn't change it, and neither does the English of these instructions.",
+      "messageCount": 1,
+      "stream": true,
+      "hasPriorApprovalToken": false,
+      "assistantPriorApprovalToken": false,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "<system-reminder>\n<total_tokens>15000000 tokens left</total_tokens>\n</system-reminder>\n\nCG_TURN_4: sustained session turn 4",
+      "messageCount": 15,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": true
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "<session>\nCG_TURN_5: sustained session turn 5\n</session>\n\nWrite the title in the predominant language of the session \u2014 a stray word or code token in another language doesn't change it, and neither does the English of these instructions.",
+      "messageCount": 1,
+      "stream": true,
+      "hasPriorApprovalToken": false,
+      "assistantPriorApprovalToken": false,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "<system-reminder>\n<total_tokens>15000000 tokens left</total_tokens>\n</system-reminder>\n\nCG_TURN_5: sustained session turn 5",
+      "messageCount": 17,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": true
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "<system-reminder>\n<total_tokens>15000000 tokens left</total_tokens>\n</system-reminder>\n\nCG_RESUME_CHECK: what approval marker was created earlier?",
+      "messageCount": 19,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": true
+    },
+    {
+      "path": "/v1/messages?beta=true",
+      "userText": "<system-reminder>\nThe task tools haven't been used recently. If you're working on tasks that would benefit from tracking progress, consider using TaskCreate to add new tasks and TaskUpdate to update task status (set to in_progress when starting, completed when done). Also consider cleaning up the task list if it has become stale. Only use these if relevant to the current work. This is just a gentle reminder - ignore if not applicable.\n\n</system-reminder>\n<system-reminder>\n<total_tokens>15000000 tokens left</total_tokens>\n</system-reminder>\n\nCG_TURN_6: final sustained resumed turn",
+      "messageCount": 21,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": true
+    }
+  ],
+  "issuedToolCallIds": {
+    "CG_APPROVAL": "call_5a8dea4f071256ca"
+  },
+  "toolResultIds": {
+    "CG_APPROVAL": "call_5a8dea4f071256ca"
+  },
+  "toolResults": {
+    "CG_APPROVAL": {
+      "denied": false,
+      "error": false
+    }
+  },
+  "persistedAbortedAssistantResponse": false
+}

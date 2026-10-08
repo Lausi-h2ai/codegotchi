@@ -1,8 +1,9 @@
 # CodeGotchi
 
-CodeGotchi is a local coding companion for Codex. Rust owns the pet
+CodeGotchi is a local coding companion for Codex, with **experimental support
+for Pi, Claude Code, OhMyPi, and Hermes Agent**. Rust owns the pet
 simulation, repository-scoped SQLite persistence, authenticated loopback
-server, Codex hook bridge, and launcher lifecycle. The React room is only a
+server, harness adapters, and launcher lifecycle. The React room is only a
 projection of that authoritative state.
 
 ![Mochi blocks a coding request, gets fed, and lets the same command run successfully.](docs/demo/codegotchi-demo.gif)
@@ -18,7 +19,7 @@ From a checkout with the embedded production bundle present:
 cargo install --path crates/codegotchi-cli --locked
 ```
 
-The default launcher mode is `auto`. These are the supported command forms;
+The default launcher mode is `auto`. These are the Codex command forms;
 arguments after `codex` are passed to the official Codex executable in order:
 
 ```sh
@@ -53,6 +54,90 @@ The token is supplied only in the URL fragment as `#token=...`. The UI removes
 the fragment from the visible address bar and keeps the token only in the
 current tab's history state for reload. Authenticated HTTP uses a bearer
 header; the live WebSocket uses the same token as its subprotocol.
+
+## Experimental support for other coding harnesses
+
+Try the same room with another installed CLI:
+
+```sh
+codegotchi run -- pi
+codegotchi run -- claude
+codegotchi run -- omp
+codegotchi run -- hermes
+```
+
+These experimental adapters offer `--ui auto|terminal|browser|both` and the five
+terminal themes. Put CodeGotchi options before `--` and harness arguments after its
+name. `claude-code` aliases `claude`; `oh-my-pi` aliases `omp`. CodeGotchi
+resolves the CLI through `PATH`; executable overrides are
+`CODEGOTCHI_REAL_PI`, `CODEGOTCHI_REAL_CLAUDE`, `CODEGOTCHI_REAL_OMP`, and
+`CODEGOTCHI_REAL_HERMES` (Codex retains `CODEGOTCHI_REAL_CODEX`). The chosen
+CLI keeps its own authentication, model settings, and normal trust flows.
+
+This is an early integration release. Actual CLI keyboard input, multiline
+paste, resizing, tool execution, Strict denial, care gestures, and clean exit
+have been exercised with scripted local models. That evidence does not establish
+complete compatibility with every provider, approval flow, session operation,
+or terminal. Check the [verification ledger](docs/verification/multi-harness.md)
+for the tested versions, additional checks, and remaining limitations before
+relying on an adapter for your usual workflow.
+
+Known limitations include Claude leaving the pet in Thinking after an Escape
+interrupt until the next turn, faint native Hermes yellow text on white
+terminals, and pet overlap with some room furniture/status text. The current
+ledger records 40 real-CLI keyboard cases and 80 manually inspected sheets
+across all five room presets, light/dark backgrounds, and four layouts.
+
+The installed executable must also be rebuilt after updating this checkout:
+`cargo install --path crates/codegotchi-cli --force --locked`. A previously
+installed `codegotchi` can still contain the older Codex-only launcher.
+
+The terminal host measures the outer terminal's background at launch and
+answers the hosted CLI's background-color queries, so OhMyPi can choose its
+light or dark palette. Terminals that do not answer the appearance query use
+a dark fallback; restart the session after changing terminal colors. See the
+[interactive verification ledger](docs/verification/multi-harness.md) for
+actual CLI keyboard checks, inspected screenshots, and remaining gaps.
+
+Pi and OhMyPi load a generated session-local extension through `--extension`.
+Claude loads an additive command-hook layer through `--settings`. If you pass
+your own Claude `--settings` file or inline JSON, CodeGotchi consolidates it
+into the temporary layer and appends its hooks to your hooks. Normal user and
+project configuration stays in place. The generated files are private and
+removed on exit, including child spawn failures. Other harnesses do not create
+Codex profiles or require `CODEX_HOME`. Codex's profile restrictions below
+apply only to Codex; Pi's and Claude's `-p` remain usable.
+
+These adapters report thinking, shell work, file edits, completion, and errors
+through the same authoritative runtime. Strict mode blocks tool calls through
+the harness's native pre-tool interface. Hook failures remain fail-open;
+CodeGotchi is a pet-care interaction, not a security sandbox. Explicitly
+disabling hooks/extensions or managed policies that disallow them can prevent
+integration. Terminal output is never scraped to infer work.
+
+Hermes needs one-time shell-hook configuration. Print the exact configuration
+for the installed CodeGotchi executable:
+
+```sh
+codegotchi integration hermes
+```
+
+Merge those entries into `hooks` in your active Hermes profile's `config.yaml`
+(normally `~/.hermes/config.yaml`), **appending** them to existing event lists.
+Then run `codegotchi run -- hermes` and approve the hooks in Hermes's normal
+first-use review. CodeGotchi neither edits that configuration nor approves
+hooks. Hermes's room and terminal launch immediately; activity reactions and
+Strict enforcement require those hooks to be configured and approved. Outside
+a wrapped CodeGotchi session the installed hooks are harmless no-ops. The
+launcher prints this setup requirement so missing hooks do not imply working
+enforcement. Moving/reinstalling the binary at a new path requires regenerating
+the snippet.
+
+The terminal uses the same PTY, input, resize, mouse, and care-control code for
+all harnesses. Adapter contracts and current verification limits are recorded
+in [the multi-harness verification ledger](docs/verification/multi-harness.md).
+
+## Codex integration
 
 Codex may pause for its normal `/hooks` trust review. Choose the review flow,
 inspect the generated CodeGotchi command hooks, and select **Trust all and

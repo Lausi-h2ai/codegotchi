@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-08",
+  "binarySha256": "81951d30ed537935f2fad76446c64294156dee392fa274a7f17ab92f0d9d53a6",
+  "workspaceTests": {
+    "command": "TMPDIR=/dev/shm cargo test --workspace",
+    "passed": 464,
+    "failed": 0,
+    "ignored": 10,
+    "log": "final-workspace-tests.log"
+  },
+  "clippy": {
+    "command": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+    "passed": true,
+    "log": "final-clippy.log"
+  },
+  "rustFormatting": {
+    "command": "cargo fmt --all -- --check",
+    "passed": true
+  },
+  "pythonCompilation": {
+    "command": "python3 -m py_compile scripts/verify-harness-keyboard.py scripts/verify-harness-matrix.py scripts/verify-harness-sessions.py scripts/verify-harness-provider.py scripts/compose-harness-evidence.py",
+    "passed": true
+  },
+  "whitespace": {
+    "commands": [
+      "git diff --check",
+      "git diff --cached --check"
+    ],
+    "passed": true
+  },
+  "installedMatchesReleaseBuild": true
+}

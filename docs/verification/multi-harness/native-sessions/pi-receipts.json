@@ -1,0 +1,194 @@
+{
+  "requests": [
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_APPROVAL: run the requested shell command once",
+      "messageCount": 2,
+      "stream": true,
+      "hasPriorApprovalToken": false,
+      "assistantPriorApprovalToken": false,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_APPROVAL: run the requested shell command once",
+      "messageCount": 4,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": false,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_LONG_RESPONSE: stream a long answer",
+      "messageCount": 6,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_INTERRUPT_RESUME: continue after cancellation",
+      "messageCount": 7,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_TURN_1: sustained session turn 1",
+      "messageCount": 9,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_TURN_2: sustained session turn 2",
+      "messageCount": 11,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_TURN_3: sustained session turn 3",
+      "messageCount": 13,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_TURN_4: sustained session turn 4",
+      "messageCount": 15,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_TURN_5: sustained session turn 5",
+      "messageCount": 17,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_TURN_6: sustained session turn 6",
+      "messageCount": 19,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_TURN_7: sustained session turn 7",
+      "messageCount": 21,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_TURN_8: sustained session turn 8",
+      "messageCount": 23,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_TURN_9: sustained session turn 9",
+      "messageCount": 25,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_TURN_10: sustained session turn 10",
+      "messageCount": 27,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_TURN_11: sustained session turn 11",
+      "messageCount": 29,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_TURN_12: sustained session turn 12",
+      "messageCount": 31,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_RESUME_CHECK: what approval marker was created earlier?",
+      "messageCount": 33,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    },
+    {
+      "path": "/v1/chat/completions",
+      "userText": "CG_TURN_13: final sustained resumed turn",
+      "messageCount": 35,
+      "stream": true,
+      "hasPriorApprovalToken": true,
+      "assistantPriorApprovalToken": true,
+      "hasPriorLongToken": false
+    }
+  ],
+  "issuedToolCallIds": {
+    "CG_APPROVAL": "call_fc9168307a1d9125"
+  },
+  "toolResultIds": {
+    "CG_APPROVAL": "call_fc9168307a1d9125"
+  },
+  "toolResults": {
+    "CG_APPROVAL": {
+      "denied": false,
+      "error": false
+    }
+  },
+  "acknowledgedTurnMarkers": [
+    "CG_TURN_1",
+    "CG_TURN_10",
+    "CG_TURN_11",
+    "CG_TURN_12",
+    "CG_TURN_13",
+    "CG_TURN_2",
+    "CG_TURN_3",
+    "CG_TURN_4",
+    "CG_TURN_5",
+    "CG_TURN_6",
+    "CG_TURN_7",
+    "CG_TURN_8",
+    "CG_TURN_9"
+  ],
+  "persistedAbortedAssistantResponse": true
+}

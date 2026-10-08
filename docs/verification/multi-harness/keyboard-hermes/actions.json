@@ -1,0 +1,367 @@
+[
+  {
+    "harness": "hermes",
+    "op": "start",
+    "ui": "both"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-startup.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 12
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "CG_INPUT_EDIT_OX"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Left"
+    ]
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "K"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "edited"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-edited.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "response"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-response.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Up"
+    ]
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "history"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-history.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Down"
+    ]
+  },
+  {
+    "harness": "hermes",
+    "op": "paste",
+    "text": "CG_PASTE_LINE_ONE\nCG_PASTE_LINE_TWO"
+  },
+  {
+    "harness": "hermes",
+    "op": "resize",
+    "cols": 100,
+    "rows": 30,
+    "name": "compact-composer"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-compact-composer.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "O"
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "compact-edited"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-compact-edited.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "resize",
+    "cols": 80,
+    "rows": 21,
+    "name": "minimal-composer"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-minimal-composer.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "O"
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "minimal-edited"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-minimal-edited.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "resize",
+    "cols": 64,
+    "rows": 45,
+    "name": "narrow-composer"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-narrow-composer.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "O"
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "narrow-edited"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-narrow-edited.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "resize",
+    "cols": 120,
+    "rows": 45,
+    "name": "full-composer"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-full-composer.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "End",
+      "BackSpace"
+    ]
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "O"
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "full-edited"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-full-edited.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "focus"
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "focus-return"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-focus-return.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "paste-response"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-paste-response.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "strict"
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "CG_STRICT_PROBE"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "strict-response"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-strict-response.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "resize",
+    "cols": 80,
+    "rows": 21,
+    "name": "care-before"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-care-before.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "feed",
+    "col": 11,
+    "row": 19,
+    "cols": 80,
+    "rows": 21
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "care-after"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-care-after.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "CG_CARE_PROBE"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  },
+  {
+    "harness": "hermes",
+    "op": "capture",
+    "name": "care-keyboard-response"
+  },
+  {
+    "harness": "hermes",
+    "action": "capture",
+    "artifact": "hermes-care-keyboard-response.png"
+  },
+  {
+    "harness": "hermes",
+    "op": "text",
+    "text": "/exit"
+  },
+  {
+    "harness": "hermes",
+    "op": "key",
+    "keys": [
+      "Return"
+    ],
+    "wait": 1
+  }
+]

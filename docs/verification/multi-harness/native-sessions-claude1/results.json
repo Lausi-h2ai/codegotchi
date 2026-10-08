@@ -1,0 +1,7 @@
+[
+  {
+    "harness": "claude",
+    "passed": false,
+    "error": "RuntimeError: bounded wait expired"
+  }
+]
